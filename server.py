@@ -508,6 +508,7 @@ def get_po_details(po_number):
         assigned_to = po.get('AssignedTo', {})
         job_number = assigned_to.get('Job')
         customer_name = None
+        po_reference = po.get('Reference', '')
         
         if job_number:
             job_response = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_number}/?columns=ID,Name,Customer')
@@ -523,6 +524,15 @@ def get_po_details(po_number):
                 if not customer_name:
                     # Try Name field as last resort
                     customer_name = customer.get('Name', '')
+        else:
+            # No job assigned - this is a Stock order or merged PO
+            # Use vendor name as the identifier for labels
+            if po_reference:
+                job_number = po_reference  # e.g. "Stock" or "Job No. 5272 - Kitchen"
+            else:
+                job_number = 'Stock'
+            # Use vendor name as customer for stock orders
+            customer_name = vendor_name
         
         # Get PO line items (catalogs)
         items_response = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/catalogs/')
