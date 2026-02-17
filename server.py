@@ -513,7 +513,16 @@ def get_po_details(po_number):
             job_response = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_number}/?columns=ID,Name,Customer')
             if job_response.status_code == 200:
                 job_data = job_response.json()
-                customer_name = job_data.get('Customer', {}).get('CompanyName')
+                customer = job_data.get('Customer', {})
+                # Try CompanyName first, then individual name fields
+                customer_name = customer.get('CompanyName') or ''
+                if not customer_name:
+                    given = customer.get('GivenName', '') or ''
+                    family = customer.get('FamilyName', '') or ''
+                    customer_name = f"{given} {family}".strip()
+                if not customer_name:
+                    # Try Name field as last resort
+                    customer_name = customer.get('Name', '')
         
         # Get PO line items (catalogs)
         items_response = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/catalogs/')

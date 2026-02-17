@@ -611,6 +611,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                 id: parseInt(select.value),
                 name: selectedOption.textContent
             };
+            this._lastStorageName = selectedOption.textContent;
             document.getElementById('allocate-btn').disabled = false;
         } else {
             this.selectedStorage = null;
@@ -772,15 +773,18 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         container.innerHTML = '';
         
         const dateStr = new Date().toLocaleDateString();
-        const storageLocation = this.selectedStorage?.name || 'Unknown';
+        const storageLocation = this.selectedStorage?.name || this._lastStorageName || 'Unknown';
+        const poNumber = this.currentPO?.poNumber || 'N/A';
+        const jobNumber = this.currentPO?.jobNumber || 'N/A';
+        const customerName = this.currentPO?.customerName || 'N/A';
         
         this.selectedItems.forEach(item => {
             for (let i = 0; i < item.quantity; i++) {
                 const label = document.createElement('div');
                 label.className = 'label';
                 label.innerHTML = `
-                    <div class="label-line1">${this.currentPO.jobNumber || 'N/A'} - ${this.currentPO.customerName || 'Customer'} - ${item.partNo || 'N/A'}</div>
-                    <div class="label-line2">${item.description} - ${storageLocation} - ${dateStr}</div>
+                    <div class="label-line1">PO ${poNumber} | Job ${jobNumber} - ${customerName} | ${item.partNo || 'N/A'}</div>
+                    <div class="label-line2">${item.description} | ${storageLocation} | ${dateStr}</div>
                 `;
                 container.appendChild(label);
             }
