@@ -1,0 +1,1300 @@
+{
+  "generated": "2026-02-16T00:03:50.308823",
+  "stock_on_hand": {
+    "GD-6LS204082040CR": {
+      "name": "Half French Colonial 6 Lite 2040x820x40 SPM Clear",
+      "locations": [
+        {
+          "device_id": 7,
+          "device_name": "1.03",
+          "qty": 1
+        }
+      ]
+    },
+    "GD-4LS204082040TL": {
+      "name": "French 4 Lite 2040x820x40 SPM Trans Lam",
+      "locations": [
+        {
+          "device_id": 8,
+          "device_name": "1.04",
+          "qty": 7
+        }
+      ]
+    },
+    "XF3DCSCX1234092035CRT": {
+      "name": "XF3 1/2 Glass Solicore SCX1  2340x920x35 Duracote Clear Toughened",
+      "locations": [
+        {
+          "device_id": 49,
+          "device_name": "1.06",
+          "qty": 1
+        }
+      ]
+    },
+    "XVP11D820": {
+      "name": "XVP11 2040x820x40 DC",
+      "locations": [
+        {
+          "device_id": 50,
+          "device_name": "1.07",
+          "qty": 1
+        }
+      ]
+    },
+    "XN1DC204082040TL": {
+      "name": "Newington XN1 2040x820x40  Duracote Translucent Laminate",
+      "locations": [
+        {
+          "device_id": 50,
+          "device_name": "1.07",
+          "qty": 1
+        }
+      ]
+    },
+    "H1P234082050R": {
+      "name": "H1 PCM 2340x820x35 W/- 50MM BOTTOM RAIL",
+      "locations": [
+        {
+          "device_id": 51,
+          "device_name": "1.08",
+          "qty": 1
+        }
+      ]
+    },
+    "BH1BK": {
+      "name": "Black Sliding Barn Door Handle BH1",
+      "locations": [
+        {
+          "device_id": 51,
+          "device_name": "1.08",
+          "qty": 1
+        }
+      ]
+    },
+    "BFR8G4SPEC": {
+      "name": "Bush Fire Resistant BAL29.0 BFR8 2040x1120x40mm with Frost Glazing",
+      "locations": [
+        {
+          "device_id": 51,
+          "device_name": "1.08",
+          "qty": 1
+        }
+      ]
+    },
+    "XN5D820TL": {
+      "name": "XN5 Duracote 2040x820x40 Translucent Laminate",
+      "locations": [
+        {
+          "device_id": 13,
+          "device_name": "2.01",
+          "qty": 1
+        }
+      ]
+    },
+    "OWT-044GS204082040CR": {
+      "name": "Horizontal 4 Panel Glass 2040x820x40 SPM Clear",
+      "locations": [
+        {
+          "device_id": 13,
+          "device_name": "2.01",
+          "qty": 1
+        }
+      ]
+    },
+    "OWT-023GS204082040CR": {
+      "name": "French 1 Lite 2040x820x40 SPM Clear",
+      "locations": [
+        {
+          "device_id": 13,
+          "device_name": "2.01",
+          "qty": 3
+        },
+        {
+          "device_id": 15,
+          "device_name": "2.03",
+          "qty": 1
+        }
+      ]
+    },
+    "SL-1LS204041040CR": {
+      "name": "French 1 Lite (Side Lite) 2040x410x40 SPM Clear",
+      "locations": [
+        {
+          "device_id": 13,
+          "device_name": "2.01",
+          "qty": 1
+        }
+      ]
+    },
+    "HAM5CR204082035PC": {
+      "name": "Hampton HAM 5 MDF 2040x820x35 Primecoat Clear",
+      "locations": [
+        {
+          "device_id": 14,
+          "device_name": "2.02",
+          "qty": 1
+        }
+      ]
+    },
+    "BF1P204082035": {
+      "name": "BI-FOLD BF1 2040x820x35  FLUSH  Primecoat",
+      "locations": [
+        {
+          "device_id": 14,
+          "device_name": "2.02",
+          "qty": 1
+        }
+      ]
+    },
+    "OAK720": {
+      "name": "Oakfield 2040x720x35",
+      "locations": [
+        {
+          "device_id": 15,
+          "device_name": "2.03",
+          "qty": 1
+        }
+      ]
+    },
+    "H1 SPECIAL SIZE UPTO 2340x920x35 PRIMECOAT  Light Commercial 4.75mm Skin": {
+      "name": "FLUSH PANEL HONEYCOMB CORE INTERNAL Special Order PRIMECOAT  **ADD SPECIFIC SIZE REQUIRED**",
+      "locations": [
+        {
+          "device_id": 15,
+          "device_name": "2.03",
+          "qty": 1
+        }
+      ]
+    },
+    "PACKING - B": {
+      "name": "CHARGE TO PACK UP PALLET  > 20 DOORS",
+      "locations": [
+        {
+          "device_id": 15,
+          "device_name": "2.03",
+          "qty": 1
+        }
+      ]
+    },
+    "SCX1204087035PC": {
+      "name": "Flush Panel Solicore Internal 2040x870x35 Primecoat",
+      "locations": [
+        {
+          "device_id": 18,
+          "device_name": "2.06",
+          "qty": 1
+        }
+      ]
+    },
+    "H1P204092035": {
+      "name": "Flush Panel Honeycomb Core Internal 2040x920x35 Primecoat MDF",
+      "locations": [
+        {
+          "device_id": 18,
+          "device_name": "2.06",
+          "qty": 1
+        }
+      ]
+    },
+    "SCX1S72035": {
+      "name": "SCX1 SPM 2040x720x35",
+      "locations": [
+        {
+          "device_id": 18,
+          "device_name": "2.06",
+          "qty": 2
+        }
+      ]
+    },
+    "SCX1PC87035": {
+      "name": "SCX1 PCM 2040x870x35",
+      "locations": [
+        {
+          "device_id": 18,
+          "device_name": "2.06",
+          "qty": 1
+        }
+      ]
+    },
+    "SP-5VS204082040": {
+      "name": "Vertical Plank (Engineered Doors) 2040x820x40 SPM",
+      "locations": [
+        {
+          "device_id": 19,
+          "device_name": "2.07",
+          "qty": 1
+        }
+      ]
+    },
+    "SP-15HS204082040": {
+      "name": "Horizontal Plank (Engineered Doors) 2040x820x40 SPM",
+      "locations": [
+        {
+          "device_id": 19,
+          "device_name": "2.07",
+          "qty": 1
+        }
+      ]
+    },
+    "SCX1S204072035": {
+      "name": "SOLICORE SCX1 2040x720x35 SPM",
+      "locations": [
+        {
+          "device_id": 19,
+          "device_name": "2.07",
+          "qty": 2
+        }
+      ]
+    },
+    "HLR230234067035PC": {
+      "name": "Linear HLR230 2340x670x35 Primecoat",
+      "locations": [
+        {
+          "device_id": 20,
+          "device_name": "2.08",
+          "qty": 6
+        }
+      ]
+    },
+    "OWT-023GS204082035TL": {
+      "name": "French 1 Lite 2040x820x35 SPM Trans Lam *Internal use only",
+      "locations": [
+        {
+          "device_id": 22,
+          "device_name": "3.01",
+          "qty": 1
+        }
+      ]
+    },
+    "OWT-AHGS204082040TL": {
+      "name": "Insert 4 (1 Lite) 2040x820x40 SPM Trans Lam",
+      "locations": [
+        {
+          "device_id": 22,
+          "device_name": "3.01",
+          "qty": 1
+        }
+      ]
+    },
+    "FS-MV204082040": {
+      "name": "Solid Vertical Shiplap Door 2040x820x40 SPM",
+      "locations": [
+        {
+          "device_id": 22,
+          "device_name": "3.01",
+          "qty": 1
+        }
+      ]
+    },
+    "OWT-023GS2340100035CR": {
+      "name": "French 1 Lite 2340x1000x35 SPM Clear *Internal use only",
+      "locations": [
+        {
+          "device_id": 23,
+          "device_name": "3.02",
+          "qty": 1
+        }
+      ]
+    },
+    "FS-HMER2040110040": {
+      "name": "Horizontal Plank (Solid Meranti Joinery) 2040x1100x40 Meranti",
+      "locations": [
+        {
+          "device_id": 23,
+          "device_name": "3.02",
+          "qty": 1
+        }
+      ]
+    },
+    "Grooved Bottom Rail 15mm x 5mm": {
+      "name": "Grooved Bottom Rail 15mm x 5mm - GBR",
+      "locations": [
+        {
+          "device_id": 24,
+          "device_name": "3.03",
+          "qty": 1
+        }
+      ]
+    },
+    "SCX1P204077035": {
+      "name": "SOLICORE SCX1 2040x770x35 PRIMECOAT",
+      "locations": [
+        {
+          "device_id": 24,
+          "device_name": "3.03",
+          "qty": 4
+        }
+      ]
+    },
+    "OWT-4VLS2040100040TL": {
+      "name": "Vertical 4 Lite  2040x1000x40 SPM Trans Lam",
+      "locations": [
+        {
+          "device_id": 25,
+          "device_name": "3.04",
+          "qty": 1
+        }
+      ]
+    },
+    "FS-VMER2040120040": {
+      "name": "Vertical Plank Door (Solid Meranti Joinery)  2040x1200x40 Meranti",
+      "locations": [
+        {
+          "device_id": 25,
+          "device_name": "3.04",
+          "qty": 1
+        }
+      ]
+    },
+    "PMOD5 2040x720x35": {
+      "name": "MODA PMOD5 2040x720x35",
+      "locations": [
+        {
+          "device_id": 28,
+          "device_name": "3.07",
+          "qty": 6
+        }
+      ]
+    },
+    "ASC720 GBR": {
+      "name": "Moulded Panel Smooth Skin Ascot 2040x720x35 Primecoat",
+      "locations": [
+        {
+          "device_id": 28,
+          "device_name": "3.07",
+          "qty": 1
+        }
+      ]
+    },
+    "GD-6LS204092035TL": {
+      "name": "Half French Colonial 6 Lite 2040x920x35 SPM Trans Lam  *Internal use only",
+      "locations": [
+        {
+          "device_id": 28,
+          "device_name": "3.07",
+          "qty": 1
+        }
+      ]
+    },
+    "OAKP204087035": {
+      "name": "Oakfield Moulded Panel Woodgrain Skin OAK  2040x870x35 Primecoat",
+      "locations": [
+        {
+          "device_id": 30,
+          "device_name": "4.01",
+          "qty": 2
+        }
+      ]
+    },
+    "H1P240040550F": {
+      "name": "H1 PCM 2400X405X35 W/- 50MM FRAME",
+      "locations": [
+        {
+          "device_id": 32,
+          "device_name": "4.03",
+          "qty": 4
+        }
+      ]
+    },
+    "CD SEAV2675X1040X40": {
+      "name": "SEAV SHIPLAP - 2675X1040X40",
+      "locations": [
+        {
+          "device_id": 34,
+          "device_name": "4.05",
+          "qty": 1
+        }
+      ]
+    }
+  },
+  "pick_list": [
+    {
+      "job_id": 5287,
+      "job_name": "IVKOVIC - MATERIALS ONLY",
+      "customer_name": "Ivkovic, Brian",
+      "pending_pos": [],
+      "awaiting_pos": [],
+      "items": [
+        {
+          "part_no": "GD-1LS204092040CR",
+          "name": "French 1 Lite 2040x920x40 SPM Clear",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "1 lite door",
+          "status": "NEEDS_ORDERING"
+        }
+      ]
+    },
+    {
+      "job_id": 5286,
+      "job_name": "BUILD SOCIETY - Cavity Sliding Door Frame Supply",
+      "customer_name": "Build Society",
+      "pending_pos": [],
+      "awaiting_pos": [],
+      "items": [
+        {
+          "part_no": "CAVEVOTCustomSizeMin2340x919",
+          "name": "EVOLUTION TIMBER Custom Size from Min 2340x919 - Max 2400x1200 with stud thickness of 90/100mm",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "GROUND FLOOR",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "",
+          "name": "TO FRAME MANUFACTURER: DOOR LEAF IS 2040x1100 (A = 2,120; B = 2,260; FLUSH JAMB)",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "GROUND FLOOR",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "CAVEVOTCustomSizeMin2340x919",
+          "name": "EVOLUTION TIMBER Custom Size from Min 2340x919 - Max 2400x1200 with stud thickness of 90/100mm",
+          "needed": 4,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "FIRST FLOOR",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "",
+          "name": "TO FRAME MANUFACTURER: DOOR LEAF IS 2040x1100 (A = 2,120; B = 2,260; FLUSH JAMB)",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "FIRST FLOOR",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "CAVEVOTCustomSizeMin2340x919",
+          "name": "EVOLUTION TIMBER Custom Size from Min 2340x919 - Max 2400x1200 with stud thickness of 90/100mm",
+          "needed": 4,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "SECOND FLOOR",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "",
+          "name": "TO FRAME MANUFACTURER: DOOR LEAF IS 2040x1100 (A = 2,120; B = 2,260; FLUSH JAMB)",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "SECOND FLOOR",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "DELIVERY",
+          "name": "Delivery/Freight - to site",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "TO SITE",
+          "status": "NEEDS_ORDERING"
+        }
+      ]
+    },
+    {
+      "job_id": 5285,
+      "job_name": "HOH - Entry door supplied and installed",
+      "customer_name": "Hoh, David",
+      "pending_pos": [],
+      "awaiting_pos": [],
+      "items": [
+        {
+          "part_no": "SCX1DC204082035",
+          "name": "SOLICORE SCX1 2040x820x35 DURACOTE",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Supply and install",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "",
+          "name": "needs a latch for entrance set as its broken ",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Supply and install",
+          "status": "NEEDS_ORDERING"
+        }
+      ]
+    },
+    {
+      "job_id": 5284,
+      "job_name": "Wood - External door",
+      "customer_name": "Wood, Jo",
+      "pending_pos": [],
+      "awaiting_pos": [],
+      "items": [
+        {
+          "part_no": "GD-10LS204092040CR",
+          "name": "French 10 Lite 2040x920x40 SPM Clear",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Cat Kitten Entry Door Option",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "SL-5LS204052040CR",
+          "name": "French 5 Lite (Side Lite) 2040x520x40 SPM Clear",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Cat Kitten Entry Door Option",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "MUSHM402100",
+          "name": "Mushroom Stop Meranti 2100 suit 40mm",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Cat Kitten Entry Door Option",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "BR1-1100F",
+          "name": "BUTT 100x100x2.5 FP SS CD2",
+          "needed": 7,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Cat Kitten Entry Door Option",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "ZEFSTOPM70122100AQ21SET",
+          "name": "Weatherguard Door sets Meranti Stop Set 70 x 12 @ 2.1",
+          "needed": 2,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Cat Kitten Entry Door Option",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "DAR161140041",
+          "name": "DAR S4S Meranti 140 x 41 1.8-5.1 random",
+          "needed": 3.6,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Cat Kitten Entry Door Option",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "",
+          "name": "140x41 dar mer 2 @1.8\r\ncover batten 2 @ 1.8 ",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Cat Kitten Entry Door Option",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "A4MT175",
+          "name": "RP4 Trade Pack MF 1750mm Mill Finish Trade Pack",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Cat Kitten Entry Door Option",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "COV161030008",
+          "name": "Cover Batten Meranti 30 x 8 1.8-5.1 random",
+          "needed": 3.6,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Cat Kitten Entry Door Option",
+          "status": "NEEDS_ORDERING"
+        }
+      ]
+    },
+    {
+      "job_id": 5283,
+      "job_name": "POLEC - XLR DOOR",
+      "customer_name": "Polec, Jacqui",
+      "pending_pos": [],
+      "awaiting_pos": [],
+      "items": [
+        {
+          "part_no": "XLR500S2040120040UN",
+          "name": "Linear XLR500 2040x1200x40 SPM",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Door Supplied & Installed",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "90mm Frame 40mm",
+          "name": "90mm Frame 40mm",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Door Supplied & Installed",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "Grooved Bottom Rail NOT including 50mm Solid Rail 35mm x 15mm",
+          "name": "Grooved Bottom Rail NOT including 50mm Solid Rail 35mm x 15mm (stpc doors or doors ordered with 50mm bottom rails only)",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Door Supplied & Installed",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "1184.SB",
+          "name": "Square Double Turn Lock Kit - Includes Lock, Single Cylinder & Escutcheons",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Door Supplied & Installed",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "5908.2.WHT",
+          "name": "Satin White Fast Fix Bearing Hinge (Aluminium) - 100 x 70 x 2.5mm",
+          "needed": 4,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Door Supplied & Installed",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "A8SIC48",
+          "name": "RP8Si Door Bottom CA 1220mm Clear Anodised Door Bottom",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Door Supplied & Installed",
+          "status": "NEEDS_ORDERING"
+        }
+      ]
+    },
+    {
+      "job_id": 5282,
+      "job_name": "DOBSON - Handle Repairs or Replacement",
+      "customer_name": "Dobson, Claire",
+      "pending_pos": [],
+      "awaiting_pos": [],
+      "items": [
+        {
+          "part_no": "2147",
+          "name": "Mortice Lock 5 Lever Rebated Polished Brass CTC57mm Backset 57mm",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Hardware Supplied & Installed - Rear Door To Dinning",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "0694",
+          "name": "Door Knob Retro Fit Round Rose Pair Polished Brass D54xP59mm BP60mm",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Hardware Supplied & Installed - Rear Door To Dinning",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "9571",
+          "name": "Tube Latch Split Cam 'D' Striker Polished Brass Backset 60mm",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Harrys Room",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "9571",
+          "name": "Tube Latch Split Cam 'D' Striker Polished Brass Backset 60mm",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Jacks Room",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "",
+          "name": "SPARE SPINDLE PLEASE FOR - Door Knob Retro Fit Round Rose Pair Polished Brass D54xP59mm BP60mm STYLE HANDLE",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Jacks Room",
+          "status": "NEEDS_ORDERING"
+        }
+      ]
+    },
+    {
+      "job_id": 5281,
+      "job_name": "Install bead/quad",
+      "customer_name": "Miller, Bonny",
+      "pending_pos": [],
+      "awaiting_pos": [],
+      "items": [
+        {
+          "part_no": "QUA180018018",
+          "name": "Quad 18 x 18 Pine 5.4",
+          "needed": 9,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Install Bead quad to Areas",
+          "status": "NEEDS_ORDERING"
+        }
+      ]
+    },
+    {
+      "job_id": 5280,
+      "job_name": "KINGSHOT - New Handles",
+      "customer_name": "Kingshot, Bruce",
+      "pending_pos": [],
+      "awaiting_pos": [],
+      "items": [
+        {
+          "part_no": "8453AOSLSNBP",
+          "name": "Agrigento Passage Straight Lever on Short Rose SN BP",
+          "needed": 7,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Hardware Supplied ",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "8553AOSLSNBP",
+          "name": "Agrigento Privacy Straight Lever on Short Rose SN BP",
+          "needed": 2,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Hardware Supplied ",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "T10016FPSS20",
+          "name": "BUTT 100x75x1.6 FP SS 20PK",
+          "needed": 18,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Hardware Supplied ",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "T10016FPZP20",
+          "name": "BUTT 100x75x1.6 FP ZP 20PK",
+          "needed": 3,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "External Laundry Door",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "STPCDC204082035",
+          "name": "FLUSH PANEL BLOCKBOARD STPC 2040x820x35 DURACOTE",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "External Laundry Door",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "840GOVSSS",
+          "name": "GOVERNOR KEYLOCK SS 60 STD",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "External Laundry Door",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "Check Measure",
+          "name": "Labour Check Measure",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Screen Door",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "LABOUR -  Screen Door",
+          "name": "Installation of Screen Door-Hinged",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Screen Door",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "PRIVACYGUARD STD PC 850",
+          "name": "Standard Hinged up to 2150mm drop 850mm width",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Screen Door",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "LABOUR -  Triple Lock",
+          "name": "Installation of Triple Lock",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Screen Door",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "Elegance HD14 Lock",
+          "name": "Elegance HD14 Triple Lock",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Screen Door",
+          "status": "NEEDS_ORDERING"
+        }
+      ]
+    },
+    {
+      "job_id": 5279,
+      "job_name": "Scalzi, Andrew",
+      "customer_name": "Scalzi, Andrew",
+      "pending_pos": [],
+      "awaiting_pos": [],
+      "items": [
+        {
+          "part_no": "OWT-014S204036035",
+          "name": "Colonial 4 Panel  2040x360x35 SPM  *Internal use only",
+          "needed": 4,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Colonial 4 Panel",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "MFBTRACK&FITTINGS4LeafSet",
+          "name": "'B' 4 LEAF SET: (2.0m track plus pack/s) 2 Starter Packs",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Colonial 4 Panel",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "DB 21120PB",
+          "name": "FLUSH PULL POLISHED BRASS",
+          "needed": 4,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "D ring ",
+          "status": "NEEDS_ORDERING"
+        }
+      ]
+    },
+    {
+      "job_id": 5278,
+      "job_name": "Materials Supply",
+      "customer_name": "Gillespie, Shane",
+      "pending_pos": [],
+      "awaiting_pos": [],
+      "items": [
+        {
+          "part_no": "FB600SC",
+          "name": "FLUSH BOLT 600MM TP",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Barell Bolt",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "",
+          "name": "air bag ",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Barell Bolt",
+          "status": "NEEDS_ORDERING"
+        }
+      ]
+    },
+    {
+      "job_id": 5277,
+      "job_name": "Roxas, Miraquel",
+      "customer_name": "Roxas, Miraquel",
+      "pending_pos": [],
+      "awaiting_pos": [],
+      "items": [
+        {
+          "part_no": "2463",
+          "name": "Hinge Ball Bearing Polished Brass H100xW75xT3mm",
+          "needed": 6,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Hinges",
+          "status": "NEEDS_ORDERING"
+        }
+      ]
+    },
+    {
+      "job_id": 5276,
+      "job_name": "Roxas, Miraquel",
+      "customer_name": "Roxas, Miraquel",
+      "pending_pos": [],
+      "awaiting_pos": [],
+      "items": [
+        {
+          "part_no": "16261KIBPRIV60",
+          "name": "Door Lever Brunswick Rose Round Brushed Gold PVD Inbuilt Privacy Kit",
+          "needed": 2,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Iver Hardware",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "16261KPASS60",
+          "name": "Door Lever Brunswick Rose Round Brushed Gold PVD Passage Kit",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Iver Hardware",
+          "status": "NEEDS_ORDERING"
+        }
+      ]
+    },
+    {
+      "job_id": 5275,
+      "job_name": "Mathews - Bathroom door - Bifolds",
+      "customer_name": "Mathews , Andrew ",
+      "pending_pos": [],
+      "awaiting_pos": [],
+      "items": [
+        {
+          "part_no": "607PASS",
+          "name": "Lock Stainless Steel Passage",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Door Supplied & Installed",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "T10016FPZP20",
+          "name": "BUTT 100x75x1.6 FP ZP 20PK",
+          "needed": 2,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Door Supplied & Installed",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "H1P204072035",
+          "name": "FLUSH PANEL HONEYCOMB CORE INTERNAL  2040x720x35 PRIMECOAT",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Door Supplied & Installed",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "DSS161032012",
+          "name": "Single Meranti Stop Set 32 x 12 2.1",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Door Supplied & Installed",
+          "status": "NEEDS_ORDERING"
+        }
+      ]
+    },
+    {
+      "job_id": 5274,
+      "job_name": "Barone, Aiden",
+      "customer_name": "Barone, Aiden",
+      "pending_pos": [],
+      "awaiting_pos": [],
+      "items": [
+        {
+          "part_no": "FREIGHT (PREBUILD ONLY)",
+          "name": "FREIGHT",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "French Door",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "GD-1LS204082035TL",
+          "name": "French 1 Lite 2040x820x35 SPM Trans Lam  *Internal use only",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "French Door",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "WWL400MGC",
+          "name": "Olympus Entrance Lock MG",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "French Door",
+          "status": "NEEDS_ORDERING"
+        }
+      ]
+    },
+    {
+      "job_id": 5273,
+      "job_name": "KUNOWICZ - Materials Only - Venetian 1/2 Lite Door",
+      "customer_name": "Kunowicz, Alexander",
+      "pending_pos": [],
+      "awaiting_pos": [],
+      "items": [
+        {
+          "part_no": "GD-HLS204082040CR",
+          "name": "Venetian 1/2 Glass 2040x820x40 SPM Double Glazed Clear",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Venetian 1/2 Lite Door - SUPPLY ONLY",
+          "status": "NEEDS_ORDERING"
+        }
+      ]
+    },
+    {
+      "job_id": 5272,
+      "job_name": "Laundry Door",
+      "customer_name": "Jukic, Zrinka",
+      "pending_pos": [],
+      "awaiting_pos": [],
+      "items": [
+        {
+          "part_no": "FREIGHT (PREBUILD ONLY)",
+          "name": "FREIGHT",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Laundry external notes ",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "GD-1LS204082040TL",
+          "name": "French 1 Lite 2040x820x40 SPM Trans Lam",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Laundry external notes ",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "11520.SB",
+          "name": "Sceptre Combination Set - Includes Double Deadbolt",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Laundry external notes ",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "9060.SB",
+          "name": "Jura Elite Round Slimline Deadbolt, Single Cylinder Throw 27mm",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Laundry external notes ",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "R3G",
+          "name": "RP3 Door Bottom GA 920mm Gold Anodised Door Bottom",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Laundry external notes ",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "5902.SB",
+          "name": "Satin Brass Butt Hinge, Fixed Pin - 100 x 75 x 2.5mm",
+          "needed": 3,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Laundry external notes ",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "H1P204072035",
+          "name": "FLUSH PANEL HONEYCOMB CORE INTERNAL  2040x720x35 PRIMECOAT",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Internal Laundry Door",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "50mm Frame 35mm",
+          "name": "50mm Frame 35mm Door",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Internal Laundry Door",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "5902.SB",
+          "name": "Satin Brass Butt Hinge, Fixed Pin - 100 x 75 x 2.5mm",
+          "needed": 2,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Internal Laundry Door",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "9140.SB",
+          "name": "Baxter Passage Set",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Internal Laundry Door",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "9140.SB",
+          "name": "Baxter Passage Set",
+          "needed": 4,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Bedroom 1 Bedroom 2 Bedroom 3 Lounge room and privacy to bathroom",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "9141.SB",
+          "name": "Baxter Privacy Set",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Bedroom 1 Bedroom 2 Bedroom 3 Lounge room and privacy to bathroom",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "5902.SB",
+          "name": "Satin Brass Butt Hinge, Fixed Pin - 100 x 75 x 2.5mm",
+          "needed": 10,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Bedroom 1 Bedroom 2 Bedroom 3 Lounge room and privacy to bathroom",
+          "status": "NEEDS_ORDERING"
+        }
+      ]
+    },
+    {
+      "job_id": 5262,
+      "job_name": "ZILM - MATERIALS ONLY",
+      "customer_name": "Zilm, Rory & Nicola",
+      "pending_pos": [],
+      "awaiting_pos": [],
+      "items": [
+        {
+          "part_no": "OWT-AHGS204082040TL",
+          "name": "Insert 4 (1 Lite) 2040x820x40 SPM Trans Lam",
+          "needed": 1,
+          "in_stock": 1,
+          "stock_locations": [
+            {
+              "device_id": 22,
+              "device_name": "3.01",
+              "qty": 1
+            }
+          ],
+          "cost_center": "Laundry Door Supply Only",
+          "status": "PICK_FROM_STOCK"
+        }
+      ]
+    },
+    {
+      "job_id": 5261,
+      "job_name": "material supply only",
+      "customer_name": "Brewer, David ",
+      "pending_pos": [],
+      "awaiting_pos": [],
+      "items": [
+        {
+          "part_no": "H1P204072035",
+          "name": "FLUSH PANEL HONEYCOMB CORE INTERNAL  2040x720x35 PRIMECOAT",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Suppy Only - Materials",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "50mm Frame 35mm",
+          "name": "50mm Frame 35mm Door",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "Suppy Only - Materials",
+          "status": "NEEDS_ORDERING"
+        }
+      ]
+    },
+    {
+      "job_id": 5260,
+      "job_name": "materials add to quote",
+      "customer_name": "Lu, Matthias",
+      "pending_pos": [],
+      "awaiting_pos": [],
+      "items": [
+        {
+          "part_no": "0902P",
+          "name": "Door Lever Victorian Privacy Pair Antique Copper H152xW42xP59mm",
+          "needed": 2,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "tradco hardware",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "0902",
+          "name": "Door Lever Victorian Latch Pair Antique Copper H152xW42xP59mm",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "tradco hardware",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "0902E",
+          "name": "Door Lever Victorian Euro Pair Antique Copper H152xW42xP59mm",
+          "needed": 1,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "tradco hardware",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "9595",
+          "name": "Privacy Bolt Antique Copper Backset 60mm",
+          "needed": 2,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "tradco hardware",
+          "status": "NEEDS_ORDERING"
+        },
+        {
+          "part_no": "9577",
+          "name": "Tube Latch Split Cam 'D' Striker Antique Copper Backset 60mm",
+          "needed": 3,
+          "in_stock": 0,
+          "stock_locations": [],
+          "cost_center": "tradco hardware",
+          "status": "NEEDS_ORDERING"
+        }
+      ]
+    }
+  ]
+}

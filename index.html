@@ -1,0 +1,937 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>PO Receiving - 2nd Fix</title>
+    
+    <!-- PWA Support -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#1e40af">
+    
+    <!-- iOS PWA Support -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="PO Receive">
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+    
+    <!-- Android PWA -->
+    <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+    
+    <link rel="stylesheet" href="styles.css">
+    
+    <!-- Register Service Worker -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('sw.js')
+                    .then(reg => console.log('SW registered'))
+                    .catch(err => console.log('SW failed:', err));
+            });
+        }
+    </script>
+</head>
+<body>
+    <!-- Login Screen -->
+    <div id="screen-login" class="screen active">
+        <header>
+            <h1>🔐 2nd Fix</h1>
+            <p class="subtitle">PO Receiving App</p>
+        </header>
+        
+        <main style="display: flex; flex-direction: column; justify-content: center;">
+            <div style="text-align: center; margin-bottom: 32px;">
+                <div style="font-size: 64px; margin-bottom: 16px;">📦</div>
+                <p style="color: #6b7280;">Staff login required</p>
+            </div>
+            
+            <div class="input-group" style="flex-direction: column; gap: 16px;">
+                <input type="text" id="login-username" placeholder="Username" style="text-align: center; font-size: 18px;" autocapitalize="none" autocomplete="username">
+                <input type="password" id="login-password" placeholder="Password" style="text-align: center; font-size: 18px;" autocomplete="current-password">
+                <button class="btn btn-primary" id="login-btn" style="width: 100%;">Login →</button>
+            </div>
+            
+            <div id="login-error" style="color: #dc2626; text-align: center; margin-top: 16px; display: none;">
+                Invalid username or password
+            </div>
+        </main>
+    </div>
+
+    <!-- Screen 1: Scan/Enter PO -->
+    <!-- Home Screen: Main Options -->
+    <div id="screen-home" class="screen">
+        <header>
+            <div class="header-top">
+                <h1>📦 2nd Fix Stock</h1>
+                <button class="logout-btn" id="logout-btn" title="Logout">🚪</button>
+            </div>
+            <p class="subtitle">Logged in as: <span id="staff-name">Staff</span></p>
+        </header>
+        
+        <main>
+            <div class="home-options">
+                <button class="home-option" id="option-po">
+                    <div class="option-icon">📦</div>
+                    <div class="option-content">
+                        <h3>Receive from PO</h3>
+                        <p>Receive delivery & allocate to storage</p>
+                    </div>
+                    <div class="option-arrow">→</div>
+                </button>
+                
+                <button class="home-option" id="option-stock">
+                    <div class="option-icon">🏪</div>
+                    <div class="option-content">
+                        <h3>Allocate from Stock</h3>
+                        <p>Pick showroom items for job</p>
+                    </div>
+                    <div class="option-arrow">→</div>
+                </button>
+                
+                <button class="home-option" id="option-picklist">
+                    <div class="option-icon">📋</div>
+                    <div class="option-content">
+                        <h3>Stock Pick List</h3>
+                        <p>Items ready to collect today</p>
+                    </div>
+                    <div class="option-badge" id="picklist-badge">0</div>
+                    <div class="option-arrow">→</div>
+                </button>
+                
+                <button class="home-option" id="option-relocate">
+                    <div class="option-icon">🔄</div>
+                    <div class="option-content">
+                        <h3>Relocate Stock</h3>
+                        <p>Move items between storage locations</p>
+                    </div>
+                    <div class="option-arrow">→</div>
+                </button>
+            </div>
+            
+            <div class="home-alerts" id="home-alerts">
+                <!-- Pending PO alerts shown here -->
+            </div>
+            
+            <!-- Manager Options (hidden for regular staff) -->
+            <div class="manager-options hidden" id="manager-options">
+                <h4>Manager Tools</h4>
+                <div class="manager-buttons">
+                    <button class="manager-btn" id="option-staff">
+                        <span>👥</span> Staff Management
+                    </button>
+                    <button class="manager-btn" id="option-logs">
+                        <span>📋</span> Allocation Logs
+                    </button>
+                </div>
+            </div>
+        </main>
+    </div>
+    
+    <!-- Staff Management Screen (Managers Only) -->
+    <div id="screen-staff-mgmt" class="screen">
+        <header>
+            <button class="back-btn" data-screen="home">← Back</button>
+            <h1>👥 Staff Management</h1>
+        </header>
+        
+        <main>
+            <div class="staff-actions">
+                <button class="btn btn-primary" id="add-staff-btn">➕ Add Staff Member</button>
+            </div>
+            
+            <div id="staff-list" class="staff-list">
+                <!-- Staff members loaded here -->
+            </div>
+        </main>
+    </div>
+    
+    <!-- Add/Edit Staff Modal -->
+    <div id="staff-modal" class="modal hidden">
+        <div class="modal-overlay" onclick="app.closeStaffModal()"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="staff-modal-title">Add Staff Member</h2>
+                <button class="close-btn" onclick="app.closeStaffModal()">✕</button>
+            </div>
+            <form id="staff-form">
+                <input type="hidden" id="staff-edit-id">
+                
+                <div class="form-group">
+                    <label>Username</label>
+                    <input type="text" id="staff-username" required minlength="3" placeholder="e.g. john" autocapitalize="none">
+                </div>
+                
+                <div class="form-group">
+                    <label>Display Name</label>
+                    <input type="text" id="staff-display-name" required placeholder="e.g. John Smith">
+                </div>
+                
+                <div class="form-group">
+                    <label>Password <span id="password-hint" class="hint">(min 6 characters)</span></label>
+                    <input type="password" id="staff-password" minlength="6" placeholder="Enter password">
+                </div>
+                
+                <div class="form-group">
+                    <label>Role</label>
+                    <select id="staff-role">
+                        <option value="staff">Staff</option>
+                        <option value="manager">Manager</option>
+                        <option value="admin" id="admin-option">Admin</option>
+                    </select>
+                    <p class="hint" id="role-hint">Managers can add/edit staff and view logs</p>
+                </div>
+                
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="staff-active" checked>
+                        <span>Account Active</span>
+                    </label>
+                </div>
+                
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="app.closeStaffModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <!-- Allocation Logs Screen (Managers Only) -->
+    <div id="screen-logs" class="screen">
+        <header>
+            <button class="back-btn" data-screen="home">← Back</button>
+            <h1>📋 Allocation Logs</h1>
+        </header>
+        
+        <main>
+            <div id="logs-list" class="logs-list">
+                <div class="loading">Loading logs...</div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Screen 1: Scan/Enter PO (was screen-scan) -->
+    <div id="screen-scan" class="screen">
+        <header>
+            <button class="back-btn" data-screen="home">← Back</button>
+            <h1>📦 Receive PO</h1>
+        </header>
+        
+        <main>
+            <div class="camera-box" id="camera-capture">
+                <div class="camera-icon">📷</div>
+                <p>Tap to photograph<br>delivery docket</p>
+                <input type="file" accept="image/*" capture="environment" id="docket-photo" hidden>
+            </div>
+            
+            <div class="divider">
+                <span>— OR —</span>
+            </div>
+            
+            <div class="input-group">
+                <input type="text" id="po-number" placeholder="Enter PO number..." inputmode="numeric">
+                <button class="btn btn-primary" id="lookup-btn">Look Up</button>
+            </div>
+            
+            <div id="scan-status" class="status-message hidden"></div>
+        </main>
+    </div>
+
+    <!-- Screen 2: Verify Items -->
+    <div id="screen-verify" class="screen">
+        <header>
+            <button class="back-btn" data-screen="scan">← Back</button>
+            <h1>☑️ Verify Items</h1>
+        </header>
+        
+        <div class="po-info">
+            <h2 id="po-title">PO #-----</h2>
+            <p id="po-vendor">Loading...</p>
+            <p id="po-job">Job: -----</p>
+        </div>
+        
+        <main>
+            <div class="select-all-bar">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="select-all">
+                    <span class="checkmark"></span>
+                    Select All Items
+                </label>
+            </div>
+            
+            <div id="items-list" class="items-list">
+                <!-- Items populated by JS -->
+            </div>
+            
+            <div class="selection-summary">
+                <span id="selection-count">0 of 0 items selected</span>
+            </div>
+        </main>
+        
+        <footer>
+            <button class="btn btn-primary btn-large" id="to-storage-btn" disabled>
+                Select Storage →
+            </button>
+        </footer>
+    </div>
+
+    <!-- Screen 3: Select Storage -->
+    <div id="screen-storage" class="screen">
+        <header>
+            <button class="back-btn" data-screen="verify">← Back</button>
+            <h1>📍 Select Storage</h1>
+        </header>
+        
+        <main>
+            <div class="storage-info">
+                <p>Where to store <strong id="storage-item-count">0</strong> selected items?</p>
+            </div>
+            
+            <div class="storage-selector">
+                <label for="storage-dropdown">Storage Location</label>
+                <select id="storage-dropdown" class="storage-dropdown">
+                    <option value="">-- Select Storage Location --</option>
+                    
+                    <optgroup label="📌 Special Locations">
+                        <option value="4">Customer Cupboard</option>
+                        <option value="21">Builders Cupboard</option>
+                        <option value="38">ON TOP - Builders Cupboard</option>
+                    </optgroup>
+                    
+                    <optgroup label="📦 Container 1">
+                        <option value="5">1.01 Blue Shipping Container</option>
+                        <option value="6">1.02 Blue Shipping Container</option>
+                        <option value="7">1.03</option>
+                        <option value="8">1.04</option>
+                        <option value="48">1.05</option>
+                        <option value="49">1.06</option>
+                        <option value="50">1.07</option>
+                        <option value="51">1.08</option>
+                    </optgroup>
+                    
+                    <optgroup label="📦 Container 2">
+                        <option value="13">2.01</option>
+                        <option value="14">2.02</option>
+                        <option value="15">2.03</option>
+                        <option value="16">2.04</option>
+                        <option value="17">2.05</option>
+                        <option value="18">2.06</option>
+                        <option value="19">2.07</option>
+                        <option value="20">2.08</option>
+                        <option value="255">2.09 - Container Side</option>
+                    </optgroup>
+                    
+                    <optgroup label="📦 Container 3">
+                        <option value="22">3.01</option>
+                        <option value="23">3.02</option>
+                        <option value="24">3.03</option>
+                        <option value="25">3.04</option>
+                        <option value="26">3.05</option>
+                        <option value="27">3.06</option>
+                        <option value="28">3.07</option>
+                        <option value="29">3.08</option>
+                    </optgroup>
+                    
+                    <optgroup label="📦 Container 4">
+                        <option value="30">4.01</option>
+                        <option value="31">4.02</option>
+                        <option value="32">4.03</option>
+                        <option value="33">4.04</option>
+                        <option value="34">4.05</option>
+                        <option value="35">4.06</option>
+                        <option value="36">4.07</option>
+                        <option value="37">4.08</option>
+                    </optgroup>
+                    
+                    <optgroup label="📦 Container 5">
+                        <option value="40">5.01</option>
+                        <option value="41">5.02</option>
+                        <option value="42">5.03</option>
+                        <option value="43">5.04</option>
+                    </optgroup>
+                    
+                    <optgroup label="🏠 Back Room (BR)">
+                        <option value="110">BR.01</option>
+                        <option value="111">BR.02</option>
+                        <option value="112">BR.03</option>
+                        <option value="113">BR.04</option>
+                        <option value="114">BR.05</option>
+                        <option value="115">BR.06</option>
+                        <option value="116">BR.07</option>
+                        <option value="117">BR.08</option>
+                        <option value="118">BR.09</option>
+                        <option value="119">BR.10</option>
+                        <option value="120">BR.11</option>
+                        <option value="121">BR.12</option>
+                        <option value="122">BR.13</option>
+                        <option value="123">BR.14</option>
+                        <option value="125">BR.15</option>
+                        <option value="126">BR.16</option>
+                        <option value="127">BR.17</option>
+                        <option value="129">BR.18</option>
+                        <option value="130">BR.19</option>
+                        <option value="131">BR.20</option>
+                        <option value="132">BR.21</option>
+                        <option value="133">BR.22</option>
+                        <option value="134">BR.23</option>
+                        <option value="135">BR.24</option>
+                        <option value="136">BR.25</option>
+                        <option value="137">BR.26</option>
+                        <option value="138">BR.27</option>
+                        <option value="139">BR.28</option>
+                        <option value="140">BR.29</option>
+                        <option value="141">BR.30</option>
+                        <option value="142">BR.31</option>
+                        <option value="143">BR.32</option>
+                        <option value="144">BR.33</option>
+                        <option value="145">BR.34</option>
+                    </optgroup>
+                    
+                    <optgroup label="🗄️ Showroom Racks">
+                        <option value="102">S01A - CUSTOMER RACK</option>
+                        <option value="106">S01B - CUSTOMER RACK</option>
+                        <option value="103">S02A</option>
+                        <option value="107">S02B</option>
+                        <option value="104">S03A</option>
+                        <option value="108">S03B</option>
+                        <option value="105">S04A</option>
+                        <option value="109">S04B</option>
+                    </optgroup>
+                    
+                    <optgroup label="📍 Other Locations">
+                        <option value="149">Back Room</option>
+                        <option value="219">Boardroom</option>
+                        <option value="258">Customer Collected</option>
+                        <option value="220">Delivered to Site</option>
+                        <option value="152">Delivery by Supplier</option>
+                        <option value="260">Hall - Entrance</option>
+                        <option value="151">On Site</option>
+                        <option value="147">PICK UP FROM SUPPLIER</option>
+                        <option value="153">Reception</option>
+                        <option value="69">Shed</option>
+                        <option value="146">Showroom Display</option>
+                    </optgroup>
+                    
+                    <optgroup label="📦 Stock Areas">
+                        <option value="52">Stock - Seal Room</option>
+                        <option value="67">Stock Shelves</option>
+                        <option value="65">Stock Shelves - Tub 1</option>
+                        <option value="62">Stock Shelves - Tub 10</option>
+                        <option value="63">Stock Shelves - Tub 11</option>
+                    </optgroup>
+                </select>
+            </div>
+            
+            <div class="photo-section">
+                <p class="photo-label">📷 Evidence Photo (optional)</p>
+                <div class="camera-box small" id="evidence-capture">
+                    <div class="camera-icon">📷</div>
+                    <p>Tap to photograph items in storage</p>
+                    <input type="file" accept="image/*" capture="environment" id="evidence-photo" hidden>
+                </div>
+                <div id="evidence-preview" class="photo-preview hidden">
+                    <img id="evidence-img" src="" alt="Evidence photo">
+                    <button class="remove-photo" id="remove-evidence">✕</button>
+                </div>
+            </div>
+        </main>
+        
+        <footer>
+            <button class="btn btn-primary btn-large" id="allocate-btn" disabled>
+                ✓ Allocate Items
+            </button>
+        </footer>
+    </div>
+
+    <!-- Screen 4: Processing -->
+    <div id="screen-processing" class="screen">
+        <header>
+            <h1>⏳ Processing</h1>
+        </header>
+        
+        <main class="center-content">
+            <div class="spinner"></div>
+            <p id="processing-status">Allocating items in Simpro...</p>
+            <p id="processing-detail" class="detail"></p>
+        </main>
+    </div>
+
+    <!-- Screen 5: Success -->
+    <div id="screen-success" class="screen">
+        <header>
+            <h1>✅ Complete</h1>
+        </header>
+        
+        <main class="center-content">
+            <div class="success-card">
+                <div class="success-icon">✓</div>
+                <h2>Allocation Complete!</h2>
+                <p id="success-summary">0 items → Storage</p>
+                <p id="success-received-by" class="detail staff-badge">Received by: <strong id="success-staff-name">Staff</strong></p>
+                <p id="success-verification" class="detail verification-status"></p>
+                <p id="success-photo" class="detail">Photo saved</p>
+            </div>
+            
+            <div class="label-section">
+                <h3>🏷️ Print Labels</h3>
+                <p id="label-count">0 labels ready to print</p>
+                <button class="btn btn-secondary btn-large" id="print-labels-btn">
+                    🖨️ Print Labels
+                </button>
+            </div>
+        </main>
+        
+        <footer>
+            <button class="btn btn-primary btn-large" id="new-po-btn">
+                📦 Receive Another PO
+            </button>
+            <button class="btn btn-outline btn-large" id="view-history-btn">
+                📋 View History
+            </button>
+        </footer>
+    </div>
+    
+    <!-- Stock Pick List Screen -->
+    <div id="screen-picklist" class="screen">
+        <header>
+            <button class="back-btn" data-screen="home">← Back</button>
+            <h1>📋 Stock Pick List</h1>
+        </header>
+        
+        <main>
+            <div class="picklist-summary" id="picklist-summary">
+                <div class="summary-stat">
+                    <span class="stat-number" id="stat-ready">0</span>
+                    <span class="stat-label">Ready to Pick</span>
+                </div>
+                <div class="summary-stat">
+                    <span class="stat-number" id="stat-order">0</span>
+                    <span class="stat-label">Need Ordering</span>
+                </div>
+            </div>
+            
+            <div class="picklist-filter">
+                <button class="filter-btn active" data-filter="ready">✅ Ready</button>
+                <button class="filter-btn" data-filter="order">⚠️ Need Order</button>
+                <button class="filter-btn" data-filter="all">All</button>
+            </div>
+            
+            <div id="picklist-items" class="picklist-items">
+                <div class="loading">Loading pick list...</div>
+            </div>
+        </main>
+    </div>
+    
+    <!-- Allocate from Stock Screen -->
+    <div id="screen-stock" class="screen">
+        <header>
+            <button class="back-btn" data-screen="home">← Back</button>
+            <h1>🏪 Allocate from Stock</h1>
+        </header>
+        
+        <main>
+            <div class="input-group">
+                <input type="text" id="job-number" placeholder="Enter Job number..." inputmode="numeric">
+                <button class="btn btn-primary" id="job-lookup-btn">Look Up</button>
+            </div>
+            
+            <div class="divider">
+                <span>— OR —</span>
+            </div>
+            
+            <div class="input-group">
+                <input type="text" id="part-search" placeholder="Search by part number...">
+                <button class="btn btn-secondary" id="part-search-btn">Search</button>
+            </div>
+            
+            <div id="stock-results" class="stock-results">
+                <p class="hint">Enter a job number to see items available in stock</p>
+            </div>
+        </main>
+    </div>
+    
+    <!-- Relocate Stock - Select Source Screen -->
+    <div id="screen-relocate-source" class="screen">
+        <header>
+            <button class="back-btn" data-screen="home">← Back</button>
+            <h1>🔄 Relocate Stock</h1>
+        </header>
+        
+        <main>
+            <div class="section-title">
+                <h3>Step 1: Select Source Location</h3>
+                <p class="hint">Where are the items currently stored?</p>
+            </div>
+            
+            <div class="storage-selector">
+                <label for="relocate-source-dropdown">Source Storage Location</label>
+                <select id="relocate-source-dropdown" class="storage-dropdown">
+                    <option value="">-- Select Source Location --</option>
+                    
+                    <optgroup label="📌 Special Locations">
+                        <option value="4">Customer Cupboard</option>
+                        <option value="21">Builders Cupboard</option>
+                        <option value="38">ON TOP - Builders Cupboard</option>
+                    </optgroup>
+                    
+                    <optgroup label="📦 Container 1">
+                        <option value="5">1.01 Blue Shipping Container</option>
+                        <option value="6">1.02 Blue Shipping Container</option>
+                        <option value="7">1.03</option>
+                        <option value="8">1.04</option>
+                        <option value="48">1.05</option>
+                        <option value="49">1.06</option>
+                        <option value="50">1.07</option>
+                        <option value="51">1.08</option>
+                    </optgroup>
+                    
+                    <optgroup label="📦 Container 2">
+                        <option value="13">2.01</option>
+                        <option value="14">2.02</option>
+                        <option value="15">2.03</option>
+                        <option value="16">2.04</option>
+                        <option value="17">2.05</option>
+                        <option value="18">2.06</option>
+                        <option value="19">2.07</option>
+                        <option value="20">2.08</option>
+                        <option value="255">2.09 - Container Side</option>
+                    </optgroup>
+                    
+                    <optgroup label="📦 Container 3">
+                        <option value="22">3.01</option>
+                        <option value="23">3.02</option>
+                        <option value="24">3.03</option>
+                        <option value="25">3.04</option>
+                        <option value="26">3.05</option>
+                        <option value="27">3.06</option>
+                        <option value="28">3.07</option>
+                        <option value="29">3.08</option>
+                    </optgroup>
+                    
+                    <optgroup label="📦 Container 4">
+                        <option value="30">4.01</option>
+                        <option value="31">4.02</option>
+                        <option value="32">4.03</option>
+                        <option value="33">4.04</option>
+                        <option value="34">4.05</option>
+                        <option value="35">4.06</option>
+                        <option value="36">4.07</option>
+                        <option value="37">4.08</option>
+                    </optgroup>
+                    
+                    <optgroup label="📦 Container 5">
+                        <option value="40">5.01</option>
+                        <option value="41">5.02</option>
+                        <option value="42">5.03</option>
+                        <option value="43">5.04</option>
+                    </optgroup>
+                    
+                    <optgroup label="🏠 Back Room (BR)">
+                        <option value="110">BR.01</option>
+                        <option value="111">BR.02</option>
+                        <option value="112">BR.03</option>
+                        <option value="113">BR.04</option>
+                        <option value="114">BR.05</option>
+                        <option value="115">BR.06</option>
+                        <option value="116">BR.07</option>
+                        <option value="117">BR.08</option>
+                        <option value="118">BR.09</option>
+                        <option value="119">BR.10</option>
+                        <option value="120">BR.11</option>
+                        <option value="121">BR.12</option>
+                        <option value="122">BR.13</option>
+                        <option value="123">BR.14</option>
+                        <option value="125">BR.15</option>
+                        <option value="126">BR.16</option>
+                        <option value="127">BR.17</option>
+                        <option value="129">BR.18</option>
+                        <option value="130">BR.19</option>
+                        <option value="131">BR.20</option>
+                        <option value="132">BR.21</option>
+                        <option value="133">BR.22</option>
+                        <option value="134">BR.23</option>
+                        <option value="135">BR.24</option>
+                        <option value="136">BR.25</option>
+                        <option value="137">BR.26</option>
+                        <option value="138">BR.27</option>
+                        <option value="139">BR.28</option>
+                        <option value="140">BR.29</option>
+                        <option value="141">BR.30</option>
+                        <option value="142">BR.31</option>
+                        <option value="143">BR.32</option>
+                        <option value="144">BR.33</option>
+                        <option value="145">BR.34</option>
+                    </optgroup>
+                    
+                    <optgroup label="🗄️ Showroom Racks">
+                        <option value="102">S01A - CUSTOMER RACK</option>
+                        <option value="106">S01B - CUSTOMER RACK</option>
+                        <option value="103">S02A</option>
+                        <option value="107">S02B</option>
+                        <option value="104">S03A</option>
+                        <option value="108">S03B</option>
+                        <option value="105">S04A</option>
+                        <option value="109">S04B</option>
+                    </optgroup>
+                    
+                    <optgroup label="📍 Other Locations">
+                        <option value="3">Stock Holding</option>
+                        <option value="149">Back Room</option>
+                        <option value="219">Boardroom</option>
+                        <option value="153">Reception</option>
+                        <option value="69">Shed</option>
+                        <option value="146">Showroom Display</option>
+                    </optgroup>
+                    
+                    <optgroup label="📦 Stock Areas">
+                        <option value="52">Stock - Seal Room</option>
+                        <option value="67">Stock Shelves</option>
+                        <option value="65">Stock Shelves - Tub 1</option>
+                        <option value="62">Stock Shelves - Tub 10</option>
+                        <option value="63">Stock Shelves - Tub 11</option>
+                    </optgroup>
+                </select>
+            </div>
+            
+            <div id="relocate-source-status" class="status-message hidden"></div>
+        </main>
+        
+        <footer>
+            <button class="btn btn-primary btn-large" id="load-source-items-btn" disabled>
+                View Items →
+            </button>
+        </footer>
+    </div>
+    
+    <!-- Relocate Stock - Select Items Screen -->
+    <div id="screen-relocate-items" class="screen">
+        <header>
+            <button class="back-btn" data-screen="relocate-source">← Back</button>
+            <h1>🔄 Select Items</h1>
+        </header>
+        
+        <div class="po-info">
+            <h2 id="relocate-source-title">From: -----</h2>
+            <p id="relocate-item-count-info">Loading items...</p>
+        </div>
+        
+        <main>
+            <div class="select-all-bar">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="relocate-select-all">
+                    <span class="checkmark"></span>
+                    Select All Items
+                </label>
+            </div>
+            
+            <div id="relocate-items-list" class="items-list">
+                <!-- Items populated by JS -->
+            </div>
+            
+            <div class="selection-summary">
+                <span id="relocate-selection-count">0 of 0 items selected</span>
+            </div>
+        </main>
+        
+        <footer>
+            <button class="btn btn-primary btn-large" id="to-relocate-dest-btn" disabled>
+                Select Destination →
+            </button>
+        </footer>
+    </div>
+    
+    <!-- Relocate Stock - Select Destination Screen -->
+    <div id="screen-relocate-dest" class="screen">
+        <header>
+            <button class="back-btn" data-screen="relocate-items">← Back</button>
+            <h1>📍 Destination</h1>
+        </header>
+        
+        <main>
+            <div class="storage-info">
+                <p>Moving <strong id="relocate-dest-item-count">0</strong> items from <strong id="relocate-from-name">---</strong></p>
+            </div>
+            
+            <div class="section-title">
+                <h3>Step 2: Select Destination</h3>
+                <p class="hint">Where should these items be moved to?</p>
+            </div>
+            
+            <div class="storage-selector">
+                <label for="relocate-dest-dropdown">Destination Storage Location</label>
+                <select id="relocate-dest-dropdown" class="storage-dropdown">
+                    <option value="">-- Select Destination Location --</option>
+                    
+                    <optgroup label="📌 Special Locations">
+                        <option value="4">Customer Cupboard</option>
+                        <option value="21">Builders Cupboard</option>
+                        <option value="38">ON TOP - Builders Cupboard</option>
+                    </optgroup>
+                    
+                    <optgroup label="📦 Container 1">
+                        <option value="5">1.01 Blue Shipping Container</option>
+                        <option value="6">1.02 Blue Shipping Container</option>
+                        <option value="7">1.03</option>
+                        <option value="8">1.04</option>
+                        <option value="48">1.05</option>
+                        <option value="49">1.06</option>
+                        <option value="50">1.07</option>
+                        <option value="51">1.08</option>
+                    </optgroup>
+                    
+                    <optgroup label="📦 Container 2">
+                        <option value="13">2.01</option>
+                        <option value="14">2.02</option>
+                        <option value="15">2.03</option>
+                        <option value="16">2.04</option>
+                        <option value="17">2.05</option>
+                        <option value="18">2.06</option>
+                        <option value="19">2.07</option>
+                        <option value="20">2.08</option>
+                        <option value="255">2.09 - Container Side</option>
+                    </optgroup>
+                    
+                    <optgroup label="📦 Container 3">
+                        <option value="22">3.01</option>
+                        <option value="23">3.02</option>
+                        <option value="24">3.03</option>
+                        <option value="25">3.04</option>
+                        <option value="26">3.05</option>
+                        <option value="27">3.06</option>
+                        <option value="28">3.07</option>
+                        <option value="29">3.08</option>
+                    </optgroup>
+                    
+                    <optgroup label="📦 Container 4">
+                        <option value="30">4.01</option>
+                        <option value="31">4.02</option>
+                        <option value="32">4.03</option>
+                        <option value="33">4.04</option>
+                        <option value="34">4.05</option>
+                        <option value="35">4.06</option>
+                        <option value="36">4.07</option>
+                        <option value="37">4.08</option>
+                    </optgroup>
+                    
+                    <optgroup label="📦 Container 5">
+                        <option value="40">5.01</option>
+                        <option value="41">5.02</option>
+                        <option value="42">5.03</option>
+                        <option value="43">5.04</option>
+                    </optgroup>
+                    
+                    <optgroup label="🏠 Back Room (BR)">
+                        <option value="110">BR.01</option>
+                        <option value="111">BR.02</option>
+                        <option value="112">BR.03</option>
+                        <option value="113">BR.04</option>
+                        <option value="114">BR.05</option>
+                        <option value="115">BR.06</option>
+                        <option value="116">BR.07</option>
+                        <option value="117">BR.08</option>
+                        <option value="118">BR.09</option>
+                        <option value="119">BR.10</option>
+                        <option value="120">BR.11</option>
+                        <option value="121">BR.12</option>
+                        <option value="122">BR.13</option>
+                        <option value="123">BR.14</option>
+                        <option value="125">BR.15</option>
+                        <option value="126">BR.16</option>
+                        <option value="127">BR.17</option>
+                        <option value="129">BR.18</option>
+                        <option value="130">BR.19</option>
+                        <option value="131">BR.20</option>
+                        <option value="132">BR.21</option>
+                        <option value="133">BR.22</option>
+                        <option value="134">BR.23</option>
+                        <option value="135">BR.24</option>
+                        <option value="136">BR.25</option>
+                        <option value="137">BR.26</option>
+                        <option value="138">BR.27</option>
+                        <option value="139">BR.28</option>
+                        <option value="140">BR.29</option>
+                        <option value="141">BR.30</option>
+                        <option value="142">BR.31</option>
+                        <option value="143">BR.32</option>
+                        <option value="144">BR.33</option>
+                        <option value="145">BR.34</option>
+                    </optgroup>
+                    
+                    <optgroup label="🗄️ Showroom Racks">
+                        <option value="102">S01A - CUSTOMER RACK</option>
+                        <option value="106">S01B - CUSTOMER RACK</option>
+                        <option value="103">S02A</option>
+                        <option value="107">S02B</option>
+                        <option value="104">S03A</option>
+                        <option value="108">S03B</option>
+                        <option value="105">S04A</option>
+                        <option value="109">S04B</option>
+                    </optgroup>
+                    
+                    <optgroup label="📍 Other Locations">
+                        <option value="3">Stock Holding</option>
+                        <option value="149">Back Room</option>
+                        <option value="219">Boardroom</option>
+                        <option value="153">Reception</option>
+                        <option value="69">Shed</option>
+                        <option value="146">Showroom Display</option>
+                    </optgroup>
+                    
+                    <optgroup label="📦 Stock Areas">
+                        <option value="52">Stock - Seal Room</option>
+                        <option value="67">Stock Shelves</option>
+                        <option value="65">Stock Shelves - Tub 1</option>
+                        <option value="62">Stock Shelves - Tub 10</option>
+                        <option value="63">Stock Shelves - Tub 11</option>
+                    </optgroup>
+                </select>
+            </div>
+            
+            <div id="relocate-dest-warning" class="warning-box hidden">
+                <p>⚠️ Cannot move to same location as source</p>
+            </div>
+        </main>
+        
+        <footer>
+            <button class="btn btn-primary btn-large" id="execute-relocate-btn" disabled>
+                ✓ Move Items
+            </button>
+        </footer>
+    </div>
+    
+    <!-- Relocate Success Screen -->
+    <div id="screen-relocate-success" class="screen">
+        <header>
+            <h1>✅ Relocated</h1>
+        </header>
+        
+        <main class="center-content">
+            <div class="success-card">
+                <div class="success-icon">🔄</div>
+                <h2>Items Relocated!</h2>
+                <p id="relocate-success-summary">0 items moved</p>
+                <p id="relocate-success-from" class="detail">From: ---</p>
+                <p id="relocate-success-to" class="detail">To: ---</p>
+                <p id="relocate-success-staff" class="detail staff-badge">Moved by: <strong id="relocate-staff-name">Staff</strong></p>
+                <p id="relocate-success-note" class="detail note hidden" style="color: #666; font-style: italic; margin-top: 10px; font-size: 14px;"></p>
+            </div>
+        </main>
+        
+        <footer>
+            <button class="btn btn-primary btn-large" id="relocate-another-btn">
+                🔄 Relocate More
+            </button>
+            <button class="btn btn-outline btn-large" id="relocate-home-btn">
+                🏠 Back to Home
+            </button>
+        </footer>
+    </div>
+    
+    <!-- Hidden Label Print Container -->
+    <div id="label-print-container" class="print-only">
+        <!-- Labels generated by JS -->
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
