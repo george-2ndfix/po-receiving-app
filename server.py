@@ -672,6 +672,25 @@ def allocate_items():
         
         all_verified = all(r.get('verified', False) for r in results if r.get('success'))
         
+        # ============================================
+        # Set "Goods Received" status (Status ID 239)
+        # This marks the PO as physically received BEFORE financial receipting
+        # Only set if at least one item was successfully allocated
+        # ============================================
+        goods_received_set = False
+        if success_count > 0:
+            try:
+                print(f"=== SETTING GOODS RECEIVED STATUS for PO {po_id} ===")
+                gr_response = simpro_request('PATCH', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}', json={'Status': 239})
+                print(f"Goods Received API Response: {gr_response.status_code}")
+                if gr_response.status_code == 204:
+                    goods_received_set = True
+                    print(f"✅ Goods Received status set successfully for PO {po_id}")
+                else:
+                    print(f"⚠️ Goods Received status update returned: {gr_response.status_code} - {gr_response.text}")
+            except Exception as gr_err:
+                print(f"⚠️ Failed to set Goods Received status: {gr_err}")
+        
         log_allocation(
             staff_id=staff_id,
             staff_name=staff_name,
@@ -685,7 +704,7 @@ def allocate_items():
         )
         
         print(f"=== ALLOCATION COMPLETE ===")
-        print(f"Success count: {success_count}, Results: {results}")
+        print(f"Success count: {success_count}, Results: {results}, Goods Received: {goods_received_set}")
         
         return jsonify({
             'success': success_count > 0,
@@ -693,7 +712,8 @@ def allocate_items():
             'successCount': success_count,
             'totalItems': len(items),
             'allocatedBy': staff_name,
-            'allVerified': all_verified if success_count > 0 else False
+            'allVerified': all_verified if success_count > 0 else False,
+            'goodsReceivedSet': goods_received_set
         })
         
     except Exception as e:

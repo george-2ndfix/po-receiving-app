@@ -675,11 +675,19 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         // Show verification status
         const verifyEl = document.getElementById('success-verification');
         if (verifyEl) {
+            let statusHtml = '';
             if (data.allVerified) {
-                verifyEl.innerHTML = '<span style="color: #22c55e;">✅ Verified in Simpro</span>';
+                statusHtml += '<div style="color: #22c55e;">✅ Verified in Simpro</div>';
             } else {
-                verifyEl.innerHTML = '<span style="color: #f59e0b;">⚠️ Allocation sent - verification pending</span>';
+                statusHtml += '<div style="color: #f59e0b;">⚠️ Allocation sent - verification pending</div>';
             }
+            // Show Goods Received status
+            if (data.goodsReceivedSet) {
+                statusHtml += '<div style="color: #22c55e; margin-top: 4px;">✅ Goods Received status set</div>';
+            } else if (data.successCount > 0) {
+                statusHtml += '<div style="color: #f59e0b; margin-top: 4px;">⚠️ Goods Received status pending</div>';
+            }
+            verifyEl.innerHTML = statusHtml;
         }
         
         // Label count
