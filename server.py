@@ -609,10 +609,11 @@ def allocate_items():
             # Set allocation via API
             allocation_url = f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/catalogs/{catalog_id}/allocations/'
             
-            payload = {
+            # Simpro API requires an ARRAY of allocations
+            payload = [{
                 'StorageDevice': int(storage_device_id),
                 'Quantity': int(quantity)
-            }
+            }]
             
             print(f"Calling API: PUT {allocation_url} with payload: {payload}")
             response = simpro_request('PUT', allocation_url, json=payload)
