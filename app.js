@@ -533,6 +533,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                         <div class="item-name">${item.description}</div>
                         <div class="item-meta">
                             ${item.partNo ? `<span class="item-part">${item.partNo}</span>` : ''}
+                            ${item.jobNumber ? `<span class="item-job">Job ${item.jobNumber}${item.customerName ? ' - ' + item.customerName : ''}</span>` : ''}
                             <span class="item-qty">Ordered: ${item.quantityOrdered}</span>
                             <span class="item-received">Received: ${item.quantityReceived}</span>
                         </div>
@@ -558,7 +559,9 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                 catalogId: item.catalogId,
                 description: item.description,
                 partNo: item.partNo,
-                quantity: item.quantityOrdered - item.quantityReceived
+                quantity: item.quantityOrdered - item.quantityReceived,
+                jobNumber: item.jobNumber,
+                customerName: item.customerName
             });
         }
         
@@ -580,7 +583,9 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                     catalogId: item.catalogId,
                     description: item.description,
                     partNo: item.partNo,
-                    quantity: item.quantityOrdered - item.quantityReceived
+                    quantity: item.quantityOrdered - item.quantityReceived,
+                    jobNumber: item.jobNumber,
+                    customerName: item.customerName
                 });
             }
         });
@@ -783,15 +788,18 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         const dateStr = new Date().toLocaleDateString();
         const storageLocation = this.selectedStorage?.name || this._lastStorageName || 'Unknown';
         const poNumber = this.currentPO?.poNumber || 'N/A';
-        const jobNumber = this.currentPO?.jobNumber || 'N/A';
-        const customerName = this.currentPO?.customerName || 'N/A';
+        // PO-level fallbacks (used if item doesn't have per-item job)
+        const poJobNumber = this.currentPO?.jobNumber || 'N/A';
+        const poCustomerName = this.currentPO?.customerName || 'N/A';
         
         this.selectedItems.forEach(item => {
             for (let i = 0; i < item.quantity; i++) {
                 const label = document.createElement('div');
                 label.className = 'label';
+                const itemJob = item.jobNumber || poJobNumber;
+                const itemCustomer = item.customerName || poCustomerName;
                 label.innerHTML = `
-                    <div class="label-line1">PO ${poNumber} | Job ${jobNumber} - ${customerName} | ${item.partNo || 'N/A'}</div>
+                    <div class="label-line1">PO ${poNumber} | Job ${itemJob} - ${itemCustomer} | ${item.partNo || 'N/A'}</div>
                     <div class="label-line2">${item.description} | ${storageLocation} | ${dateStr}</div>
                 `;
                 container.appendChild(label);

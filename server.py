@@ -542,6 +542,36 @@ def get_po_details(po_number):
         
         catalogs = items_response.json()
         
+        # Cache for job customer lookups (avoid duplicate API calls for same job)
+        job_customer_cache = {}
+        
+        def get_job_customer(jid):
+            """Look up job number and customer name, with caching"""
+            if jid in job_customer_cache:
+                return job_customer_cache[jid]
+            try:
+                job_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/?ID={jid}&columns=ID,Name,Customer')
+                if job_resp.status_code == 200:
+                    jobs = job_resp.json()
+                    if jobs:
+                        job_data = jobs[0]
+                        customer = job_data.get('Customer', {})
+                        cust_name = customer.get('CompanyName') or ''
+                        if not cust_name:
+                            given = customer.get('GivenName', '') or ''
+                            family = customer.get('FamilyName', '') or ''
+                            cust_name = f"{given} {family}".strip()
+                        if not cust_name:
+                            cust_name = customer.get('Name', '')
+                        result = {'jobNumber': str(jid), 'customerName': cust_name}
+                        job_customer_cache[jid] = result
+                        return result
+            except Exception as je:
+                print(f"Error looking up job {jid}: {je}")
+            result = {'jobNumber': str(jid), 'customerName': ''}
+            job_customer_cache[jid] = result
+            return result
+        
         items = []
         for catalog in catalogs:
             catalog_id = catalog.get('Catalog', {}).get('ID')
@@ -551,6 +581,8 @@ def get_po_details(po_number):
             # Get quantity from allocations endpoint (quantity is not in catalog response)
             quantity_ordered = 0
             quantity_received = 0
+            item_job_number = None
+            item_customer_name = None
             
             if catalog_id:
                 try:
@@ -561,8 +593,21 @@ def get_po_details(po_number):
                             qty_obj = alloc.get('Quantity', {})
                             quantity_ordered += qty_obj.get('Total', 0)
                             quantity_received += qty_obj.get('Received', 0)
+                            
+                            # Extract per-item job from allocation's AssignedTo
+                            alloc_assigned = alloc.get('AssignedTo', {})
+                            alloc_job = alloc_assigned.get('Job')
+                            if alloc_job and not item_job_number:
+                                job_info = get_job_customer(alloc_job)
+                                item_job_number = job_info['jobNumber']
+                                item_customer_name = job_info['customerName']
                 except Exception as e:
                     print(f"Error getting allocations for catalog {catalog_id}: {e}")
+            
+            # Fall back to PO-level job/customer if no per-item assignment
+            if not item_job_number:
+                item_job_number = str(job_number) if job_number else None
+                item_customer_name = customer_name
             
             # Determine receipt status
             if quantity_ordered > 0 and quantity_received >= quantity_ordered:
@@ -578,7 +623,9 @@ def get_po_details(po_number):
                 'description': description,
                 'quantityOrdered': quantity_ordered,
                 'quantityReceived': quantity_received,
-                'receiptStatus': receipt_status
+                'receiptStatus': receipt_status,
+                'jobNumber': item_job_number,
+                'customerName': item_customer_name
             })
         
         return jsonify({
