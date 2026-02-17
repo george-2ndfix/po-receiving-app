@@ -582,10 +582,14 @@ def allocate_items():
     """Allocate items to storage location in Simpro"""
     try:
         data = request.get_json()
+        print(f"=== ALLOCATION REQUEST ===")
+        print(f"Data received: {data}")
         
         po_id = data.get('poId')
         items = data.get('items', [])
         storage_device_id = data.get('storageDeviceId')
+        print(f"PO ID: {po_id}, Storage: {storage_device_id}, Items count: {len(items)}")
+        print(f"Items: {items}")
         storage_name = data.get('storageName', 'Unknown')
         
         if not po_id or not items or not storage_device_id:
@@ -610,7 +614,9 @@ def allocate_items():
                 'Quantity': int(quantity)
             }
             
+            print(f"Calling API: PUT {allocation_url} with payload: {payload}")
             response = simpro_request('PUT', allocation_url, json=payload)
+            print(f"API Response: {response.status_code} - {response.text}")
             
             if response.status_code in (200, 201):
                 results.append({
@@ -644,6 +650,9 @@ def allocate_items():
             allocation_type='po_receive',
             verified=1 if success_count > 0 else 0
         )
+        
+        print(f"=== ALLOCATION COMPLETE ===")
+        print(f"Success count: {success_count}, Results: {results}")
         
         return jsonify({
             'success': success_count > 0,
