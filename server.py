@@ -518,21 +518,30 @@ def get_po_details(po_number):
         
         catalogs = items_response.json()
         
-        # DEBUG: Print ALL fields in first catalog item
-        if catalogs:
-            print(f"DEBUG - ALL KEYS in first catalog item: {list(catalogs[0].keys())}")
-            print(f"DEBUG - FULL catalog item: {json.dumps(catalogs[0], indent=2, default=str)}")
-        
         items = []
         for catalog in catalogs:
             catalog_id = catalog.get('Catalog', {}).get('ID')
             part_no = catalog.get('Catalog', {}).get('PartNo', '')
             description = catalog.get('Catalog', {}).get('Name', catalog.get('Description', 'Unknown Item'))
-            quantity_ordered = catalog.get('Quantity', 0)
-            quantity_received = catalog.get('QuantityReceived', 0)
+            
+            # Get quantity from allocations endpoint (quantity is not in catalog response)
+            quantity_ordered = 0
+            quantity_received = 0
+            
+            if catalog_id:
+                try:
+                    alloc_response = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/catalogs/{catalog_id}/allocations/')
+                    if alloc_response.status_code == 200:
+                        allocations = alloc_response.json()
+                        for alloc in allocations:
+                            qty_obj = alloc.get('Quantity', {})
+                            quantity_ordered += qty_obj.get('Total', 0)
+                            quantity_received += qty_obj.get('Received', 0)
+                except Exception as e:
+                    print(f"Error getting allocations for catalog {catalog_id}: {e}")
             
             # Determine receipt status
-            if quantity_received >= quantity_ordered:
+            if quantity_ordered > 0 and quantity_received >= quantity_ordered:
                 receipt_status = 'fully_receipted'
             elif quantity_received > 0:
                 receipt_status = 'partially_receipted'
@@ -899,9 +908,12 @@ def get_stock_pick_list():
 # ============================================
 # Initialize and Run
 # ============================================
+# Initialize database on module load (for gunicorn)
+print("Initializing database...")
+init_db()
+
 if __name__ == '__main__':
-    print("Initializing database...")
-    init_db()
     print("Starting PO Receiving App server...")
     print("Staff management enabled")
-    app.run(host='0.0.0.0', port=8000, debug=False)
+    port = int(os.environ.get('PORT', 8000))
+    app.run(host='0.0.0.0', port=port, debug=False)
