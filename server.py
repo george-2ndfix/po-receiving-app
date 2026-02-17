@@ -492,22 +492,27 @@ def get_po_details(po_number):
         if not orders:
             return jsonify({'error': f'PO #{po_number} not found'}), 404
         
-        po = orders[0]
-        po_id = po.get('ID')
+        po_id = orders[0].get('ID')
         
-        # Get vendor info
-        vendor_name = po.get('Vendor', {}).get('CompanyName', 'Unknown Vendor')
+        # Get full PO record (search returns minimal data)
+        full_po_response = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}')
+        if full_po_response.status_code != 200:
+            return jsonify({'error': 'Failed to get PO details'}), 500
         
-        # Get job info
-        job_id = po.get('Job', {}).get('ID')
-        job_number = None
+        po = full_po_response.json()
+        
+        # Get vendor info from full PO record
+        vendor_name = po.get('Vendor', {}).get('Name', 'Unknown Vendor')
+        
+        # Get job info from AssignedTo object
+        assigned_to = po.get('AssignedTo', {})
+        job_number = assigned_to.get('Job')
         customer_name = None
         
-        if job_id:
-            job_response = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id}/?columns=ID,Name,Customer')
+        if job_number:
+            job_response = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_number}/?columns=ID,Name,Customer')
             if job_response.status_code == 200:
                 job_data = job_response.json()
-                job_number = job_data.get('ID')
                 customer_name = job_data.get('Customer', {}).get('CompanyName')
         
         # Get PO line items (catalogs)
