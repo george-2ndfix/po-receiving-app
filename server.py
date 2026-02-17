@@ -359,7 +359,7 @@ def delete_staff(staff_id):
 # Allocation Logs Endpoint
 # ============================================
 @app.route('/api/logs', methods=['GET'])
-@manager_required
+@login_required
 def get_allocation_logs():
     """Get allocation logs (managers only)"""
     limit = request.args.get('limit', 50, type=int)
@@ -620,12 +620,33 @@ def allocate_items():
             print(f"API Response: {response.status_code} - {response.text}")
             
             if response.status_code in (200, 201):
+                # Verify the allocation was applied
+                verified = False
+                try:
+                    verify_url = f'/companies/3/vendorOrders/{po_id}/catalogs/{catalog_id}/allocations/'
+                    verify_resp = simpro_request('GET', verify_url)
+                    if verify_resp.status_code == 200:
+                        allocs = verify_resp.json()
+                        for alloc in allocs:
+                            sd = alloc.get('StorageDevice', {})
+                            if isinstance(sd, dict) and sd.get('ID') == int(storage_device_id):
+                                verified = True
+                                break
+                            elif sd == int(storage_device_id):
+                                verified = True
+                                break
+                except Exception as ve:
+                    print(f"Verification error for catalog {catalog_id}: {ve}")
+                
                 results.append({
                     'catalogId': catalog_id,
                     'success': True,
-                    'quantity': quantity
+                    'quantity': quantity,
+                    'verified': verified
                 })
                 success_count += 1
+                if not verified:
+                    print(f"WARNING: Allocation for catalog {catalog_id} could not be verified!")
             else:
                 results.append({
                     'catalogId': catalog_id,
@@ -640,6 +661,8 @@ def allocate_items():
         job_number = data.get('jobNumber', '')
         vendor_name = data.get('vendorName', '')
         
+        all_verified = all(r.get('verified', False) for r in results if r.get('success'))
+        
         log_allocation(
             staff_id=staff_id,
             staff_name=staff_name,
@@ -649,7 +672,7 @@ def allocate_items():
             items_count=success_count,
             storage_location=storage_name,
             allocation_type='po_receive',
-            verified=1 if success_count > 0 else 0
+            verified=1 if all_verified and success_count > 0 else 0
         )
         
         print(f"=== ALLOCATION COMPLETE ===")
@@ -660,7 +683,8 @@ def allocate_items():
             'results': results,
             'successCount': success_count,
             'totalItems': len(items),
-            'allocatedBy': staff_name
+            'allocatedBy': staff_name,
+            'allVerified': all_verified if success_count > 0 else False
         })
         
     except Exception as e:

@@ -97,6 +97,7 @@ const app = {
         
         // Success screen
         document.getElementById('new-po-btn')?.addEventListener('click', () => this.startNewPO());
+document.getElementById('view-history-btn')?.addEventListener('click', () => this.showLogs());
         document.getElementById('print-labels-btn')?.addEventListener('click', () => this.printLabels());
         
         // Back buttons
@@ -670,6 +671,16 @@ const app = {
         
         document.getElementById('success-staff-name').textContent = data.allocatedBy || this.currentStaff?.displayName || 'Staff';
         
+        // Show verification status
+        const verifyEl = document.getElementById('success-verification');
+        if (verifyEl) {
+            if (data.allVerified) {
+                verifyEl.innerHTML = '<span style="color: #22c55e;">✅ Verified in Simpro</span>';
+            } else {
+                verifyEl.innerHTML = '<span style="color: #f59e0b;">⚠️ Allocation sent - verification pending</span>';
+            }
+        }
+        
         // Label count
         const totalLabels = this.selectedItems.reduce((sum, item) => sum + item.quantity, 0);
         document.getElementById('label-count').textContent = `${totalLabels} labels ready to print`;
@@ -761,6 +772,7 @@ const app = {
         container.innerHTML = '';
         
         const dateStr = new Date().toLocaleDateString();
+        const storageLocation = this.selectedStorage?.name || 'Unknown';
         
         this.selectedItems.forEach(item => {
             for (let i = 0; i < item.quantity; i++) {
@@ -768,7 +780,7 @@ const app = {
                 label.className = 'label';
                 label.innerHTML = `
                     <div class="label-line1">${this.currentPO.jobNumber || 'N/A'} - ${this.currentPO.customerName || 'Customer'} - ${item.partNo || 'N/A'}</div>
-                    <div class="label-line2">${item.description} - ${dateStr}</div>
+                    <div class="label-line2">${item.description} - ${storageLocation} - ${dateStr}</div>
                 `;
                 container.appendChild(label);
             }
