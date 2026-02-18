@@ -1,4 +1,4 @@
-const CACHE_NAME = 'po-receiving-v21';
+const CACHE_NAME = 'po-receiving-v22';
 const urlsToCache = [
   '/',
   '/index.html',

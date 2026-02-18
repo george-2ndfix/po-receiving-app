@@ -1488,6 +1488,57 @@ def generate_picking_slip():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 # ============================================
+# Needs Receipting Dashboard
+# ============================================
+@app.route('/api/needs-receipting')
+@login_required
+def needs_receipting():
+    """Get allocations that may need receipting"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT DISTINCT po_number, job_number, vendor_name, storage_location,
+               MIN(created_at) as allocated_date, SUM(items_allocated) as total_items,
+               staff_name
+        FROM allocation_logs 
+        WHERE allocation_type = 'po_receive'
+        AND created_at >= datetime('now', '-30 days')
+        GROUP BY po_number
+        ORDER BY created_at DESC
+    ''')
+    items = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return jsonify({'items': items, 'count': len(items)})
+
+# ============================================
+# Mystery Box Search
+# ============================================
+@app.route('/api/search-mystery-box')
+@login_required
+def search_mystery_box():
+    """Search by packing slip or shipping number to identify mystery boxes"""
+    query = request.args.get('q', '').strip()
+    if not query:
+        return jsonify({'error': 'Search query required'}), 400
+    
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT d.*, a.storage_location, a.job_number as receipt_job
+        FROM docket_data d
+        LEFT JOIN allocation_logs a ON d.po_number = a.po_number AND a.allocation_type = 'po_receive'
+        WHERE d.packing_slip_number LIKE ? 
+        OR d.tracking_number LIKE ?
+        OR d.po_number LIKE ?
+        OR d.supplier_name LIKE ?
+        ORDER BY d.created_at DESC
+        LIMIT 20
+    ''', (f'%{query}%', f'%{query}%', f'%{query}%', f'%{query}%'))
+    results = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return jsonify({'results': results, 'count': len(results)})
+
+# ============================================
 # Initialize and Run
 # ============================================
 # Initialize database on module load (for gunicorn)

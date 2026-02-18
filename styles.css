@@ -1726,3 +1726,104 @@ footer {
     border-radius: 8px;
     margin-top: 8px;
 }
+
+/* ============================================
+   Needs Receipting Dashboard
+   ============================================ */
+.receipting-alert {
+    background: white;
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+    border: 1px solid var(--gray-200);
+}
+.alert-indicator {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 16px;
+}
+.alert-icon {
+    font-size: 24px;
+}
+.receipting-details {
+    margin-top: 12px;
+    border-top: 1px solid var(--gray-200);
+    padding-top: 12px;
+}
+.receipting-item {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--gray-100);
+    font-size: 13px;
+    align-items: center;
+}
+.receipting-item strong {
+    min-width: 100px;
+}
+.receipting-date {
+    margin-left: auto;
+    color: var(--gray-500);
+    font-size: 12px;
+}
+
+/* ============================================
+   Mystery Box Search
+   ============================================ */
+.search-box {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+}
+.search-box input {
+    flex: 1;
+    padding: 12px 16px;
+    border: 2px solid var(--gray-300);
+    border-radius: 8px;
+    font-size: 16px;
+}
+.search-box input:focus {
+    border-color: var(--primary);
+    outline: none;
+}
+.mystery-results {
+    min-height: 200px;
+}
+.mystery-result-card {
+    background: white;
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 12px;
+    border: 1px solid var(--gray-200);
+}
+.result-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    font-size: 16px;
+}
+.result-date {
+    color: var(--gray-500);
+    font-size: 13px;
+}
+.result-details {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 14px;
+    color: var(--gray-700);
+}
+.hint-text {
+    text-align: center;
+    color: var(--gray-400);
+    font-style: italic;
+    margin-top: 40px;
+}
+.no-results {
+    text-align: center;
+    color: var(--gray-500);
+    margin-top: 40px;
+}

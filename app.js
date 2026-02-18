@@ -61,6 +61,10 @@ const app = {
         document.getElementById('option-stock')?.addEventListener('click', () => this.showScreen('stock'));
         document.getElementById('option-picklist')?.addEventListener('click', () => this.showPicklist());
         document.getElementById('option-relocate')?.addEventListener('click', () => this.showScreen('relocate-source'));
+        document.getElementById('option-mystery')?.addEventListener('click', () => this.showScreen('mystery'));
+        document.getElementById('mystery-search')?.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') this.searchMysteryBox();
+        });
         
         // Relocate flow
         document.getElementById('relocate-source-dropdown')?.addEventListener('change', (e) => this.selectRelocateSource(e));
@@ -201,6 +205,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         
         this.showScreen('home');
         this.loadPicklistCount();
+        this.loadReceiptingStatus();
     },
     
     // ============================================
@@ -1524,6 +1529,88 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         this.showScreen('relocate-source');
     },
     
+    // ============================================
+    // Needs Receipting Dashboard
+    // ============================================
+    async loadReceiptingStatus() {
+        try {
+            const response = await fetch('/api/needs-receipting');
+            const data = await response.json();
+            const alertEl = document.getElementById('receipting-alert');
+            const iconEl = document.getElementById('receipting-icon');
+            const textEl = document.getElementById('receipting-text');
+            const detailsEl = document.getElementById('receipting-details');
+            
+            if (!alertEl) return;
+            alertEl.style.display = 'block';
+            
+            if (data.count === 0) {
+                iconEl.textContent = '🟢';
+                textEl.textContent = 'All allocations receipted';
+                detailsEl.style.display = 'none';
+            } else {
+                iconEl.textContent = '🔴';
+                textEl.innerHTML = `<strong>${data.count}</strong> PO(s) allocated - check receipting status`;
+                alertEl.onclick = () => {
+                    detailsEl.style.display = detailsEl.style.display === 'none' ? 'block' : 'none';
+                };
+                alertEl.style.cursor = 'pointer';
+                
+                detailsEl.innerHTML = data.items.map(item => `
+                    <div class="receipting-item">
+                        <strong>PO #${item.po_number}</strong>
+                        <span>${item.vendor_name || ''}</span>
+                        <span>Job ${item.job_number || 'N/A'}</span>
+                        <span>${item.total_items} item(s) → ${item.storage_location}</span>
+                        <span class="receipting-date">${new Date(item.allocated_date).toLocaleDateString('en-AU')}</span>
+                    </div>
+                `).join('');
+            }
+        } catch (error) {
+            console.error('Receipting status error:', error);
+        }
+    },
+
+    // ============================================
+    // Mystery Box Search
+    // ============================================
+    async searchMysteryBox() {
+        const query = document.getElementById('mystery-search').value.trim();
+        if (!query) return;
+        
+        const resultsEl = document.getElementById('mystery-results');
+        resultsEl.innerHTML = '<p class="loading">🔍 Searching...</p>';
+        
+        try {
+            const response = await fetch(`/api/search-mystery-box?q=${encodeURIComponent(query)}`);
+            const data = await response.json();
+            
+            if (data.count === 0) {
+                resultsEl.innerHTML = '<p class="no-results">❌ No matching records found</p>';
+                return;
+            }
+            
+            resultsEl.innerHTML = data.results.map(r => `
+                <div class="mystery-result-card">
+                    <div class="result-header">
+                        <strong>PO #${r.po_number || 'N/A'}</strong>
+                        <span class="result-date">${r.created_at ? new Date(r.created_at).toLocaleDateString('en-AU') : ''}</span>
+                    </div>
+                    <div class="result-details">
+                        ${r.supplier_name ? `<div>📦 Supplier: ${r.supplier_name}</div>` : ''}
+                        ${r.packing_slip_number ? `<div>📋 Packing Slip: ${r.packing_slip_number}</div>` : ''}
+                        ${r.tracking_number ? `<div>🚚 Tracking #: ${r.tracking_number}</div>` : ''}
+                        ${r.storage_location ? `<div>📍 Storage: ${r.storage_location}</div>` : ''}
+                        ${r.receipt_job ? `<div>🔨 Job: ${r.receipt_job}</div>` : ''}
+                        ${r.staff_name ? `<div>👤 Received by: ${r.staff_name}</div>` : ''}
+                    </div>
+                </div>
+            `).join('');
+        } catch (error) {
+            resultsEl.innerHTML = `<p class="error">❌ Search failed: ${error.message}</p>`;
+        }
+    },
+
     // ============================================
     // Utilities
     // ============================================
