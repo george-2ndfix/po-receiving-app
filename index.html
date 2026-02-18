@@ -432,15 +432,44 @@
             </div>
             
             <div class="photo-section">
-                <p class="photo-label">📷 Evidence Photo (optional)</p>
-                <div class="camera-box small" id="evidence-capture">
-                    <div class="camera-icon">📷</div>
-                    <p>Tap to photograph items in storage</p>
-                    <input type="file" accept="image/*" capture="environment" id="evidence-photo" hidden>
+                <p class="photo-label">📷 Delivery Photos</p>
+                
+                <!-- Photo Mode Selection -->
+                <div id="photo-mode-select" class="photo-mode-buttons">
+                    <button class="photo-mode-btn" id="photo-mode-individual" onclick="app.setPhotoMode('individual')">
+                        📸 Individual Items
+                    </button>
+                    <button class="photo-mode-btn" id="photo-mode-group" onclick="app.setPhotoMode('group')">
+                        📦 Group Photo
+                    </button>
+                    <button class="photo-mode-btn photo-mode-skip" id="photo-mode-skip" onclick="app.setPhotoMode('skip')">
+                        ⏭️ Skip Photos
+                    </button>
                 </div>
-                <div id="evidence-preview" class="photo-preview hidden">
-                    <img id="evidence-img" src="" alt="Evidence photo">
-                    <button class="remove-photo" id="remove-evidence">✕</button>
+                
+                <!-- Group Photo Mode -->
+                <div id="group-photo-section" class="hidden">
+                    <div class="camera-box small" id="evidence-capture">
+                        <div class="camera-icon">📷</div>
+                        <p>Tap to photograph all items together</p>
+                        <input type="file" accept="image/*" capture="environment" id="evidence-photo" hidden>
+                    </div>
+                    <div id="evidence-preview" class="photo-preview hidden">
+                        <img id="evidence-img" src="" alt="Evidence photo">
+                        <button class="remove-photo" id="remove-evidence">✕</button>
+                    </div>
+                </div>
+                
+                <!-- Individual Photo Mode -->
+                <div id="individual-photo-section" class="hidden">
+                    <div id="individual-photo-list" class="individual-photo-list">
+                        <!-- Populated by JS for each selected item -->
+                    </div>
+                </div>
+                
+                <!-- Upload status indicator -->
+                <div id="photo-upload-note" class="photo-upload-note hidden">
+                    📤 Photos will be uploaded to Simpro after allocation
                 </div>
             </div>
         </main>
@@ -479,7 +508,7 @@
                 <p id="success-received-by" class="detail staff-badge">Received by: <strong id="success-staff-name">Staff</strong></p>
                 <p id="success-verification" class="detail verification-status"></p>
                 <p id="success-backorder" class="detail" style="display:none;"></p>
-                <p id="success-photo" class="detail">Photo saved</p>
+                <p id="success-photo" class="detail"></p>
             </div>
             
             <div class="label-section">

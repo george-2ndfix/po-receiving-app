@@ -1081,6 +1081,98 @@ def get_stock_pick_list():
         return jsonify({'items': [], 'error': str(e)})
 
 # ============================================
+# Photo Upload Endpoint
+# ============================================
+@app.route('/api/upload-photos', methods=['POST'])
+@login_required
+def upload_photos():
+    """Upload delivery photos to Simpro job attachments"""
+    try:
+        data = request.get_json()
+        po_number = data.get('poNumber', 'Unknown')
+        job_ids = data.get('jobIds', [])
+        photos = data.get('photos', [])
+        
+        if not photos or not job_ids:
+            return jsonify({'success': False, 'error': 'No photos or job IDs provided'})
+        
+        results = []
+        date_str = datetime.now().strftime('%Y-%m-%d')
+        
+        for job_id in job_ids:
+            if not job_id or str(job_id) == 'N/A':
+                continue
+                
+            # Step 1: Get existing folders to check for "Materials Received"
+            folder_id = None
+            try:
+                folders_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id}/attachments/folders/')
+                if folders_resp.status_code == 200:
+                    folders = folders_resp.json()
+                    for folder in folders:
+                        if folder.get('Name', '').strip().lower() == 'materials received':
+                            folder_id = folder.get('ID')
+                            break
+            except Exception as fe:
+                print(f"Error checking folders for job {job_id}: {fe}")
+            
+            # Step 2: Create folder if not exists
+            if not folder_id:
+                try:
+                    create_resp = simpro_request('POST', f'/companies/{COMPANY_ID}/jobs/{job_id}/attachments/folders/',
+                                                 json={"Name": "Materials Received"})
+                    if create_resp.status_code in (200, 201):
+                        folder_data = create_resp.json()
+                        folder_id = folder_data.get('ID')
+                        print(f"Created 'Materials Received' folder (ID: {folder_id}) for job {job_id}")
+                    else:
+                        print(f"Failed to create folder for job {job_id}: {create_resp.status_code} {create_resp.text}")
+                except Exception as cfe:
+                    print(f"Error creating folder for job {job_id}: {cfe}")
+            
+            # Step 3: Upload each photo
+            for photo in photos:
+                base64_data = photo.get('base64', '')
+                filename = photo.get('filename', f'PO_{po_number}_{date_str}.jpg')
+                
+                # Strip data URL prefix if present
+                if ',' in base64_data:
+                    base64_data = base64_data.split(',')[1]
+                
+                upload_payload = {
+                    "FileName": filename,
+                    "Public": True,
+                    "Data": base64_data
+                }
+                
+                if folder_id:
+                    upload_payload["Folder"] = {"ID": folder_id}
+                
+                try:
+                    upload_resp = simpro_request('POST', f'/companies/{COMPANY_ID}/jobs/{job_id}/attachments/files/',
+                                                 json=upload_payload)
+                    if upload_resp.status_code in (200, 201):
+                        results.append({'jobId': job_id, 'filename': filename, 'success': True})
+                        print(f"Uploaded {filename} to job {job_id}")
+                    else:
+                        results.append({'jobId': job_id, 'filename': filename, 'success': False, 'error': f'Status {upload_resp.status_code}'})
+                        print(f"Failed upload {filename} to job {job_id}: {upload_resp.status_code} {upload_resp.text}")
+                except Exception as ue:
+                    results.append({'jobId': job_id, 'filename': filename, 'success': False, 'error': str(ue)})
+        
+        success_count = sum(1 for r in results if r.get('success'))
+        return jsonify({
+            'success': success_count > 0,
+            'uploaded': success_count,
+            'total': len(results),
+            'results': results
+        })
+        
+    except Exception as e:
+        print(f"Photo upload error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# ============================================
 # Backorder Endpoints
 # ============================================
 @app.route('/api/backorder', methods=['POST'])

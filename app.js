@@ -23,6 +23,10 @@ const app = {
     staffList: [],
     editingStaffId: null,
     
+    // Photo mode state
+    photoMode: null, // 'individual', 'group', or 'skip'
+    individualPhotos: [], // [{itemIndex, description, base64}]
+    
     // Relocate state
     relocateSourceId: null,
     relocateSourceName: null,
@@ -762,6 +766,64 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                     }
                 }
                 
+                // Upload photos to Simpro
+                let photoUploadResult = null;
+                if (this.photoMode && this.photoMode !== 'skip') {
+                    try {
+                        document.getElementById('processing-status').textContent = 'Uploading photos to Simpro...';
+                        
+                        const photos = [];
+                        const dateStr = new Date().toISOString().split('T')[0];
+                        
+                        if (this.photoMode === 'group' && this.evidencePhoto) {
+                            photos.push({
+                                base64: this.evidencePhoto,
+                                filename: `PO_${this.currentPO.poNumber}_delivery_${dateStr}.jpg`
+                            });
+                        } else if (this.photoMode === 'individual') {
+                            this.individualPhotos.forEach(p => {
+                                const safeName = (p.partNo || p.description || 'item').replace(/[^a-zA-Z0-9]/g, '_').substring(0, 30);
+                                photos.push({
+                                    base64: p.base64,
+                                    filename: `PO_${this.currentPO.poNumber}_${safeName}_${dateStr}.jpg`
+                                });
+                            });
+                        }
+                        
+                        if (photos.length > 0) {
+                            // Collect unique job IDs from selected items
+                            const jobIds = [...new Set(
+                                this.selectedItems
+                                    .map(item => item.jobNumber)
+                                    .filter(j => j && j !== 'N/A')
+                            )];
+                            
+                            // Fallback to PO-level job
+                            if (jobIds.length === 0 && this.currentPO.jobNumber && this.currentPO.jobNumber !== 'N/A') {
+                                jobIds.push(this.currentPO.jobNumber);
+                            }
+                            
+                            if (jobIds.length > 0) {
+                                const uploadResp = await fetch('/api/upload-photos', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                        poNumber: this.currentPO.poNumber,
+                                        jobIds: jobIds,
+                                        photos: photos
+                                    })
+                                });
+                                photoUploadResult = await uploadResp.json();
+                            }
+                        }
+                    } catch (photoErr) {
+                        console.error('Photo upload error:', photoErr);
+                    }
+                }
+                
+                // Pass photo result to success screen
+                data.photoUploadResult = photoUploadResult;
+                
                 this.showSuccessScreen(data);
             } else {
                 alert('Allocation failed: ' + (data.error || 'Unknown error'));
@@ -811,6 +873,21 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             }
         }
         
+        // Photo upload status
+        const photoEl = document.getElementById('success-photo');
+        if (data.photoUploadResult) {
+            if (data.photoUploadResult.success) {
+                photoEl.innerHTML = `<span style="color: #22c55e;">📸 ${data.photoUploadResult.uploaded} photo(s) uploaded to Simpro</span>`;
+            } else {
+                photoEl.innerHTML = `<span style="color: #f59e0b;">⚠️ Photo upload: ${data.photoUploadResult.error || 'partial failure'}</span>`;
+            }
+            photoEl.style.display = 'block';
+        } else if (this.photoMode === 'skip' || !this.photoMode) {
+            photoEl.style.display = 'none';
+        } else {
+            photoEl.style.display = 'none';
+        }
+        
         // Label count
         const totalLabels = this.selectedItems.reduce((sum, item) => sum + item.quantity, 0);
         document.getElementById('label-count').textContent = `${totalLabels} labels ready to print`;
@@ -825,6 +902,9 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         this.docketPhoto = null;
         this.docketOCRData = null;
         this.backorderItems = [];
+        this.photoMode = null;
+        this.individualPhotos = [];
+        this.evidencePhoto = null;
         document.getElementById('po-number').value = '';
         document.getElementById('storage-dropdown').value = '';
         document.getElementById('allocate-btn').disabled = true;
@@ -955,6 +1035,106 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         }
     },
     
+    // ============================================
+    // Photo Mode Selection
+    // ============================================
+    setPhotoMode(mode) {
+        this.photoMode = mode;
+        
+        // Update button styles
+        document.querySelectorAll('.photo-mode-btn').forEach(btn => btn.classList.remove('active'));
+        
+        const groupSection = document.getElementById('group-photo-section');
+        const individualSection = document.getElementById('individual-photo-section');
+        const uploadNote = document.getElementById('photo-upload-note');
+        
+        groupSection.classList.add('hidden');
+        individualSection.classList.add('hidden');
+        
+        if (mode === 'group') {
+            document.getElementById('photo-mode-group').classList.add('active');
+            groupSection.classList.remove('hidden');
+            uploadNote.classList.remove('hidden');
+        } else if (mode === 'individual') {
+            document.getElementById('photo-mode-individual').classList.add('active');
+            this.buildIndividualPhotoList();
+            individualSection.classList.remove('hidden');
+            uploadNote.classList.remove('hidden');
+        } else {
+            document.getElementById('photo-mode-skip').classList.add('active');
+            uploadNote.classList.add('hidden');
+            this.individualPhotos = [];
+            this.evidencePhoto = null;
+        }
+    },
+
+    buildIndividualPhotoList() {
+        this.individualPhotos = [];
+        const container = document.getElementById('individual-photo-list');
+        
+        container.innerHTML = this.selectedItems.map((item, index) => {
+            return `
+                <div class="individual-photo-item" id="photo-item-${index}">
+                    <div class="photo-item-info">
+                        <span class="photo-item-name">${item.description || 'Item ' + (index + 1)}</span>
+                        <span class="photo-item-qty">Qty: ${item.quantity}</span>
+                    </div>
+                    <div class="photo-item-actions">
+                        <div class="photo-item-capture" id="photo-capture-${index}">
+                            <button class="btn btn-secondary btn-small" onclick="document.getElementById('photo-input-${index}').click()">
+                                📷 Photo
+                            </button>
+                            <input type="file" accept="image/*" capture="environment" id="photo-input-${index}" hidden
+                                onchange="app.handleIndividualPhoto(${index}, event)">
+                        </div>
+                        <div class="photo-item-preview hidden" id="photo-preview-${index}">
+                            <img id="photo-img-${index}" src="" alt="Item photo" class="photo-thumbnail">
+                            <button class="remove-photo-small" onclick="app.removeIndividualPhoto(${index})">✕</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    },
+
+    handleIndividualPhoto(index, event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const base64 = e.target.result;
+            
+            // Store photo
+            const existing = this.individualPhotos.findIndex(p => p.itemIndex === index);
+            const photoData = {
+                itemIndex: index,
+                description: this.selectedItems[index]?.description || 'Item',
+                partNo: this.selectedItems[index]?.partNo || '',
+                base64: base64
+            };
+            
+            if (existing >= 0) {
+                this.individualPhotos[existing] = photoData;
+            } else {
+                this.individualPhotos.push(photoData);
+            }
+            
+            // Show preview
+            document.getElementById(`photo-img-${index}`).src = base64;
+            document.getElementById(`photo-preview-${index}`).classList.remove('hidden');
+            document.getElementById(`photo-capture-${index}`).classList.add('hidden');
+        };
+        reader.readAsDataURL(file);
+    },
+
+    removeIndividualPhoto(index) {
+        this.individualPhotos = this.individualPhotos.filter(p => p.itemIndex !== index);
+        document.getElementById(`photo-preview-${index}`).classList.add('hidden');
+        document.getElementById(`photo-capture-${index}`).classList.remove('hidden');
+        document.getElementById(`photo-input-${index}`).value = '';
+    },
+
     handleEvidencePhoto(event) {
         const file = event.target.files[0];
         if (file) {
