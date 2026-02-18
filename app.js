@@ -522,6 +522,23 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             ? `Job ${this.currentPO.jobNumber}${this.currentPO.customerName ? ' - ' + this.currentPO.customerName : ''}`
             : 'No job linked';
         
+        // Display due date
+        const dueDateEl = document.getElementById('po-due-date');
+        if (dueDateEl) {
+            if (this.currentPO.dueDate) {
+                const dueDate = new Date(this.currentPO.dueDate);
+                const today = new Date();
+                today.setHours(0,0,0,0);
+                const isOverdue = dueDate < today;
+                const formatted = dueDate.toLocaleDateString('en-AU', {day: 'numeric', month: 'short', year: 'numeric'});
+                dueDateEl.innerHTML = `📅 Due: <strong>${formatted}</strong>${isOverdue ? ' <span class="overdue">⚠️ OVERDUE</span>' : ''}`;
+                dueDateEl.className = 'po-due-date' + (isOverdue ? ' overdue' : '');
+            } else {
+                dueDateEl.innerHTML = '📅 Due: <em>Not set</em>';
+                dueDateEl.className = 'po-due-date no-date';
+            }
+        }
+        
         // Render items with editable quantities and backorder buttons
         const itemsList = document.getElementById('items-list');
         this.selectedItems = [];

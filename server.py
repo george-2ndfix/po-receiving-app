@@ -685,6 +685,8 @@ def get_po_details(po_number):
             'jobNumber': job_number,
             'customerName': customer_name,
             'status': po.get('Stage', 'Unknown'),
+            'dueDate': po.get('DueDate'),
+            'orderDate': po.get('OrderDate'),
             'items': items
         })
         

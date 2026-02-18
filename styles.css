@@ -266,6 +266,22 @@ footer {
     margin-top: 4px;
 }
 
+.po-due-date {
+    font-size: 14px;
+    margin-top: 6px;
+    color: var(--gray-700);
+}
+.po-due-date.overdue strong {
+    color: #dc2626;
+}
+.po-due-date .overdue {
+    color: #dc2626;
+    font-weight: 600;
+}
+.po-due-date.no-date em {
+    color: var(--gray-400);
+}
+
 /* Select All Bar */
 .select-all-bar {
     background: var(--gray-50);
