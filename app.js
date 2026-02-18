@@ -809,6 +809,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                                     headers: { 'Content-Type': 'application/json' },
                                     body: JSON.stringify({
                                         poNumber: this.currentPO.poNumber,
+                                        poSimproId: this.currentPO.poId,
                                         jobIds: jobIds,
                                         photos: photos
                                     })
@@ -877,7 +878,14 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         const photoEl = document.getElementById('success-photo');
         if (data.photoUploadResult) {
             if (data.photoUploadResult.success) {
-                photoEl.innerHTML = `<span style="color: #22c55e;">📸 ${data.photoUploadResult.uploaded} photo(s) uploaded to Simpro</span>`;
+                const jobCount = data.photoUploadResult.jobUploads || 0;
+                const poCount = data.photoUploadResult.poUploads || 0;
+                let uploadMsg = '📸 Photos uploaded to Simpro: ';
+                const parts = [];
+                if (jobCount > 0) parts.push(`${jobCount} to Job`);
+                if (poCount > 0) parts.push(`${poCount} to PO`);
+                uploadMsg += parts.join(', ') || `${data.photoUploadResult.uploaded} total`;
+                photoEl.innerHTML = `<span style="color: #22c55e;">${uploadMsg}</span>`;
             } else {
                 photoEl.innerHTML = `<span style="color: #f59e0b;">⚠️ Photo upload: ${data.photoUploadResult.error || 'partial failure'}</span>`;
             }

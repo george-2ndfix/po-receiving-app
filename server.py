@@ -1086,19 +1086,22 @@ def get_stock_pick_list():
 @app.route('/api/upload-photos', methods=['POST'])
 @login_required
 def upload_photos():
-    """Upload delivery photos to Simpro job attachments"""
+    """Upload delivery photos to Simpro job AND PO attachments"""
     try:
         data = request.get_json()
         po_number = data.get('poNumber', 'Unknown')
+        po_simpro_id = data.get('poSimproId')  # Internal Simpro PO ID for attachment
         job_ids = data.get('jobIds', [])
         photos = data.get('photos', [])
         
-        if not photos or not job_ids:
-            return jsonify({'success': False, 'error': 'No photos or job IDs provided'})
+        if not photos or (not job_ids and not po_simpro_id):
+            return jsonify({'success': False, 'error': 'No photos or destinations provided'})
         
         results = []
+        po_results = []
         date_str = datetime.now().strftime('%Y-%m-%d')
         
+        # ---- PART 1: Upload to Job attachments ----
         for job_id in job_ids:
             if not job_id or str(job_id) == 'N/A':
                 continue
@@ -1130,12 +1133,11 @@ def upload_photos():
                 except Exception as cfe:
                     print(f"Error creating folder for job {job_id}: {cfe}")
             
-            # Step 3: Upload each photo
+            # Step 3: Upload each photo to job
             for photo in photos:
                 base64_data = photo.get('base64', '')
                 filename = photo.get('filename', f'PO_{po_number}_{date_str}.jpg')
                 
-                # Strip data URL prefix if present
                 if ',' in base64_data:
                     base64_data = base64_data.split(',')[1]
                 
@@ -1152,18 +1154,81 @@ def upload_photos():
                     upload_resp = simpro_request('POST', f'/companies/{COMPANY_ID}/jobs/{job_id}/attachments/files/',
                                                  json=upload_payload)
                     if upload_resp.status_code in (200, 201):
-                        results.append({'jobId': job_id, 'filename': filename, 'success': True})
+                        results.append({'target': f'Job {job_id}', 'filename': filename, 'success': True})
                         print(f"Uploaded {filename} to job {job_id}")
                     else:
-                        results.append({'jobId': job_id, 'filename': filename, 'success': False, 'error': f'Status {upload_resp.status_code}'})
+                        results.append({'target': f'Job {job_id}', 'filename': filename, 'success': False, 'error': f'Status {upload_resp.status_code}'})
                         print(f"Failed upload {filename} to job {job_id}: {upload_resp.status_code} {upload_resp.text}")
                 except Exception as ue:
-                    results.append({'jobId': job_id, 'filename': filename, 'success': False, 'error': str(ue)})
+                    results.append({'target': f'Job {job_id}', 'filename': filename, 'success': False, 'error': str(ue)})
+        
+        # ---- PART 2: Upload to PO attachments ----
+        if po_simpro_id:
+            # Get or create "Delivery Photos" folder on PO
+            po_folder_id = None
+            try:
+                po_folders_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_simpro_id}/attachments/folders/')
+                if po_folders_resp.status_code == 200:
+                    po_folders = po_folders_resp.json()
+                    for folder in po_folders:
+                        if folder.get('Name', '').strip().lower() == 'delivery photos':
+                            po_folder_id = folder.get('ID')
+                            break
+            except Exception as fe:
+                print(f"Error checking PO folders for PO {po_simpro_id}: {fe}")
+            
+            if not po_folder_id:
+                try:
+                    create_resp = simpro_request('POST', f'/companies/{COMPANY_ID}/vendorOrders/{po_simpro_id}/attachments/folders/',
+                                                 json={"Name": "Delivery Photos"})
+                    if create_resp.status_code in (200, 201):
+                        po_folder_data = create_resp.json()
+                        po_folder_id = po_folder_data.get('ID')
+                        print(f"Created 'Delivery Photos' folder (ID: {po_folder_id}) for PO {po_simpro_id}")
+                except Exception as cfe:
+                    print(f"Error creating PO folder for PO {po_simpro_id}: {cfe}")
+            
+            # Upload each photo to PO
+            for photo in photos:
+                base64_data = photo.get('base64', '')
+                filename = photo.get('filename', f'PO_{po_number}_{date_str}.jpg')
+                
+                if ',' in base64_data:
+                    base64_data = base64_data.split(',')[1]
+                
+                po_upload_payload = {
+                    "FileName": filename,
+                    "Public": True,
+                    "Data": base64_data
+                }
+                
+                if po_folder_id:
+                    po_upload_payload["Folder"] = {"ID": po_folder_id}
+                
+                try:
+                    po_upload_resp = simpro_request('POST', f'/companies/{COMPANY_ID}/vendorOrders/{po_simpro_id}/attachments/files/',
+                                                     json=po_upload_payload)
+                    if po_upload_resp.status_code in (200, 201):
+                        results.append({'target': f'PO {po_number}', 'filename': filename, 'success': True})
+                        po_results.append(True)
+                        print(f"Uploaded {filename} to PO {po_simpro_id}")
+                    else:
+                        results.append({'target': f'PO {po_number}', 'filename': filename, 'success': False, 'error': f'Status {po_upload_resp.status_code}'})
+                        po_results.append(False)
+                        print(f"Failed upload {filename} to PO {po_simpro_id}: {po_upload_resp.status_code} {po_upload_resp.text}")
+                except Exception as ue:
+                    results.append({'target': f'PO {po_number}', 'filename': filename, 'success': False, 'error': str(ue)})
+                    po_results.append(False)
         
         success_count = sum(1 for r in results if r.get('success'))
+        job_uploads = sum(1 for r in results if r.get('success') and r.get('target', '').startswith('Job'))
+        po_uploads = sum(1 for r in results if r.get('success') and r.get('target', '').startswith('PO'))
+        
         return jsonify({
             'success': success_count > 0,
             'uploaded': success_count,
+            'jobUploads': job_uploads,
+            'poUploads': po_uploads,
             'total': len(results),
             'results': results
         })
