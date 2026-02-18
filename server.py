@@ -122,18 +122,29 @@ def init_db():
     
     conn.commit()
     
-    # Check if any admin exists, if not create default
-    cursor.execute("SELECT COUNT(*) FROM staff WHERE role = 'admin'")
-    if cursor.fetchone()[0] == 0:
-        # Create default admin (George)
-        default_password = hash_password('2ndFix2026')
-        cursor.execute('''
-            INSERT INTO staff (username, display_name, password_hash, role, active)
-            VALUES (?, ?, ?, ?, ?)
-        ''', ('george', 'George', default_password, 'admin', 1))
-        conn.commit()
-        print("Created default admin account: george")
+    # Seed all staff accounts (survives Render restarts)
+    # Each staff member is created if they don't already exist
+    default_password = hash_password('2ndFix2026')
+    staff_seed = [
+        ('george', 'George', 'admin'),
+        ('jim', 'Jim', 'manager'),
+        ('cherie', 'Cherie', 'manager'),
+        ('tom', 'Tom', 'manager'),
+        ('tyrese', 'Tyrese', 'staff'),
+        ('mik', 'Mik', 'staff'),
+        ('ryan', 'Ryan', 'staff'),
+    ]
     
+    for username, display_name, role in staff_seed:
+        cursor.execute("SELECT COUNT(*) FROM staff WHERE username = ?", (username,))
+        if cursor.fetchone()[0] == 0:
+            cursor.execute('''
+                INSERT INTO staff (username, display_name, password_hash, role, active)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (username, display_name, hash_password('2ndFix2026'), role, 1))
+            print(f"Created staff account: {username} ({role})")
+    
+    conn.commit()
     conn.close()
 
 def hash_password(password):
