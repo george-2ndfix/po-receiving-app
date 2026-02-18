@@ -20,6 +20,9 @@
     
     <link rel="stylesheet" href="styles.css">
     
+    <!-- Tesseract.js OCR -->
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    
     <!-- Register Service Worker -->
     <script>
         if ('serviceWorker' in navigator) {
@@ -223,6 +226,12 @@
                 <p>Tap to photograph<br>delivery docket</p>
                 <input type="file" accept="image/*" capture="environment" id="docket-photo" hidden>
             </div>
+            
+            <div id="ocr-progress" class="ocr-progress">
+                <div class="spinner-small"></div>
+                <p id="ocr-status-text">Scanning document...</p>
+            </div>
+            <div id="ocr-result" class="ocr-result" style="display:none;"></div>
             
             <div class="divider">
                 <span>— OR —</span>
@@ -469,6 +478,7 @@
                 <p id="success-summary">0 items → Storage</p>
                 <p id="success-received-by" class="detail staff-badge">Received by: <strong id="success-staff-name">Staff</strong></p>
                 <p id="success-verification" class="detail verification-status"></p>
+                <p id="success-backorder" class="detail" style="display:none;"></p>
                 <p id="success-photo" class="detail">Photo saved</p>
             </div>
             

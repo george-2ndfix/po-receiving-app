@@ -81,6 +81,45 @@ def init_db():
         )
     ''')
     
+    # Backorder items table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS backorder_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            po_id TEXT NOT NULL,
+            po_number TEXT NOT NULL,
+            catalog_id INTEGER NOT NULL,
+            description TEXT,
+            part_no TEXT,
+            quantity_backordered INTEGER NOT NULL,
+            job_number TEXT,
+            customer_name TEXT,
+            vendor_name TEXT,
+            vendor_email TEXT,
+            staff_id INTEGER,
+            staff_name TEXT,
+            status TEXT DEFAULT 'pending',
+            created_at TEXT DEFAULT (datetime('now')),
+            resolved_at TEXT
+        )
+    ''')
+    
+    # Docket OCR data table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS docket_data (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            po_id TEXT,
+            po_number TEXT,
+            supplier_name TEXT,
+            packing_slip_number TEXT,
+            tracking_number TEXT,
+            delivery_date TEXT,
+            raw_ocr_text TEXT,
+            staff_id INTEGER,
+            staff_name TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        )
+    ''')
+    
     conn.commit()
     
     # Check if any admin exists, if not create default
@@ -1029,6 +1068,102 @@ def get_stock_pick_list():
         
     except Exception as e:
         return jsonify({'items': [], 'error': str(e)})
+
+# ============================================
+# Backorder Endpoints
+# ============================================
+@app.route('/api/backorder', methods=['POST'])
+@login_required
+def save_backorder_items():
+    """Save backorder items"""
+    try:
+        data = request.get_json()
+        items = data.get('items', [])
+        po_id = data.get('poId', '')
+        po_number = data.get('poNumber', '')
+        vendor_name = data.get('vendorName', '')
+        staff_id = session.get('staff_id')
+        staff_name = session.get('display_name', 'Unknown')
+        
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        saved_count = 0
+        for item in items:
+            cursor.execute('''
+                INSERT INTO backorder_items 
+                (po_id, po_number, catalog_id, description, part_no, quantity_backordered, 
+                 job_number, customer_name, vendor_name, staff_id, staff_name)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                po_id, po_number, item.get('catalogId'),
+                item.get('description', ''), item.get('partNo', ''),
+                item.get('quantity', 0), item.get('jobNumber', ''),
+                item.get('customerName', ''), vendor_name,
+                staff_id, staff_name
+            ))
+            saved_count += 1
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'savedCount': saved_count})
+    except Exception as e:
+        print(f"Backorder save error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/backorder', methods=['GET'])
+@login_required
+def get_backorder_items():
+    """Get backorder items"""
+    try:
+        status = request.args.get('status', 'pending')
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT * FROM backorder_items 
+            WHERE status = ?
+            ORDER BY created_at DESC
+        ''', (status,))
+        items = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        return jsonify({'items': items, 'count': len(items)})
+    except Exception as e:
+        print(f"Backorder list error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# ============================================
+# Docket Data Endpoints
+# ============================================
+@app.route('/api/docket-data', methods=['POST'])
+@login_required
+def save_docket_data():
+    """Save OCR extraction results from docket photo"""
+    try:
+        data = request.get_json()
+        staff_id = session.get('staff_id')
+        staff_name = session.get('display_name', 'Unknown')
+        
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO docket_data 
+            (po_id, po_number, supplier_name, packing_slip_number, 
+             tracking_number, delivery_date, raw_ocr_text, staff_id, staff_name)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            data.get('poId', ''), data.get('poNumber', ''),
+            data.get('supplierName', ''), data.get('packingSlipNumber', ''),
+            data.get('trackingNumber', ''), data.get('deliveryDate', ''),
+            data.get('rawOcrText', ''), staff_id, staff_name
+        ))
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        print(f"Docket data save error: {e}")
+        return jsonify({'error': str(e)}), 500
 
 # ============================================
 # Initialize and Run

@@ -13,6 +13,11 @@ const app = {
     storageLocations: [],
     picklistItems: [],
     
+    // OCR + Backorder state
+    docketPhoto: null,
+    docketOCRData: null,
+    backorderItems: [],
+    
     // Staff state
     currentStaff: null,
     staffList: [],
@@ -513,15 +518,17 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             ? `Job ${this.currentPO.jobNumber}${this.currentPO.customerName ? ' - ' + this.currentPO.customerName : ''}`
             : 'No job linked';
         
-        // Render items
+        // Render items with editable quantities and backorder buttons
         const itemsList = document.getElementById('items-list');
         this.selectedItems = [];
+        this.backorderItems = [];
         
         itemsList.innerHTML = this.currentPO.items.map((item, index) => {
             const statusClass = item.receiptStatus === 'fully_receipted' ? 'receipted' 
                 : item.receiptStatus === 'partially_receipted' ? 'partial' : 'pending';
             const statusText = item.receiptStatus === 'fully_receipted' ? 'Fully receipted'
                 : item.receiptStatus === 'partially_receipted' ? 'Partially receipted' : 'Not yet receipted';
+            const remaining = item.quantityOrdered - item.quantityReceived;
             
             return `
                 <div class="item-card ${statusClass}" data-index="${index}" data-catalog-id="${item.catalogId}">
@@ -539,6 +546,15 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                         </div>
                         <div class="item-status ${statusClass}">${statusText}</div>
                     </div>
+                    <div class="item-qty-controls">
+                        <label class="qty-label">Qty:</label>
+                        <input type="number" class="qty-input" id="qty-${index}" 
+                               min="0" max="${remaining}" value="${remaining}"
+                               onchange="app.updateItemQty(${index})" disabled>
+                        <button class="backorder-btn" onclick="app.toggleBackorder(${index})" title="Mark as backordered">
+                            BO
+                        </button>
+                    </div>
                 </div>
             `;
         }).join('');
@@ -550,22 +566,70 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
     toggleItem(index) {
         const item = this.currentPO.items[index];
         const idx = this.selectedItems.findIndex(i => i.index === index);
+        const qtyInput = document.getElementById(`qty-${index}`);
+        const remaining = item.quantityOrdered - item.quantityReceived;
         
         if (idx >= 0) {
             this.selectedItems.splice(idx, 1);
+            if (qtyInput) { qtyInput.disabled = true; }
         } else {
+            const qty = qtyInput ? parseInt(qtyInput.value) || remaining : remaining;
             this.selectedItems.push({
                 index,
                 catalogId: item.catalogId,
                 description: item.description,
                 partNo: item.partNo,
-                quantity: item.quantityOrdered - item.quantityReceived,
+                quantity: qty,
                 jobNumber: item.jobNumber,
                 customerName: item.customerName
             });
+            if (qtyInput) { qtyInput.disabled = false; }
         }
         
         this.updateSelectionCount();
+    },
+    
+    updateItemQty(index) {
+        const item = this.currentPO.items[index];
+        const qtyInput = document.getElementById(`qty-${index}`);
+        if (!qtyInput) return;
+        
+        const remaining = item.quantityOrdered - item.quantityReceived;
+        let qty = parseInt(qtyInput.value) || 0;
+        if (qty < 0) qty = 0;
+        if (qty > remaining) qty = remaining;
+        qtyInput.value = qty;
+        
+        const sel = this.selectedItems.find(i => i.index === index);
+        if (sel) {
+            sel.quantity = qty;
+        }
+    },
+    
+    toggleBackorder(index) {
+        const item = this.currentPO.items[index];
+        const btn = document.querySelector(`.item-card[data-index="${index}"] .backorder-btn`);
+        const card = document.querySelector(`.item-card[data-index="${index}"]`);
+        const boIdx = this.backorderItems.findIndex(i => i.index === index);
+        
+        if (boIdx >= 0) {
+            this.backorderItems.splice(boIdx, 1);
+            btn?.classList.remove('active');
+            card?.classList.remove('backordered');
+        } else {
+            const remaining = item.quantityOrdered - item.quantityReceived;
+            this.backorderItems.push({
+                index,
+                catalogId: item.catalogId,
+                description: item.description,
+                partNo: item.partNo,
+                quantity: remaining,
+                jobNumber: item.jobNumber,
+                customerName: item.customerName
+            });
+            btn?.classList.add('active');
+            card?.classList.add('backordered');
+        }
     },
     
     toggleSelectAll(event) {
@@ -576,17 +640,23 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         
         checkboxes.forEach((cb, index) => {
             cb.checked = checked;
+            const qtyInput = document.getElementById(`qty-${index}`);
             if (checked) {
                 const item = this.currentPO.items[index];
+                const remaining = item.quantityOrdered - item.quantityReceived;
+                const qty = qtyInput ? parseInt(qtyInput.value) || remaining : remaining;
                 this.selectedItems.push({
                     index,
                     catalogId: item.catalogId,
                     description: item.description,
                     partNo: item.partNo,
-                    quantity: item.quantityOrdered - item.quantityReceived,
+                    quantity: qty,
                     jobNumber: item.jobNumber,
                     customerName: item.customerName
                 });
+                if (qtyInput) { qtyInput.disabled = false; }
+            } else {
+                if (qtyInput) { qtyInput.disabled = true; }
             }
         });
         
@@ -657,6 +727,41 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             const data = await response.json();
             
             if (data.success) {
+                // Save backorder items if any
+                if (this.backorderItems.length > 0) {
+                    try {
+                        await fetch('/api/backorder', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                poId: this.currentPO.poId,
+                                poNumber: this.currentPO.poNumber,
+                                vendorName: this.currentPO.vendorName,
+                                items: this.backorderItems
+                            })
+                        });
+                    } catch (boErr) {
+                        console.error('Backorder save error:', boErr);
+                    }
+                }
+                
+                // Save docket OCR data if available
+                if (this.docketOCRData) {
+                    try {
+                        await fetch('/api/docket-data', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                poId: this.currentPO.poId,
+                                poNumber: this.currentPO.poNumber,
+                                ...this.docketOCRData
+                            })
+                        });
+                    } catch (dErr) {
+                        console.error('Docket data save error:', dErr);
+                    }
+                }
+                
                 this.showSuccessScreen(data);
             } else {
                 alert('Allocation failed: ' + (data.error || 'Unknown error'));
@@ -695,6 +800,17 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             verifyEl.innerHTML = statusHtml;
         }
         
+        // Show backorder info
+        const boEl = document.getElementById('success-backorder');
+        if (boEl) {
+            if (this.backorderItems.length > 0) {
+                boEl.style.display = 'block';
+                boEl.innerHTML = `<span style="color: #f59e0b;">⚠️ ${this.backorderItems.length} item(s) marked as backordered</span>`;
+            } else {
+                boEl.style.display = 'none';
+            }
+        }
+        
         // Label count
         const totalLabels = this.selectedItems.reduce((sum, item) => sum + item.quantity, 0);
         document.getElementById('label-count').textContent = `${totalLabels} labels ready to print`;
@@ -706,10 +822,18 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         this.currentPO = null;
         this.selectedItems = [];
         this.selectedStorage = null;
+        this.docketPhoto = null;
+        this.docketOCRData = null;
+        this.backorderItems = [];
         document.getElementById('po-number').value = '';
         document.getElementById('storage-dropdown').value = '';
         document.getElementById('allocate-btn').disabled = true;
         document.getElementById('select-all').checked = false;
+        // Reset OCR UI
+        const ocrProgress = document.getElementById('ocr-progress');
+        const ocrResult = document.getElementById('ocr-result');
+        if (ocrProgress) ocrProgress.classList.remove('active');
+        if (ocrResult) ocrResult.style.display = 'none';
         this.showScreen('scan');
     },
     
@@ -748,11 +872,86 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
     // ============================================
     // Photos
     // ============================================
-    handleDocketPhoto(event) {
+    async handleDocketPhoto(event) {
         const file = event.target.files[0];
-        if (file) {
-            // For now just show PO input - OCR would extract PO number
-            this.showStatus('scan-status', 'Photo captured. Enter PO number to continue.', 'success');
+        if (!file) return;
+        
+        // Store docket photo as base64
+        const reader = new FileReader();
+        reader.onload = (e) => { this.docketPhoto = e.target.result; };
+        reader.readAsDataURL(file);
+        
+        // Show OCR progress
+        const ocrProgress = document.getElementById('ocr-progress');
+        const ocrResult = document.getElementById('ocr-result');
+        const ocrStatusText = document.getElementById('ocr-status-text');
+        ocrProgress.classList.add('active');
+        ocrResult.style.display = 'none';
+        ocrStatusText.textContent = 'Scanning document...';
+        
+        try {
+            // Use Tesseract.js to OCR the image
+            const result = await Tesseract.recognize(file, 'eng', {
+                logger: m => {
+                    if (m.status === 'recognizing text') {
+                        const pct = Math.round((m.progress || 0) * 100);
+                        ocrStatusText.textContent = `Scanning document... ${pct}%`;
+                    }
+                }
+            });
+            
+            const text = result.data.text || '';
+            console.log('OCR text:', text);
+            
+            // Extract PO number - look for patterns
+            let poNumber = null;
+            const poPatterns = [
+                /(?:PO|P\.O\.?|Purchase\s*Order|Order\s*No\.?)\s*[#:]?\s*(\d{4,6})/i,
+                /\b(2\d{4})\b/  // 5-digit numbers starting with 2 (like 20xxx)
+            ];
+            
+            for (const pattern of poPatterns) {
+                const match = text.match(pattern);
+                if (match) {
+                    poNumber = match[1];
+                    break;
+                }
+            }
+            
+            // Extract other data
+            const supplierMatch = text.match(/(?:Supplier|Vendor|From|Company)[:\s]+([A-Za-z][A-Za-z\s&'.,-]+)/i);
+            const slipMatch = text.match(/(?:Packing\s*Slip|Slip\s*No|Docket\s*No|Invoice\s*No)[.:\s#]*(\S+)/i);
+            const trackingMatch = text.match(/(?:Tracking|Consignment|AWB|Freight)[.:\s#]*(\S+)/i);
+            const dateMatch = text.match(/(?:Date|Delivery\s*Date|Ship\s*Date)[.:\s]*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i);
+            
+            this.docketOCRData = {
+                poNumber: poNumber,
+                supplierName: supplierMatch ? supplierMatch[1].trim() : null,
+                packingSlipNumber: slipMatch ? slipMatch[1].trim() : null,
+                trackingNumber: trackingMatch ? trackingMatch[1].trim() : null,
+                deliveryDate: dateMatch ? dateMatch[1].trim() : null,
+                rawOcrText: text.substring(0, 2000)
+            };
+            
+            ocrProgress.classList.remove('active');
+            
+            if (poNumber) {
+                document.getElementById('po-number').value = poNumber;
+                ocrResult.className = 'ocr-result found';
+                ocrResult.innerHTML = `✅ Found PO #<strong>${poNumber}</strong>`;
+                ocrResult.style.display = 'block';
+            } else {
+                ocrResult.className = 'ocr-result not-found';
+                ocrResult.innerHTML = '⚠️ Could not find PO number — please enter manually';
+                ocrResult.style.display = 'block';
+            }
+            
+        } catch (error) {
+            console.error('OCR error:', error);
+            ocrProgress.classList.remove('active');
+            ocrResult.className = 'ocr-result not-found';
+            ocrResult.innerHTML = '⚠️ OCR failed — please enter PO number manually';
+            ocrResult.style.display = 'block';
         }
     },
     
