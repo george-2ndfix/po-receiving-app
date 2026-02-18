@@ -282,6 +282,24 @@ footer {
     color: var(--gray-400);
 }
 
+.picking-slip-section {
+    background: white;
+    border-radius: 12px;
+    padding: 20px;
+    margin-top: 16px;
+    text-align: center;
+    border: 1px solid var(--gray-200);
+}
+.picking-slip-section h3 {
+    margin-bottom: 8px;
+    color: var(--gray-800);
+}
+.picking-slip-section p {
+    font-size: 14px;
+    color: var(--gray-600);
+    margin-bottom: 12px;
+}
+
 /* Select All Bar */
 .select-all-bar {
     background: var(--gray-50);

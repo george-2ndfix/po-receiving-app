@@ -917,6 +917,18 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         const totalLabels = this.selectedItems.reduce((sum, item) => sum + item.quantity, 0);
         document.getElementById('label-count').textContent = `${totalLabels} labels ready to print`;
         
+        // Show picking slip button (always available after allocation)
+        const pickSlipSection = document.getElementById('picking-slip-section');
+        if (pickSlipSection) {
+            pickSlipSection.style.display = 'block';
+            document.getElementById('picking-slip-status').textContent = 'Generate a picking slip for field workers';
+            const pickBtn = document.getElementById('generate-picking-slip-btn');
+            if (pickBtn) {
+                pickBtn.disabled = false;
+                pickBtn.textContent = '📋 Generate Picking Slip';
+            }
+        }
+        
         this.showScreen('success');
     },
     
@@ -940,6 +952,62 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         if (ocrProgress) ocrProgress.classList.remove('active');
         if (ocrResult) ocrResult.style.display = 'none';
         this.showScreen('scan');
+    },
+    
+    // ============================================
+    // Picking Slip Generation
+    // ============================================
+    async generatePickingSlip() {
+        const btn = document.getElementById('generate-picking-slip-btn');
+        const statusEl = document.getElementById('picking-slip-status');
+        
+        if (!this.currentPO || !this.selectedItems.length) {
+            statusEl.textContent = '⚠️ No items to generate slip for';
+            return;
+        }
+        
+        btn.disabled = true;
+        btn.textContent = '⏳ Generating...';
+        statusEl.textContent = 'Creating PDF and uploading to Simpro...';
+        
+        try {
+            // Build items list with storage location
+            const items = this.selectedItems.map(item => ({
+                description: item.description,
+                partNo: item.partNo || '',
+                quantity: item.quantity,
+                storageLocation: this.selectedStorage?.name || 'Unknown'
+            }));
+            
+            const response = await fetch('/api/picking-slip/generate', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    poId: this.currentPO.poId,
+                    poNumber: this.currentPO.poNumber,
+                    jobNumber: this.currentPO.jobNumber || '',
+                    vendorName: this.currentPO.vendorName || '',
+                    customerName: this.currentPO.customerName || '',
+                    items: items
+                })
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                btn.textContent = '✅ Picking Slip Uploaded';
+                statusEl.innerHTML = `<span style="color: #22c55e;">✅ Picking slip uploaded to Job ${data.jobNumber || ''} in Simpro</span>`;
+            } else {
+                btn.textContent = '📋 Retry';
+                btn.disabled = false;
+                statusEl.innerHTML = `<span style="color: #dc2626;">❌ ${data.error || 'Failed to generate'}</span>`;
+            }
+        } catch (error) {
+            console.error('Picking slip error:', error);
+            btn.textContent = '📋 Retry';
+            btn.disabled = false;
+            statusEl.innerHTML = `<span style="color: #dc2626;">❌ Error: ${error.message}</span>`;
+        }
     },
     
     // ============================================
