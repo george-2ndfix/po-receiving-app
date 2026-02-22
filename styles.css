@@ -266,6 +266,40 @@ footer {
     margin-top: 4px;
 }
 
+.po-due-date {
+    font-size: 14px;
+    margin-top: 6px;
+    color: var(--gray-700);
+}
+.po-due-date.overdue strong {
+    color: #dc2626;
+}
+.po-due-date .overdue {
+    color: #dc2626;
+    font-weight: 600;
+}
+.po-due-date.no-date em {
+    color: var(--gray-400);
+}
+
+.picking-slip-section {
+    background: white;
+    border-radius: 12px;
+    padding: 20px;
+    margin-top: 16px;
+    text-align: center;
+    border: 1px solid var(--gray-200);
+}
+.picking-slip-section h3 {
+    margin-bottom: 8px;
+    color: var(--gray-800);
+}
+.picking-slip-section p {
+    font-size: 14px;
+    color: var(--gray-600);
+    margin-bottom: 12px;
+}
+
 /* Select All Bar */
 .select-all-bar {
     background: var(--gray-50);
@@ -303,6 +337,9 @@ footer {
     padding: 16px;
     cursor: pointer;
     transition: all 0.2s;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
 }
 
 .item-card.selected {
@@ -516,39 +553,44 @@ footer {
 
 /* Success Card */
 .success-card {
-    background: var(--success);
-    color: white;
+    background: white;
+    color: #1a1a2e;
     padding: 40px;
     border-radius: 20px;
     text-align: center;
     width: 100%;
     max-width: 320px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+    border-top: 6px solid var(--success);
 }
 
 .success-icon {
     width: 80px;
     height: 80px;
-    border: 4px solid white;
+    background: var(--success);
+    border: none;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
     font-size: 40px;
+    color: white;
     margin: 0 auto 20px;
 }
 
 .success-card h2 {
     font-size: 24px;
     margin-bottom: 12px;
+    color: #1a1a2e;
 }
 
 .success-card p {
     font-size: 16px;
-    opacity: 0.95;
+    color: #333;
 }
 
 .success-card .detail {
-    color: rgba(255,255,255,0.8);
+    color: #666;
     margin-top: 8px;
 }
 
@@ -1441,4 +1483,352 @@ footer {
 #screen-relocate-success .success-icon {
     font-size: 64px;
     margin-bottom: 16px;
+}
+
+/* ============================================
+   Phase 1: OCR, Editable Quantities, Backorder
+   ============================================ */
+
+/* Quantity Controls */
+.item-qty-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 120px;
+    flex-shrink: 0;
+}
+
+.qty-input {
+    width: 50px;
+    padding: 6px;
+    border: 2px solid #d1d5db;
+    border-radius: 8px;
+    text-align: center;
+    font-size: 16px;
+    font-weight: 600;
+    -webkit-appearance: none;
+    -moz-appearance: textfield;
+}
+
+.qty-input:focus {
+    border-color: #3b82f6;
+    outline: none;
+}
+
+.qty-input:disabled {
+    background: #f3f4f6;
+    color: #9ca3af;
+}
+
+.qty-label {
+    font-size: 12px;
+    color: #6b7280;
+    font-weight: 600;
+}
+
+/* Backorder Button */
+.backorder-btn {
+    padding: 6px 8px;
+    border: 2px solid #f59e0b;
+    border-radius: 8px;
+    background: white;
+    color: #f59e0b;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.backorder-btn.active {
+    background: #f59e0b;
+    color: white;
+}
+
+.backorder-btn:hover {
+    background: #fef3c7;
+}
+
+.backorder-btn.active:hover {
+    background: #d97706;
+}
+
+/* Backordered item card */
+.item-card.backordered {
+    border-left: 4px solid #f59e0b;
+    background: #fffbeb;
+}
+
+.item-card.backordered .item-status {
+    color: #f59e0b;
+}
+
+/* OCR Progress */
+.ocr-progress {
+    margin-top: 16px;
+    text-align: center;
+    padding: 16px;
+    background: #eff6ff;
+    border-radius: 12px;
+    display: none;
+}
+
+.ocr-progress.active {
+    display: block;
+}
+
+.ocr-progress .spinner-small {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    border: 3px solid #e5e7eb;
+    border-top-color: #3b82f6;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.ocr-result {
+    margin-top: 12px;
+    padding: 12px;
+    border-radius: 8px;
+    font-size: 14px;
+}
+
+.ocr-result.found {
+    background: #ecfdf5;
+    color: #059669;
+    border: 1px solid #a7f3d0;
+}
+
+.ocr-result.not-found {
+    background: #fef3c7;
+    color: #92400e;
+    border: 1px solid #fcd34d;
+}
+
+/* Photo Mode Selection */
+.photo-mode-buttons {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.photo-mode-btn {
+    flex: 1;
+    padding: 12px 8px;
+    border: 2px solid #e5e7eb;
+    border-radius: 12px;
+    background: white;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.2s;
+}
+
+.photo-mode-btn.active {
+    border-color: #2563eb;
+    background: #eff6ff;
+    color: #2563eb;
+}
+
+.photo-mode-btn.photo-mode-skip {
+    flex: 0.6;
+    font-size: 12px;
+    color: #9ca3af;
+}
+
+.photo-mode-btn.photo-mode-skip.active {
+    border-color: #9ca3af;
+    background: #f9fafb;
+    color: #6b7280;
+}
+
+/* Individual Photo List */
+.individual-photo-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.individual-photo-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 12px;
+    background: white;
+    border-radius: 10px;
+    border: 1px solid #e5e7eb;
+}
+
+.photo-item-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.photo-item-name {
+    display: block;
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 180px;
+}
+
+.photo-item-qty {
+    font-size: 11px;
+    color: #6b7280;
+}
+
+.photo-item-actions {
+    flex-shrink: 0;
+    margin-left: 8px;
+}
+
+.btn-small {
+    padding: 6px 12px;
+    font-size: 12px;
+    border-radius: 8px;
+}
+
+.photo-thumbnail {
+    width: 48px;
+    height: 48px;
+    object-fit: cover;
+    border-radius: 6px;
+}
+
+.photo-item-preview {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.remove-photo-small {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: none;
+    background: #ef4444;
+    color: white;
+    font-size: 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.photo-upload-note {
+    text-align: center;
+    font-size: 12px;
+    color: #6b7280;
+    padding: 8px;
+    background: #f0f9ff;
+    border-radius: 8px;
+    margin-top: 8px;
+}
+
+/* ============================================
+   Needs Receipting Dashboard
+   ============================================ */
+.receipting-alert {
+    background: white;
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+    border: 1px solid var(--gray-200);
+}
+.alert-indicator {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 16px;
+}
+.alert-icon {
+    font-size: 24px;
+}
+.receipting-details {
+    margin-top: 12px;
+    border-top: 1px solid var(--gray-200);
+    padding-top: 12px;
+}
+.receipting-item {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--gray-100);
+    font-size: 13px;
+    align-items: center;
+}
+.receipting-item strong {
+    min-width: 100px;
+}
+.receipting-date {
+    margin-left: auto;
+    color: var(--gray-500);
+    font-size: 12px;
+}
+
+/* ============================================
+   Mystery Box Search
+   ============================================ */
+.search-box {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+}
+.search-box input {
+    flex: 1;
+    padding: 12px 16px;
+    border: 2px solid var(--gray-300);
+    border-radius: 8px;
+    font-size: 16px;
+}
+.search-box input:focus {
+    border-color: var(--primary);
+    outline: none;
+}
+.mystery-results {
+    min-height: 200px;
+}
+.mystery-result-card {
+    background: white;
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 12px;
+    border: 1px solid var(--gray-200);
+}
+.result-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    font-size: 16px;
+}
+.result-date {
+    color: var(--gray-500);
+    font-size: 13px;
+}
+.result-details {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 14px;
+    color: var(--gray-700);
+}
+.hint-text {
+    text-align: center;
+    color: var(--gray-400);
+    font-style: italic;
+    margin-top: 40px;
+}
+.no-results {
+    text-align: center;
+    color: var(--gray-500);
+    margin-top: 40px;
 }
