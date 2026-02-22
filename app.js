@@ -13,10 +13,19 @@ const app = {
     storageLocations: [],
     picklistItems: [],
     
+    // OCR + Backorder state
+    docketPhoto: null,
+    docketOCRData: null,
+    backorderItems: [],
+    
     // Staff state
     currentStaff: null,
     staffList: [],
     editingStaffId: null,
+    
+    // Photo mode state
+    photoMode: null, // 'individual', 'group', or 'skip'
+    individualPhotos: [], // [{itemIndex, description, base64}]
     
     // Relocate state
     relocateSourceId: null,
@@ -52,6 +61,10 @@ const app = {
         document.getElementById('option-stock')?.addEventListener('click', () => this.showScreen('stock'));
         document.getElementById('option-picklist')?.addEventListener('click', () => this.showPicklist());
         document.getElementById('option-relocate')?.addEventListener('click', () => this.showScreen('relocate-source'));
+        document.getElementById('option-mystery')?.addEventListener('click', () => this.showScreen('mystery'));
+        document.getElementById('mystery-search')?.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') this.searchMysteryBox();
+        });
         
         // Relocate flow
         document.getElementById('relocate-source-dropdown')?.addEventListener('change', (e) => this.selectRelocateSource(e));
@@ -97,6 +110,7 @@ const app = {
         
         // Success screen
         document.getElementById('new-po-btn')?.addEventListener('click', () => this.startNewPO());
+document.getElementById('view-history-btn')?.addEventListener('click', () => this.showLogs());
         document.getElementById('print-labels-btn')?.addEventListener('click', () => this.printLabels());
         
         // Back buttons
@@ -191,6 +205,7 @@ const app = {
         
         this.showScreen('home');
         this.loadPicklistCount();
+        this.loadReceiptingStatus();
     },
     
     // ============================================
@@ -512,15 +527,34 @@ const app = {
             ? `Job ${this.currentPO.jobNumber}${this.currentPO.customerName ? ' - ' + this.currentPO.customerName : ''}`
             : 'No job linked';
         
-        // Render items
+        // Display due date
+        const dueDateEl = document.getElementById('po-due-date');
+        if (dueDateEl) {
+            if (this.currentPO.dueDate) {
+                const dueDate = new Date(this.currentPO.dueDate);
+                const today = new Date();
+                today.setHours(0,0,0,0);
+                const isOverdue = dueDate < today;
+                const formatted = dueDate.toLocaleDateString('en-AU', {day: 'numeric', month: 'short', year: 'numeric'});
+                dueDateEl.innerHTML = `📅 Due: <strong>${formatted}</strong>${isOverdue ? ' <span class="overdue">⚠️ OVERDUE</span>' : ''}`;
+                dueDateEl.className = 'po-due-date' + (isOverdue ? ' overdue' : '');
+            } else {
+                dueDateEl.innerHTML = '📅 Due: <em>Not set</em>';
+                dueDateEl.className = 'po-due-date no-date';
+            }
+        }
+        
+        // Render items with editable quantities and backorder buttons
         const itemsList = document.getElementById('items-list');
         this.selectedItems = [];
+        this.backorderItems = [];
         
         itemsList.innerHTML = this.currentPO.items.map((item, index) => {
             const statusClass = item.receiptStatus === 'fully_receipted' ? 'receipted' 
                 : item.receiptStatus === 'partially_receipted' ? 'partial' : 'pending';
             const statusText = item.receiptStatus === 'fully_receipted' ? 'Fully receipted'
                 : item.receiptStatus === 'partially_receipted' ? 'Partially receipted' : 'Not yet receipted';
+            const remaining = item.quantityOrdered - item.quantityReceived;
             
             return `
                 <div class="item-card ${statusClass}" data-index="${index}" data-catalog-id="${item.catalogId}">
@@ -532,10 +566,20 @@ const app = {
                         <div class="item-name">${item.description}</div>
                         <div class="item-meta">
                             ${item.partNo ? `<span class="item-part">${item.partNo}</span>` : ''}
+                            ${item.jobNumber ? `<span class="item-job">Job ${item.jobNumber}${item.customerName ? ' - ' + item.customerName : ''}</span>` : ''}
                             <span class="item-qty">Ordered: ${item.quantityOrdered}</span>
                             <span class="item-received">Received: ${item.quantityReceived}</span>
                         </div>
                         <div class="item-status ${statusClass}">${statusText}</div>
+                    </div>
+                    <div class="item-qty-controls">
+                        <label class="qty-label">Qty:</label>
+                        <input type="number" class="qty-input" id="qty-${index}" 
+                               min="0" max="${remaining}" value="${remaining}"
+                               onchange="app.updateItemQty(${index})" disabled>
+                        <button class="backorder-btn" onclick="app.toggleBackorder(${index})" title="Mark as backordered">
+                            BO
+                        </button>
                     </div>
                 </div>
             `;
@@ -548,20 +592,70 @@ const app = {
     toggleItem(index) {
         const item = this.currentPO.items[index];
         const idx = this.selectedItems.findIndex(i => i.index === index);
+        const qtyInput = document.getElementById(`qty-${index}`);
+        const remaining = item.quantityOrdered - item.quantityReceived;
         
         if (idx >= 0) {
             this.selectedItems.splice(idx, 1);
+            if (qtyInput) { qtyInput.disabled = true; }
         } else {
+            const qty = qtyInput ? parseInt(qtyInput.value) || remaining : remaining;
             this.selectedItems.push({
                 index,
                 catalogId: item.catalogId,
                 description: item.description,
                 partNo: item.partNo,
-                quantity: item.quantityOrdered - item.quantityReceived
+                quantity: qty,
+                jobNumber: item.jobNumber,
+                customerName: item.customerName
             });
+            if (qtyInput) { qtyInput.disabled = false; }
         }
         
         this.updateSelectionCount();
+    },
+    
+    updateItemQty(index) {
+        const item = this.currentPO.items[index];
+        const qtyInput = document.getElementById(`qty-${index}`);
+        if (!qtyInput) return;
+        
+        const remaining = item.quantityOrdered - item.quantityReceived;
+        let qty = parseInt(qtyInput.value) || 0;
+        if (qty < 0) qty = 0;
+        if (qty > remaining) qty = remaining;
+        qtyInput.value = qty;
+        
+        const sel = this.selectedItems.find(i => i.index === index);
+        if (sel) {
+            sel.quantity = qty;
+        }
+    },
+    
+    toggleBackorder(index) {
+        const item = this.currentPO.items[index];
+        const btn = document.querySelector(`.item-card[data-index="${index}"] .backorder-btn`);
+        const card = document.querySelector(`.item-card[data-index="${index}"]`);
+        const boIdx = this.backorderItems.findIndex(i => i.index === index);
+        
+        if (boIdx >= 0) {
+            this.backorderItems.splice(boIdx, 1);
+            btn?.classList.remove('active');
+            card?.classList.remove('backordered');
+        } else {
+            const remaining = item.quantityOrdered - item.quantityReceived;
+            this.backorderItems.push({
+                index,
+                catalogId: item.catalogId,
+                description: item.description,
+                partNo: item.partNo,
+                quantity: remaining,
+                jobNumber: item.jobNumber,
+                customerName: item.customerName
+            });
+            btn?.classList.add('active');
+            card?.classList.add('backordered');
+        }
     },
     
     toggleSelectAll(event) {
@@ -572,15 +666,23 @@ const app = {
         
         checkboxes.forEach((cb, index) => {
             cb.checked = checked;
+            const qtyInput = document.getElementById(`qty-${index}`);
             if (checked) {
                 const item = this.currentPO.items[index];
+                const remaining = item.quantityOrdered - item.quantityReceived;
+                const qty = qtyInput ? parseInt(qtyInput.value) || remaining : remaining;
                 this.selectedItems.push({
                     index,
                     catalogId: item.catalogId,
                     description: item.description,
                     partNo: item.partNo,
-                    quantity: item.quantityOrdered - item.quantityReceived
+                    quantity: qty,
+                    jobNumber: item.jobNumber,
+                    customerName: item.customerName
                 });
+                if (qtyInput) { qtyInput.disabled = false; }
+            } else {
+                if (qtyInput) { qtyInput.disabled = true; }
             }
         });
         
@@ -610,6 +712,7 @@ const app = {
                 id: parseInt(select.value),
                 name: selectedOption.textContent
             };
+            this._lastStorageName = selectedOption.textContent;
             document.getElementById('allocate-btn').disabled = false;
         } else {
             this.selectedStorage = null;
@@ -640,7 +743,8 @@ const app = {
                     vendorName: this.currentPO.vendorName,
                     items: this.selectedItems.map(item => ({
                         catalogId: item.catalogId,
-                        quantity: item.quantity
+                        quantity: item.quantity || item.received || item.ordered || 1,
+                        receiptStatus: item.receiptStatus || 'not_receipted'
                     })),
                     storageDeviceId: this.selectedStorage.id,
                     storageName: this.selectedStorage.name
@@ -650,6 +754,100 @@ const app = {
             const data = await response.json();
             
             if (data.success) {
+                // Save backorder items if any
+                if (this.backorderItems.length > 0) {
+                    try {
+                        await fetch('/api/backorder', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                poId: this.currentPO.poId,
+                                poNumber: this.currentPO.poNumber,
+                                vendorName: this.currentPO.vendorName,
+                                items: this.backorderItems
+                            })
+                        });
+                    } catch (boErr) {
+                        console.error('Backorder save error:', boErr);
+                    }
+                }
+                
+                // Save docket OCR data if available
+                if (this.docketOCRData) {
+                    try {
+                        await fetch('/api/docket-data', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                poId: this.currentPO.poId,
+                                poNumber: this.currentPO.poNumber,
+                                ...this.docketOCRData
+                            })
+                        });
+                    } catch (dErr) {
+                        console.error('Docket data save error:', dErr);
+                    }
+                }
+                
+                // Upload photos to Simpro
+                let photoUploadResult = null;
+                if (this.photoMode && this.photoMode !== 'skip') {
+                    try {
+                        document.getElementById('processing-status').textContent = 'Uploading photos to Simpro...';
+                        
+                        const photos = [];
+                        const dateStr = new Date().toISOString().split('T')[0];
+                        
+                        if (this.photoMode === 'group' && this.evidencePhoto) {
+                            photos.push({
+                                base64: this.evidencePhoto,
+                                filename: `PO_${this.currentPO.poNumber}_delivery_${dateStr}.jpg`
+                            });
+                        } else if (this.photoMode === 'individual') {
+                            this.individualPhotos.forEach(p => {
+                                const safeName = (p.partNo || p.description || 'item').replace(/[^a-zA-Z0-9]/g, '_').substring(0, 30);
+                                photos.push({
+                                    base64: p.base64,
+                                    filename: `PO_${this.currentPO.poNumber}_${safeName}_${dateStr}.jpg`
+                                });
+                            });
+                        }
+                        
+                        if (photos.length > 0) {
+                            // Collect unique job IDs from selected items
+                            const jobIds = [...new Set(
+                                this.selectedItems
+                                    .map(item => item.jobNumber)
+                                    .filter(j => j && j !== 'N/A')
+                            )];
+                            
+                            // Fallback to PO-level job
+                            if (jobIds.length === 0 && this.currentPO.jobNumber && this.currentPO.jobNumber !== 'N/A') {
+                                jobIds.push(this.currentPO.jobNumber);
+                            }
+                            
+                            if (jobIds.length > 0) {
+                                const uploadResp = await fetch('/api/upload-photos', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                        poNumber: this.currentPO.poNumber,
+                                        poSimproId: this.currentPO.poId,
+                                        jobIds: jobIds,
+                                        photos: photos
+                                    })
+                                });
+                                photoUploadResult = await uploadResp.json();
+                            }
+                        }
+                    } catch (photoErr) {
+                        console.error('Photo upload error:', photoErr);
+                    }
+                }
+                
+                // Pass photo result to success screen
+                data.photoUploadResult = photoUploadResult;
+                
                 this.showSuccessScreen(data);
             } else {
                 alert('Allocation failed: ' + (data.error || 'Unknown error'));
@@ -670,9 +868,72 @@ const app = {
         
         document.getElementById('success-staff-name').textContent = data.allocatedBy || this.currentStaff?.displayName || 'Staff';
         
+        // Show verification status
+        const verifyEl = document.getElementById('success-verification');
+        if (verifyEl) {
+            let statusHtml = '';
+            if (data.allVerified) {
+                statusHtml += '<div style="color: #22c55e;">✅ Verified in Simpro</div>';
+            } else {
+                statusHtml += '<div style="color: #f59e0b;">⚠️ Allocation sent - verification pending</div>';
+            }
+            // Show Goods Received status
+            if (data.goodsReceivedSet) {
+                statusHtml += '<div style="color: #22c55e; margin-top: 4px;">✅ Goods Received status set</div>';
+            } else if (data.successCount > 0) {
+                statusHtml += '<div style="color: #f59e0b; margin-top: 4px;">⚠️ Goods Received status pending</div>';
+            }
+            verifyEl.innerHTML = statusHtml;
+        }
+        
+        // Show backorder info
+        const boEl = document.getElementById('success-backorder');
+        if (boEl) {
+            if (this.backorderItems.length > 0) {
+                boEl.style.display = 'block';
+                boEl.innerHTML = `<span style="color: #f59e0b;">⚠️ ${this.backorderItems.length} item(s) marked as backordered</span>`;
+            } else {
+                boEl.style.display = 'none';
+            }
+        }
+        
+        // Photo upload status
+        const photoEl = document.getElementById('success-photo');
+        if (data.photoUploadResult) {
+            if (data.photoUploadResult.success) {
+                const jobCount = data.photoUploadResult.jobUploads || 0;
+                const poCount = data.photoUploadResult.poUploads || 0;
+                let uploadMsg = '📸 Photos uploaded to Simpro: ';
+                const parts = [];
+                if (jobCount > 0) parts.push(`${jobCount} to Job`);
+                if (poCount > 0) parts.push(`${poCount} to PO`);
+                uploadMsg += parts.join(', ') || `${data.photoUploadResult.uploaded} total`;
+                photoEl.innerHTML = `<span style="color: #22c55e;">${uploadMsg}</span>`;
+            } else {
+                photoEl.innerHTML = `<span style="color: #f59e0b;">⚠️ Photo upload: ${data.photoUploadResult.error || 'partial failure'}</span>`;
+            }
+            photoEl.style.display = 'block';
+        } else if (this.photoMode === 'skip' || !this.photoMode) {
+            photoEl.style.display = 'none';
+        } else {
+            photoEl.style.display = 'none';
+        }
+        
         // Label count
         const totalLabels = this.selectedItems.reduce((sum, item) => sum + item.quantity, 0);
         document.getElementById('label-count').textContent = `${totalLabels} labels ready to print`;
+        
+        // Show picking slip button (always available after allocation)
+        const pickSlipSection = document.getElementById('picking-slip-section');
+        if (pickSlipSection) {
+            pickSlipSection.style.display = 'block';
+            document.getElementById('picking-slip-status').textContent = 'Generate a picking slip for field workers';
+            const pickBtn = document.getElementById('generate-picking-slip-btn');
+            if (pickBtn) {
+                pickBtn.disabled = false;
+                pickBtn.textContent = '📋 Generate Picking Slip';
+            }
+        }
         
         this.showScreen('success');
     },
@@ -681,11 +942,78 @@ const app = {
         this.currentPO = null;
         this.selectedItems = [];
         this.selectedStorage = null;
+        this.docketPhoto = null;
+        this.docketOCRData = null;
+        this.backorderItems = [];
+        this.photoMode = null;
+        this.individualPhotos = [];
+        this.evidencePhoto = null;
         document.getElementById('po-number').value = '';
         document.getElementById('storage-dropdown').value = '';
         document.getElementById('allocate-btn').disabled = true;
         document.getElementById('select-all').checked = false;
+        // Reset OCR UI
+        const ocrProgress = document.getElementById('ocr-progress');
+        const ocrResult = document.getElementById('ocr-result');
+        if (ocrProgress) ocrProgress.classList.remove('active');
+        if (ocrResult) ocrResult.style.display = 'none';
         this.showScreen('scan');
+    },
+    
+    // ============================================
+    // Picking Slip Generation
+    // ============================================
+    async generatePickingSlip() {
+        const btn = document.getElementById('generate-picking-slip-btn');
+        const statusEl = document.getElementById('picking-slip-status');
+        
+        if (!this.currentPO || !this.selectedItems.length) {
+            statusEl.textContent = '⚠️ No items to generate slip for';
+            return;
+        }
+        
+        btn.disabled = true;
+        btn.textContent = '⏳ Generating...';
+        statusEl.textContent = 'Creating PDF and uploading to Simpro...';
+        
+        try {
+            // Build items list with storage location
+            const items = this.selectedItems.map(item => ({
+                description: item.description,
+                partNo: item.partNo || '',
+                quantity: item.quantity,
+                storageLocation: this.selectedStorage?.name || 'Unknown'
+            }));
+            
+            const response = await fetch('/api/picking-slip/generate', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    poId: this.currentPO.poId,
+                    poNumber: this.currentPO.poNumber,
+                    jobNumber: this.currentPO.jobNumber || '',
+                    vendorName: this.currentPO.vendorName || '',
+                    customerName: this.currentPO.customerName || '',
+                    items: items
+                })
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                btn.textContent = '✅ Picking Slip Uploaded';
+                statusEl.innerHTML = `<span style="color: #22c55e;">✅ Picking slip uploaded to Job ${data.jobNumber || ''} in Simpro</span>`;
+            } else {
+                btn.textContent = '📋 Retry';
+                btn.disabled = false;
+                statusEl.innerHTML = `<span style="color: #dc2626;">❌ ${data.error || 'Failed to generate'}</span>`;
+            }
+        } catch (error) {
+            console.error('Picking slip error:', error);
+            btn.textContent = '📋 Retry';
+            btn.disabled = false;
+            statusEl.innerHTML = `<span style="color: #dc2626;">❌ Error: ${error.message}</span>`;
+        }
     },
     
     // ============================================
@@ -723,14 +1051,189 @@ const app = {
     // ============================================
     // Photos
     // ============================================
-    handleDocketPhoto(event) {
+    async handleDocketPhoto(event) {
         const file = event.target.files[0];
-        if (file) {
-            // For now just show PO input - OCR would extract PO number
-            this.showStatus('scan-status', 'Photo captured. Enter PO number to continue.', 'success');
+        if (!file) return;
+        
+        // Store docket photo as base64
+        const reader = new FileReader();
+        reader.onload = (e) => { this.docketPhoto = e.target.result; };
+        reader.readAsDataURL(file);
+        
+        // Show OCR progress
+        const ocrProgress = document.getElementById('ocr-progress');
+        const ocrResult = document.getElementById('ocr-result');
+        const ocrStatusText = document.getElementById('ocr-status-text');
+        ocrProgress.classList.add('active');
+        ocrResult.style.display = 'none';
+        ocrStatusText.textContent = 'Scanning document...';
+        
+        try {
+            // Use Tesseract.js to OCR the image
+            const result = await Tesseract.recognize(file, 'eng', {
+                logger: m => {
+                    if (m.status === 'recognizing text') {
+                        const pct = Math.round((m.progress || 0) * 100);
+                        ocrStatusText.textContent = `Scanning document... ${pct}%`;
+                    }
+                }
+            });
+            
+            const text = result.data.text || '';
+            console.log('OCR text:', text);
+            
+            // Extract PO number - look for patterns
+            let poNumber = null;
+            const poPatterns = [
+                /(?:PO|P\.O\.?|Purchase\s*Order|Order\s*No\.?)\s*[#:]?\s*(\d{4,6})/i,
+                /\b(2\d{4})\b/  // 5-digit numbers starting with 2 (like 20xxx)
+            ];
+            
+            for (const pattern of poPatterns) {
+                const match = text.match(pattern);
+                if (match) {
+                    poNumber = match[1];
+                    break;
+                }
+            }
+            
+            // Extract other data
+            const supplierMatch = text.match(/(?:Supplier|Vendor|From|Company)[:\s]+([A-Za-z][A-Za-z\s&'.,-]+)/i);
+            const slipMatch = text.match(/(?:Packing\s*Slip|Slip\s*No|Docket\s*No|Invoice\s*No)[.:\s#]*(\S+)/i);
+            const trackingMatch = text.match(/(?:Tracking|Consignment|AWB|Freight)[.:\s#]*(\S+)/i);
+            const dateMatch = text.match(/(?:Date|Delivery\s*Date|Ship\s*Date)[.:\s]*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i);
+            
+            this.docketOCRData = {
+                poNumber: poNumber,
+                supplierName: supplierMatch ? supplierMatch[1].trim() : null,
+                packingSlipNumber: slipMatch ? slipMatch[1].trim() : null,
+                trackingNumber: trackingMatch ? trackingMatch[1].trim() : null,
+                deliveryDate: dateMatch ? dateMatch[1].trim() : null,
+                rawOcrText: text.substring(0, 2000)
+            };
+            
+            ocrProgress.classList.remove('active');
+            
+            if (poNumber) {
+                document.getElementById('po-number').value = poNumber;
+                ocrResult.className = 'ocr-result found';
+                ocrResult.innerHTML = `✅ Found PO #<strong>${poNumber}</strong>`;
+                ocrResult.style.display = 'block';
+            } else {
+                ocrResult.className = 'ocr-result not-found';
+                ocrResult.innerHTML = '⚠️ Could not find PO number — please enter manually';
+                ocrResult.style.display = 'block';
+            }
+            
+        } catch (error) {
+            console.error('OCR error:', error);
+            ocrProgress.classList.remove('active');
+            ocrResult.className = 'ocr-result not-found';
+            ocrResult.innerHTML = '⚠️ OCR failed — please enter PO number manually';
+            ocrResult.style.display = 'block';
         }
     },
     
+    // ============================================
+    // Photo Mode Selection
+    // ============================================
+    setPhotoMode(mode) {
+        this.photoMode = mode;
+        
+        // Update button styles
+        document.querySelectorAll('.photo-mode-btn').forEach(btn => btn.classList.remove('active'));
+        
+        const groupSection = document.getElementById('group-photo-section');
+        const individualSection = document.getElementById('individual-photo-section');
+        const uploadNote = document.getElementById('photo-upload-note');
+        
+        groupSection.classList.add('hidden');
+        individualSection.classList.add('hidden');
+        
+        if (mode === 'group') {
+            document.getElementById('photo-mode-group').classList.add('active');
+            groupSection.classList.remove('hidden');
+            uploadNote.classList.remove('hidden');
+        } else if (mode === 'individual') {
+            document.getElementById('photo-mode-individual').classList.add('active');
+            this.buildIndividualPhotoList();
+            individualSection.classList.remove('hidden');
+            uploadNote.classList.remove('hidden');
+        } else {
+            document.getElementById('photo-mode-skip').classList.add('active');
+            uploadNote.classList.add('hidden');
+            this.individualPhotos = [];
+            this.evidencePhoto = null;
+        }
+    },
+
+    buildIndividualPhotoList() {
+        this.individualPhotos = [];
+        const container = document.getElementById('individual-photo-list');
+        
+        container.innerHTML = this.selectedItems.map((item, index) => {
+            return `
+                <div class="individual-photo-item" id="photo-item-${index}">
+                    <div class="photo-item-info">
+                        <span class="photo-item-name">${item.description || 'Item ' + (index + 1)}</span>
+                        <span class="photo-item-qty">Qty: ${item.quantity}</span>
+                    </div>
+                    <div class="photo-item-actions">
+                        <div class="photo-item-capture" id="photo-capture-${index}">
+                            <button class="btn btn-secondary btn-small" onclick="document.getElementById('photo-input-${index}').click()">
+                                📷 Photo
+                            </button>
+                            <input type="file" accept="image/*" capture="environment" id="photo-input-${index}" hidden
+                                onchange="app.handleIndividualPhoto(${index}, event)">
+                        </div>
+                        <div class="photo-item-preview hidden" id="photo-preview-${index}">
+                            <img id="photo-img-${index}" src="" alt="Item photo" class="photo-thumbnail">
+                            <button class="remove-photo-small" onclick="app.removeIndividualPhoto(${index})">✕</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    },
+
+    handleIndividualPhoto(index, event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const base64 = e.target.result;
+            
+            // Store photo
+            const existing = this.individualPhotos.findIndex(p => p.itemIndex === index);
+            const photoData = {
+                itemIndex: index,
+                description: this.selectedItems[index]?.description || 'Item',
+                partNo: this.selectedItems[index]?.partNo || '',
+                base64: base64
+            };
+            
+            if (existing >= 0) {
+                this.individualPhotos[existing] = photoData;
+            } else {
+                this.individualPhotos.push(photoData);
+            }
+            
+            // Show preview
+            document.getElementById(`photo-img-${index}`).src = base64;
+            document.getElementById(`photo-preview-${index}`).classList.remove('hidden');
+            document.getElementById(`photo-capture-${index}`).classList.add('hidden');
+        };
+        reader.readAsDataURL(file);
+    },
+
+    removeIndividualPhoto(index) {
+        this.individualPhotos = this.individualPhotos.filter(p => p.itemIndex !== index);
+        document.getElementById(`photo-preview-${index}`).classList.add('hidden');
+        document.getElementById(`photo-capture-${index}`).classList.remove('hidden');
+        document.getElementById(`photo-input-${index}`).value = '';
+    },
+
     handleEvidencePhoto(event) {
         const file = event.target.files[0];
         if (file) {
@@ -761,14 +1264,21 @@ const app = {
         container.innerHTML = '';
         
         const dateStr = new Date().toLocaleDateString();
+        const storageLocation = this.selectedStorage?.name || this._lastStorageName || 'Unknown';
+        const poNumber = this.currentPO?.poNumber || 'N/A';
+        // PO-level fallbacks (used if item doesn't have per-item job)
+        const poJobNumber = this.currentPO?.jobNumber || 'N/A';
+        const poCustomerName = this.currentPO?.customerName || 'N/A';
         
         this.selectedItems.forEach(item => {
             for (let i = 0; i < item.quantity; i++) {
                 const label = document.createElement('div');
                 label.className = 'label';
+                const itemJob = item.jobNumber || poJobNumber;
+                const itemCustomer = item.customerName || poCustomerName;
                 label.innerHTML = `
-                    <div class="label-line1">${this.currentPO.jobNumber || 'N/A'} - ${this.currentPO.customerName || 'Customer'} - ${item.partNo || 'N/A'}</div>
-                    <div class="label-line2">${item.description} - ${dateStr}</div>
+                    <div class="label-line1">PO ${poNumber} | Job ${itemJob} - ${itemCustomer} | ${item.partNo || 'N/A'}</div>
+                    <div class="label-line2">${item.description} | ${storageLocation} | ${dateStr}</div>
                 `;
                 container.appendChild(label);
             }
@@ -1020,6 +1530,88 @@ const app = {
         this.showScreen('relocate-source');
     },
     
+    // ============================================
+    // Needs Receipting Dashboard
+    // ============================================
+    async loadReceiptingStatus() {
+        try {
+            const response = await fetch('/api/needs-receipting');
+            const data = await response.json();
+            const alertEl = document.getElementById('receipting-alert');
+            const iconEl = document.getElementById('receipting-icon');
+            const textEl = document.getElementById('receipting-text');
+            const detailsEl = document.getElementById('receipting-details');
+            
+            if (!alertEl) return;
+            alertEl.style.display = 'block';
+            
+            if (data.count === 0) {
+                iconEl.textContent = '🟢';
+                textEl.textContent = 'All allocations receipted';
+                detailsEl.style.display = 'none';
+            } else {
+                iconEl.textContent = '🔴';
+                textEl.innerHTML = `<strong>${data.count}</strong> PO(s) allocated - check receipting status`;
+                alertEl.onclick = () => {
+                    detailsEl.style.display = detailsEl.style.display === 'none' ? 'block' : 'none';
+                };
+                alertEl.style.cursor = 'pointer';
+                
+                detailsEl.innerHTML = data.items.map(item => `
+                    <div class="receipting-item">
+                        <strong>PO #${item.po_number}</strong>
+                        <span>${item.vendor_name || ''}</span>
+                        <span>Job ${item.job_number || 'N/A'}</span>
+                        <span>${item.total_items} item(s) → ${item.storage_location}</span>
+                        <span class="receipting-date">${new Date(item.allocated_date).toLocaleDateString('en-AU')}</span>
+                    </div>
+                `).join('');
+            }
+        } catch (error) {
+            console.error('Receipting status error:', error);
+        }
+    },
+
+    // ============================================
+    // Mystery Box Search
+    // ============================================
+    async searchMysteryBox() {
+        const query = document.getElementById('mystery-search').value.trim();
+        if (!query) return;
+        
+        const resultsEl = document.getElementById('mystery-results');
+        resultsEl.innerHTML = '<p class="loading">🔍 Searching...</p>';
+        
+        try {
+            const response = await fetch(`/api/search-mystery-box?q=${encodeURIComponent(query)}`);
+            const data = await response.json();
+            
+            if (data.count === 0) {
+                resultsEl.innerHTML = '<p class="no-results">❌ No matching records found</p>';
+                return;
+            }
+            
+            resultsEl.innerHTML = data.results.map(r => `
+                <div class="mystery-result-card">
+                    <div class="result-header">
+                        <strong>PO #${r.po_number || 'N/A'}</strong>
+                        <span class="result-date">${r.created_at ? new Date(r.created_at).toLocaleDateString('en-AU') : ''}</span>
+                    </div>
+                    <div class="result-details">
+                        ${r.supplier_name ? `<div>📦 Supplier: ${r.supplier_name}</div>` : ''}
+                        ${r.packing_slip_number ? `<div>📋 Packing Slip: ${r.packing_slip_number}</div>` : ''}
+                        ${r.tracking_number ? `<div>🚚 Tracking #: ${r.tracking_number}</div>` : ''}
+                        ${r.storage_location ? `<div>📍 Storage: ${r.storage_location}</div>` : ''}
+                        ${r.receipt_job ? `<div>🔨 Job: ${r.receipt_job}</div>` : ''}
+                        ${r.staff_name ? `<div>👤 Received by: ${r.staff_name}</div>` : ''}
+                    </div>
+                </div>
+            `).join('');
+        } catch (error) {
+            resultsEl.innerHTML = `<p class="error">❌ Search failed: ${error.message}</p>`;
+        }
+    },
+
     // ============================================
     // Utilities
     // ============================================
