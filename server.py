@@ -1376,13 +1376,13 @@ def upload_photos():
                     base64_data = base64_data.split(',')[1]
                 
                 upload_payload = {
-                    "FileName": filename,
+                    "Filename": filename,
                     "Public": True,
-                    "Data": base64_data
+                    "Base64Data": base64_data
                 }
                 
                 if folder_id:
-                    upload_payload["Folder"] = {"ID": folder_id}
+                    upload_payload["Folder"] = folder_id
                 
                 try:
                     upload_resp = simpro_request('POST', f'/companies/{COMPANY_ID}/jobs/{job_id}/attachments/files/',
@@ -1431,13 +1431,13 @@ def upload_photos():
                     base64_data = base64_data.split(',')[1]
                 
                 po_upload_payload = {
-                    "FileName": filename,
+                    "Filename": filename,
                     "Public": True,
-                    "Data": base64_data
+                    "Base64Data": base64_data
                 }
                 
                 if po_folder_id:
-                    po_upload_payload["Folder"] = {"ID": po_folder_id}
+                    po_upload_payload["Folder"] = po_folder_id
                 
                 try:
                     po_upload_resp = simpro_request('POST', f'/companies/{COMPANY_ID}/vendorOrders/{po_simpro_id}/attachments/files/',
@@ -1690,12 +1690,12 @@ def generate_picking_slip():
 
         # Upload the PDF
         upload_payload = {
-            "FileName": filename,
+            "Filename": filename,
             "Public": True,
-            "Data": pdf_base64
+            "Base64Data": pdf_base64
         }
         if folder_id:
-            upload_payload["Folder"] = {"ID": folder_id}
+            upload_payload["Folder"] = folder_id
 
         upload_resp = simpro_request('POST', f'/companies/{COMPANY_ID}/jobs/{job_id}/attachments/files/',
                                      json=upload_payload)
