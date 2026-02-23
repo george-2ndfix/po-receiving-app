@@ -569,6 +569,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                             ${item.jobNumber ? `<span class="item-job">Job ${item.jobNumber}${item.customerName ? ' - ' + item.customerName : ''}</span>` : ''}
                             <span class="item-qty">Ordered: ${item.quantityOrdered}</span>
                             <span class="item-received">Received: ${item.quantityReceived}</span>
+                            ${item.storageLocation ? `<span class="item-storage">📍 ${item.storageLocation}</span>` : ''}
                         </div>
                         <div class="item-status ${statusClass}">${statusText}</div>
                     </div>
@@ -586,7 +587,62 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         }).join('');
         
         this.updateSelectionCount();
+        
+        // Show "Print Labels" button if any items have storage locations (already allocated)
+        const hasAllocatedItems = this.currentPO.items.some(item => 
+            item.storageLocation && item.storageLocation !== 'Stock Holding'
+        );
+        const reprintBtn = document.getElementById('reprint-labels-btn');
+        if (reprintBtn) {
+            reprintBtn.classList.toggle('hidden', !hasAllocatedItems);
+        }
+        
         this.showScreen('verify');
+    },
+    
+    reprintLabels() {
+        // Build labels for all allocated items in this PO
+        const container = document.getElementById('label-print-container');
+        if (!container) return;
+        
+        const po = this.currentPO;
+        const today = new Date().toLocaleDateString('en-AU');
+        container.innerHTML = '';
+        
+        let labelCount = 0;
+        po.items.forEach(item => {
+            if (!item.storageLocation || item.storageLocation === 'Stock Holding') return;
+            
+            const qty = item.quantityReceived || item.quantityOrdered;
+            for (let i = 0; i < qty; i++) {
+                const label = document.createElement('div');
+                label.className = 'print-label';
+                label.innerHTML = `
+                    <div class="label-row-top">
+                        <span class="label-job">${item.jobNumber ? 'Job ' + item.jobNumber : ''}</span>
+                        <span class="label-customer">${item.customerName || ''}</span>
+                        <span class="label-separator">│</span>
+                        <span class="label-partno">${item.partNo || ''}</span>
+                        <span class="label-desc">${item.description}</span>
+                    </div>
+                    <div class="label-row-bottom">
+                        <span class="label-qty">Qty: ${qty}</span>
+                        <span class="label-location">${item.storageLocation}</span>
+                        <span class="label-date">${today}</span>
+                        <span class="label-po">PO ${po.poNumber}</span>
+                    </div>
+                `;
+                container.appendChild(label);
+                labelCount++;
+            }
+        });
+        
+        if (labelCount === 0) {
+            alert('No allocated items to print labels for.');
+            return;
+        }
+        
+        window.print();
     },
     
     toggleItem(index) {

@@ -634,6 +634,7 @@ def get_po_details(po_number):
             quantity_received = 0
             item_job_number = None
             item_customer_name = None
+            item_storage_location = None
             
             if catalog_id:
                 try:
@@ -652,6 +653,18 @@ def get_po_details(po_number):
                                 job_info = get_job_customer(alloc_job)
                                 item_job_number = job_info['jobNumber']
                                 item_customer_name = job_info['customerName']
+                            
+                            # Extract current storage device
+                            storage_dev = alloc.get('StorageDevice', {})
+                            if isinstance(storage_dev, dict) and storage_dev.get('Name'):
+                                item_storage_location = storage_dev.get('Name')
+                            elif isinstance(storage_dev, dict) and storage_dev.get('ID'):
+                                # Look up name from our devices list
+                                sd_id = storage_dev['ID']
+                                for dev in get_storage_devices():
+                                    if dev['ID'] == sd_id:
+                                        item_storage_location = dev['Name']
+                                        break
                 except Exception as e:
                     print(f"Error getting allocations for catalog {catalog_id}: {e}")
             
@@ -676,7 +689,8 @@ def get_po_details(po_number):
                 'quantityReceived': quantity_received,
                 'receiptStatus': receipt_status,
                 'jobNumber': item_job_number,
-                'customerName': item_customer_name
+                'customerName': item_customer_name,
+                'storageLocation': item_storage_location
             })
         
         return jsonify({

@@ -20,6 +20,9 @@
     
     <link rel="stylesheet" href="styles.css">
     
+    <!-- Tesseract.js OCR -->
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    
     <!-- Register Service Worker -->
     <script>
         if ('serviceWorker' in navigator) {
@@ -106,10 +109,28 @@
                     </div>
                     <div class="option-arrow">→</div>
                 </button>
+                
+                <button class="home-option" id="option-mystery">
+                    <div class="option-icon">🔍</div>
+                    <div class="option-content">
+                        <h3>Mystery Box Search</h3>
+                        <p>Find a box by shipping or tracking number</p>
+                    </div>
+                    <div class="option-arrow">→</div>
+                </button>
             </div>
             
             <div class="home-alerts" id="home-alerts">
                 <!-- Pending PO alerts shown here -->
+                <div class="receipting-alert" id="receipting-alert" style="display:none;">
+                    <div class="alert-indicator" id="receipting-indicator">
+                        <span class="alert-icon" id="receipting-icon">🟢</span>
+                        <span class="alert-text" id="receipting-text">All clear</span>
+                    </div>
+                    <div class="receipting-details" id="receipting-details" style="display:none;">
+                        <!-- Filled by JS -->
+                    </div>
+                </div>
             </div>
             
             <!-- Manager Options (hidden for regular staff) -->
@@ -224,6 +245,12 @@
                 <input type="file" accept="image/*" capture="environment" id="docket-photo" hidden>
             </div>
             
+            <div id="ocr-progress" class="ocr-progress">
+                <div class="spinner-small"></div>
+                <p id="ocr-status-text">Scanning document...</p>
+            </div>
+            <div id="ocr-result" class="ocr-result" style="display:none;"></div>
+            
             <div class="divider">
                 <span>— OR —</span>
             </div>
@@ -248,6 +275,7 @@
             <h2 id="po-title">PO #-----</h2>
             <p id="po-vendor">Loading...</p>
             <p id="po-job">Job: -----</p>
+            <p id="po-due-date" class="po-due-date"></p>
         </div>
         
         <main>
@@ -423,15 +451,44 @@
             </div>
             
             <div class="photo-section">
-                <p class="photo-label">📷 Evidence Photo (optional)</p>
-                <div class="camera-box small" id="evidence-capture">
-                    <div class="camera-icon">📷</div>
-                    <p>Tap to photograph items in storage</p>
-                    <input type="file" accept="image/*" capture="environment" id="evidence-photo" hidden>
+                <p class="photo-label">📷 Delivery Photos</p>
+                
+                <!-- Photo Mode Selection -->
+                <div id="photo-mode-select" class="photo-mode-buttons">
+                    <button class="photo-mode-btn" id="photo-mode-individual" onclick="app.setPhotoMode('individual')">
+                        📸 Individual Items
+                    </button>
+                    <button class="photo-mode-btn" id="photo-mode-group" onclick="app.setPhotoMode('group')">
+                        📦 Group Photo
+                    </button>
+                    <button class="photo-mode-btn photo-mode-skip" id="photo-mode-skip" onclick="app.setPhotoMode('skip')">
+                        ⏭️ Skip Photos
+                    </button>
                 </div>
-                <div id="evidence-preview" class="photo-preview hidden">
-                    <img id="evidence-img" src="" alt="Evidence photo">
-                    <button class="remove-photo" id="remove-evidence">✕</button>
+                
+                <!-- Group Photo Mode -->
+                <div id="group-photo-section" class="hidden">
+                    <div class="camera-box small" id="evidence-capture">
+                        <div class="camera-icon">📷</div>
+                        <p>Tap to photograph all items together</p>
+                        <input type="file" accept="image/*" capture="environment" id="evidence-photo" hidden>
+                    </div>
+                    <div id="evidence-preview" class="photo-preview hidden">
+                        <img id="evidence-img" src="" alt="Evidence photo">
+                        <button class="remove-photo" id="remove-evidence">✕</button>
+                    </div>
+                </div>
+                
+                <!-- Individual Photo Mode -->
+                <div id="individual-photo-section" class="hidden">
+                    <div id="individual-photo-list" class="individual-photo-list">
+                        <!-- Populated by JS for each selected item -->
+                    </div>
+                </div>
+                
+                <!-- Upload status indicator -->
+                <div id="photo-upload-note" class="photo-upload-note hidden">
+                    📤 Photos will be uploaded to Simpro after allocation
                 </div>
             </div>
         </main>
@@ -439,6 +496,9 @@
         <footer>
             <button class="btn btn-primary btn-large" id="allocate-btn" disabled>
                 ✓ Allocate Items
+            </button>
+            <button class="btn btn-secondary btn-large hidden" id="reprint-labels-btn" onclick="app.reprintLabels()">
+                🏷️ Print Labels
             </button>
         </footer>
     </div>
@@ -469,7 +529,8 @@
                 <p id="success-summary">0 items → Storage</p>
                 <p id="success-received-by" class="detail staff-badge">Received by: <strong id="success-staff-name">Staff</strong></p>
                 <p id="success-verification" class="detail verification-status"></p>
-                <p id="success-photo" class="detail">Photo saved</p>
+                <p id="success-backorder" class="detail" style="display:none;"></p>
+                <p id="success-photo" class="detail"></p>
             </div>
             
             <div class="label-section">
@@ -477,6 +538,14 @@
                 <p id="label-count">0 labels ready to print</p>
                 <button class="btn btn-secondary btn-large" id="print-labels-btn">
                     🖨️ Print Labels
+                </button>
+            </div>
+            
+            <div class="picking-slip-section" id="picking-slip-section" style="display:none;">
+                <h3>📋 Picking Slip</h3>
+                <p id="picking-slip-status">Generate a picking slip for field workers</p>
+                <button class="btn btn-secondary btn-large" id="generate-picking-slip-btn" onclick="app.generatePickingSlip()">
+                    📋 Generate Picking Slip
                 </button>
             </div>
         </main>
@@ -930,6 +999,27 @@
     <!-- Hidden Label Print Container -->
     <div id="label-print-container" class="print-only">
         <!-- Labels generated by JS -->
+    </div>
+
+    <!-- Mystery Box Search Screen -->
+    <div id="screen-mystery" class="screen">
+        <header>
+            <button class="back-btn" onclick="app.showHomeScreen()">← Back</button>
+            <h1>🔍 Mystery Box</h1>
+        </header>
+        
+        <main>
+            <div class="search-box">
+                <input type="text" id="mystery-search" placeholder="Enter shipping #, tracking #, or packing slip #">
+                <button class="btn btn-primary" id="mystery-search-btn" onclick="app.searchMysteryBox()">
+                    🔍 Search
+                </button>
+            </div>
+            
+            <div id="mystery-results" class="mystery-results">
+                <p class="hint-text">Search by any number found on the box</p>
+            </div>
+        </main>
     </div>
 
     <script src="app.js"></script>
