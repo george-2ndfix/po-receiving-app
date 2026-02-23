@@ -15,9 +15,10 @@ from flask import Flask, request, jsonify, send_from_directory, session
 import requests
 import io
 import base64
+from PIL import Image, ImageDraw, ImageFont
 
 app = Flask(__name__, static_folder='.')
-app.secret_key = secrets.token_hex(32)
+app.secret_key = os.environ.get('SECRET_KEY', '2ndfix-po-app-secret-key-2026-persistent')
 
 @app.after_request
 def add_cache_headers(response):
@@ -136,24 +137,23 @@ def init_db():
     
     # Seed all staff accounts (survives Render restarts)
     # Each staff member is created if they don't already exist
-    default_password = hash_password('2ndFix2026')
     staff_seed = [
-        ('george', 'George', 'admin'),
-        ('jim', 'Jim', 'manager'),
-        ('cherie', 'Cherie', 'manager'),
-        ('tom', 'Tom', 'manager'),
-        ('tyrese', 'Tyrese', 'staff'),
-        ('mik', 'Mik', 'staff'),
-        ('ryan', 'Ryan', 'staff'),
+        ('george', 'George', 'admin', '2ndFix5082'),
+        ('jim', 'Jim', 'manager', '2ndFix5082'),
+        ('cherie', 'Cherie', 'manager', '2ndFix5082'),
+        ('tom', 'Tom', 'manager', '2ndFix5082'),
+        ('tyrese', 'Tyrese', 'staff', 'Tyrese123'),
+        ('mik', 'Mik', 'staff', '2ndFix5082$'),
+        ('ryan', 'Ryan', 'staff', '2ndFix5082$'),
     ]
     
-    for username, display_name, role in staff_seed:
+    for username, display_name, role, password in staff_seed:
         cursor.execute("SELECT COUNT(*) FROM staff WHERE username = ?", (username,))
         if cursor.fetchone()[0] == 0:
             cursor.execute('''
                 INSERT INTO staff (username, display_name, password_hash, role, active)
                 VALUES (?, ?, ?, ?, ?)
-            ''', (username, display_name, hash_password('2ndFix2026'), role, 1))
+            ''', (username, display_name, hash_password(password), role, 1))
             print(f"Created staff account: {username} ({role})")
     
     conn.commit()
@@ -514,6 +514,148 @@ def simpro_request(method, endpoint, **kwargs):
             raise
     
     return response
+
+# ============================================
+# Label Image Generation
+# ============================================
+def _load_label_fonts():
+    """Load fonts for label generation with fallbacks."""
+    font_paths_regular = [
+        '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+        '/usr/share/fonts/TTF/DejaVuSans.ttf',
+        '/usr/share/fonts/dejavu/DejaVuSans.ttf',
+    ]
+    font_paths_bold = [
+        '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+        '/usr/share/fonts/TTF/DejaVuSans-Bold.ttf',
+        '/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf',
+    ]
+    
+    regular_font = None
+    bold_font = None
+    regular_small = None
+    
+    for path in font_paths_regular:
+        try:
+            regular_font = ImageFont.truetype(path, 28)
+            regular_small = ImageFont.truetype(path, 24)
+            break
+        except (OSError, IOError):
+            continue
+    
+    for path in font_paths_bold:
+        try:
+            bold_font = ImageFont.truetype(path, 28)
+            break
+        except (OSError, IOError):
+            continue
+    
+    if regular_font is None:
+        regular_font = ImageFont.load_default()
+        regular_small = regular_font
+    if bold_font is None:
+        bold_font = regular_font
+    
+    return regular_font, bold_font, regular_small
+
+@app.route('/api/generate-labels', methods=['POST'])
+@login_required
+def generate_labels():
+    """Generate label images as base64-encoded PNGs."""
+    try:
+        data = request.get_json()
+        if not data or 'items' not in data:
+            return jsonify({'error': 'Missing items in request'}), 400
+        
+        items = data['items']
+        po_number = data.get('poNumber', 'N/A')
+        today = datetime.now().strftime('%d/%m/%Y')
+        
+        regular_font, bold_font, small_font = _load_label_fonts()
+        
+        labels = []
+        for item in items:
+            # Create label image
+            img = Image.new('RGB', (900, 280), 'white')
+            draw = ImageDraw.Draw(img)
+            
+            job_number = item.get('jobNumber', '')
+            customer_name = item.get('customerName', '')
+            part_no = item.get('partNo', '')
+            description = item.get('description', '')
+            quantity = item.get('quantity', 0)
+            storage_location = item.get('storageLocation', '')
+            
+            # Line 1: Job {jobNumber}  {customerName}  │  {partNo}  {description}
+            x = 20
+            y = 40
+            
+            # Job number and customer in regular font
+            job_text = f"Job {job_number}" if job_number else ""
+            if job_text:
+                draw.text((x, y), job_text, fill='black', font=regular_font)
+                bbox = draw.textbbox((x, y), job_text, font=regular_font)
+                x = bbox[2] + 12
+            
+            if customer_name:
+                draw.text((x, y), customer_name, fill='black', font=regular_font)
+                bbox = draw.textbbox((x, y), customer_name, font=regular_font)
+                x = bbox[2] + 12
+            
+            # Separator
+            if job_text or customer_name:
+                draw.text((x, y), "│", fill='black', font=regular_font)
+                bbox = draw.textbbox((x, y), "│", font=regular_font)
+                x = bbox[2] + 12
+            
+            # Part code in BOLD
+            if part_no:
+                draw.text((x, y), part_no, fill='black', font=bold_font)
+                bbox = draw.textbbox((x, y), part_no, font=bold_font)
+                x = bbox[2] + 12
+            
+            # Description in regular - truncate if needed
+            if description:
+                max_desc_width = 880 - x
+                desc_text = description
+                # Truncate description if too long
+                while desc_text:
+                    bbox = draw.textbbox((0, 0), desc_text, font=regular_font)
+                    if bbox[2] - bbox[0] <= max_desc_width:
+                        break
+                    desc_text = desc_text[:-1]
+                if desc_text != description and len(desc_text) > 3:
+                    desc_text = desc_text[:-3] + '...'
+                draw.text((x, y), desc_text, fill='black', font=regular_font)
+            
+            # Line 2: Qty: {quantity}  {storageLocation}  {date}  PO {poNumber}
+            x = 20
+            y = 140
+            
+            line2_parts = []
+            line2_parts.append(f"Qty: {quantity}")
+            if storage_location:
+                line2_parts.append(storage_location)
+            line2_parts.append(today)
+            line2_parts.append(f"PO {po_number}")
+            
+            line2_text = "    ".join(line2_parts)
+            draw.text((x, y), line2_text, fill='black', font=small_font)
+            
+            # Draw a thin border
+            draw.rectangle([0, 0, 899, 279], outline='#cccccc', width=1)
+            
+            # Convert to base64 PNG
+            buffer = io.BytesIO()
+            img.save(buffer, format='PNG', dpi=(360, 360))
+            buffer.seek(0)
+            labels.append(base64.b64encode(buffer.getvalue()).decode('utf-8'))
+        
+        return jsonify({'labels': labels})
+        
+    except Exception as e:
+        print(f"[{datetime.now()}] Label generation error: {e}")
+        return jsonify({'error': f'Label generation failed: {str(e)}'}), 500
 
 # ============================================
 # Static File Routes
