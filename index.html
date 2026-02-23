@@ -118,6 +118,15 @@
                     </div>
                     <div class="option-arrow">→</div>
                 </button>
+                
+                <button class="home-option" id="option-labels">
+                    <div class="option-icon">🏷️</div>
+                    <div class="option-content">
+                        <h3>Print Labels</h3>
+                        <p>Reprint labels for allocated PO items</p>
+                    </div>
+                    <div class="option-arrow">→</div>
+                </button>
             </div>
             
             <div class="home-alerts" id="home-alerts">
@@ -1020,6 +1029,42 @@
                 <p class="hint-text">Search by any number found on the box</p>
             </div>
         </main>
+    </div>
+
+    <!-- Print Labels Screen -->
+    <div id="screen-labels" class="screen">
+        <header>
+            <button class="back-btn" data-screen="home">← Back</button>
+            <h1>🏷️ Print Labels</h1>
+        </header>
+        
+        <main>
+            <div class="input-group">
+                <label for="label-po-input">Purchase Order Number</label>
+                <div class="input-with-btn">
+                    <input type="number" id="label-po-input" placeholder="Enter PO number..." inputmode="numeric">
+                    <button class="btn btn-primary" id="label-lookup-btn">Look Up</button>
+                </div>
+            </div>
+            
+            <div id="label-po-info" class="po-info-card" style="display:none;">
+                <div class="po-info-header">
+                    <h3 id="label-po-title"></h3>
+                    <span id="label-po-vendor" class="po-vendor"></span>
+                </div>
+                <div id="label-po-job" class="po-job"></div>
+            </div>
+            
+            <div id="label-items-list" class="items-list">
+                <!-- Items populated by JS -->
+            </div>
+        </main>
+        
+        <footer>
+            <button class="btn btn-primary btn-large hidden" id="print-labels-btn2" onclick="app.printLabelsFromScreen()">
+                🏷️ Print Labels
+            </button>
+        </footer>
     </div>
 
     <script src="app.js"></script>

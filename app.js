@@ -65,6 +65,11 @@ const app = {
         document.getElementById('mystery-search')?.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') this.searchMysteryBox();
         });
+        document.getElementById('option-labels')?.addEventListener('click', () => this.showScreen('labels'));
+        document.getElementById('label-po-input')?.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') this.lookupLabels();
+        });
+        document.getElementById('label-lookup-btn')?.addEventListener('click', () => this.lookupLabels());
         
         // Relocate flow
         document.getElementById('relocate-source-dropdown')?.addEventListener('change', (e) => this.selectRelocateSource(e));
@@ -606,6 +611,128 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         if (!container) return;
         
         const po = this.currentPO;
+        const today = new Date().toLocaleDateString('en-AU');
+        container.innerHTML = '';
+        
+        let labelCount = 0;
+        po.items.forEach(item => {
+            if (!item.storageLocation || item.storageLocation === 'Stock Holding') return;
+            
+            const qty = item.quantityReceived || item.quantityOrdered;
+            for (let i = 0; i < qty; i++) {
+                const label = document.createElement('div');
+                label.className = 'print-label';
+                label.innerHTML = `
+                    <div class="label-row-top">
+                        <span class="label-job">${item.jobNumber ? 'Job ' + item.jobNumber : ''}</span>
+                        <span class="label-customer">${item.customerName || ''}</span>
+                        <span class="label-separator">│</span>
+                        <span class="label-partno">${item.partNo || ''}</span>
+                        <span class="label-desc">${item.description}</span>
+                    </div>
+                    <div class="label-row-bottom">
+                        <span class="label-qty">Qty: ${qty}</span>
+                        <span class="label-location">${item.storageLocation}</span>
+                        <span class="label-date">${today}</span>
+                        <span class="label-po">PO ${po.poNumber}</span>
+                    </div>
+                `;
+                container.appendChild(label);
+                labelCount++;
+            }
+        });
+        
+        if (labelCount === 0) {
+            alert('No allocated items to print labels for.');
+            return;
+        }
+        
+        window.print();
+    },
+    
+    async lookupLabels() {
+        const poInput = document.getElementById('label-po-input');
+        const poNumber = poInput.value.trim();
+        if (!poNumber) {
+            alert('Please enter a PO number');
+            return;
+        }
+        
+        const lookupBtn = document.getElementById('label-lookup-btn');
+        lookupBtn.disabled = true;
+        lookupBtn.textContent = 'Looking up...';
+        
+        try {
+            const response = await fetch(`/api/po/${poNumber}`, {
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error(err.error || 'PO not found');
+            }
+            
+            const data = await response.json();
+            this.labelPO = data;
+            
+            // Show PO info
+            const infoCard = document.getElementById('label-po-info');
+            document.getElementById('label-po-title').textContent = `PO #${data.poNumber}`;
+            document.getElementById('label-po-vendor').textContent = data.vendorName || '';
+            document.getElementById('label-po-job').textContent = data.jobNumber 
+                ? `Job ${data.jobNumber}${data.customerName ? ' - ' + data.customerName : ''}`
+                : 'No job linked';
+            infoCard.style.display = 'block';
+            
+            // Show items with storage locations
+            const itemsList = document.getElementById('label-items-list');
+            const allocatedItems = data.items.filter(item => 
+                item.storageLocation && item.storageLocation !== 'Stock Holding'
+            );
+            
+            if (allocatedItems.length === 0) {
+                itemsList.innerHTML = `
+                    <div class="empty-state">
+                        <p>⚠️ No allocated items found on this PO.</p>
+                        <p>Items must be allocated to a storage location before labels can be printed.</p>
+                    </div>
+                `;
+                document.getElementById('print-labels-btn2').classList.add('hidden');
+            } else {
+                itemsList.innerHTML = allocatedItems.map(item => `
+                    <div class="item-card">
+                        <div class="item-details">
+                            <div class="item-name">${item.description}</div>
+                            <div class="item-meta">
+                                ${item.partNo ? `<span class="item-part">${item.partNo}</span>` : ''}
+                                ${item.jobNumber ? `<span class="item-job">Job ${item.jobNumber}${item.customerName ? ' - ' + item.customerName : ''}</span>` : ''}
+                                <span class="item-qty">Qty: ${item.quantityReceived || item.quantityOrdered}</span>
+                                <span class="item-storage">📍 ${item.storageLocation}</span>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+                document.getElementById('print-labels-btn2').classList.remove('hidden');
+            }
+            
+        } catch (err) {
+            alert(err.message);
+            document.getElementById('label-po-info').style.display = 'none';
+            document.getElementById('label-items-list').innerHTML = '';
+            document.getElementById('print-labels-btn2').classList.add('hidden');
+        } finally {
+            lookupBtn.disabled = false;
+            lookupBtn.textContent = 'Look Up';
+        }
+    },
+    
+    printLabelsFromScreen() {
+        if (!this.labelPO) return;
+        
+        const container = document.getElementById('label-print-container');
+        if (!container) return;
+        
+        const po = this.labelPO;
         const today = new Date().toLocaleDateString('en-AU');
         container.innerHTML = '';
         
