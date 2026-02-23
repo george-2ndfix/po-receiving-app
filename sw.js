@@ -1,16 +1,14 @@
-const CACHE_NAME = 'po-receiving-v9';
+const CACHE_NAME = 'po-receiving-v23';
 const urlsToCache = [
-  '/',
-  '/index.html',
   '/styles.css',
   '/storage-locations.json',
   '/pick_list_data.json',
   '/icons/icon-192.png',
   '/icons/icon-512.png'
 ];
-// NOTE: app.js NOT cached - always fetch fresh to get latest code
+// NOTE: index.html and app.js NOT cached - always fetch fresh to get latest code
 
-// Install - cache assets
+// Install - cache static assets only
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
@@ -19,7 +17,7 @@ self.addEventListener('install', event => {
   self.skipWaiting();
 });
 
-// Activate - clean old caches
+// Activate - clean old caches immediately
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys().then(cacheNames => {
@@ -35,17 +33,23 @@ self.addEventListener('activate', event => {
   self.clients.claim();
 });
 
-// Fetch - network first for API and app.js, cache fallback for static assets
+// Fetch - network first for HTML, JS, and API; cache fallback for static assets
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
   
-  // Always fetch API calls and app.js from network
-  if (url.pathname.startsWith('/api/') || url.pathname === '/app.js') {
-    event.respondWith(fetch(event.request));
+  // Always fetch HTML, API calls, and JS from network
+  if (url.pathname.startsWith('/api/') || 
+      url.pathname === '/app.js' || 
+      url.pathname === '/' || 
+      url.pathname === '/index.html' ||
+      url.pathname === '/sw.js') {
+    event.respondWith(
+      fetch(event.request).catch(() => caches.match(event.request))
+    );
     return;
   }
   
-  // For other resources, try cache first, then network
+  // For static assets (CSS, images, JSON), try cache first, then network
   event.respondWith(
     caches.match(event.request)
       .then(response => {

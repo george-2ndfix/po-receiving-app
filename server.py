@@ -19,6 +19,16 @@ import base64
 app = Flask(__name__, static_folder='.')
 app.secret_key = secrets.token_hex(32)
 
+@app.after_request
+def add_cache_headers(response):
+    """Prevent browser caching of HTML and JS files"""
+    if response.content_type and ('text/html' in response.content_type or 
+                                   'javascript' in response.content_type):
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+    return response
+
 # ============================================
 # Configuration
 # ============================================
