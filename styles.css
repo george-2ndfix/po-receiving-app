@@ -702,40 +702,36 @@ footer {
         overflow: hidden;
     }
     
-    /* Row 1: Job number + Customer name (bold, prominent) */
+    /* Row 1: Job + Customer + Product code + Description */
     .label-row-top {
-        font-size: 13pt;
-        font-weight: bold;
-        line-height: 1.2;
+        font-size: 11pt;
+        line-height: 1.3;
     }
     .label-job {
+        font-weight: bold;
         flex-shrink: 0;
     }
     .label-customer {
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-    
-    /* Row 2: Product code + description */
-    .label-row-product {
-        font-size: 11pt;
-        font-weight: normal;
-        line-height: 1.2;
+        font-weight: bold;
+        flex-shrink: 0;
     }
     .label-partno {
         font-weight: bold;
         flex-shrink: 0;
+        margin-left: 1mm;
+        padding-left: 2mm;
+        border-left: 0.5pt solid #999;
     }
     .label-desc {
         overflow: hidden;
         text-overflow: ellipsis;
     }
     
-    /* Row 3: Qty | Location | Date | PO */
+    /* Row 2: Qty | Location | Date | PO */
     .label-row-bottom {
-        font-size: 9pt;
+        font-size: 10pt;
         font-weight: normal;
-        line-height: 1.2;
+        line-height: 1.3;
         color: #333;
     }
     .label-qty {
@@ -743,6 +739,7 @@ footer {
         flex-shrink: 0;
     }
     .label-location {
+        font-weight: bold;
         flex-shrink: 0;
     }
     .label-date {

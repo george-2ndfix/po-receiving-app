@@ -1279,9 +1279,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                 <div class="label-row label-row-top">
                     <span class="label-job">Job ${itemJob}</span>
                     <span class="label-customer">${itemCustomer}</span>
-                </div>
-                <div class="label-row label-row-product">
-                    <span class="label-partno">${item.partNo || 'N/A'}</span>
+                    <span class="label-partno">${item.partNo || ''}</span>
                     <span class="label-desc">${item.description}</span>
                 </div>
                 <div class="label-row label-row-bottom">
