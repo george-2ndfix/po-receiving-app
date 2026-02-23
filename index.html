@@ -23,12 +23,27 @@
     <!-- Tesseract.js OCR -->
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     
-    <!-- Register Service Worker -->
+    <!-- Register Service Worker with Force Update -->
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('sw.js')
-                    .then(reg => console.log('SW registered'))
+                    .then(reg => {
+                        console.log('SW registered');
+                        // Check for updates immediately and every 5 minutes
+                        reg.update();
+                        setInterval(() => reg.update(), 5 * 60 * 1000);
+                        // When new SW is waiting, activate it immediately
+                        reg.addEventListener('updatefound', () => {
+                            const newWorker = reg.installing;
+                            newWorker.addEventListener('statechange', () => {
+                                if (newWorker.state === 'activated') {
+                                    console.log('New version available - refreshing');
+                                    window.location.reload();
+                                }
+                            });
+                        });
+                    })
                     .catch(err => console.log('SW failed:', err));
             });
         }
@@ -49,7 +64,7 @@
             </div>
             
             <div class="input-group" style="flex-direction: column; gap: 16px;">
-                <input type="text" id="login-username" placeholder="Username" style="text-align: center; font-size: 18px;" autocapitalize="none" autocomplete="username">
+                <input type="text" id="login-username" placeholder="Username" style="text-align: center; font-size: 18px;" autocapitalize="sentences" autocomplete="username">
                 <input type="password" id="login-password" placeholder="Password" style="text-align: center; font-size: 18px;" autocomplete="current-password">
                 <button class="btn btn-primary" id="login-btn" style="width: 100%;">Login →</button>
             </div>

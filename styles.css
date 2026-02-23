@@ -1461,7 +1461,7 @@ footer {
 
 /* Login Screen Username */
 #login-username {
-    text-transform: lowercase;
+    text-transform: none;
 }
 
 /* ============================================
@@ -1875,4 +1875,66 @@ footer {
     text-align: center;
     color: var(--gray-500);
     margin-top: 40px;
+}
+
+/* Label Image Overlay */
+#label-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+.label-overlay-content {
+    background: white;
+    border-radius: 16px;
+    padding: 20px;
+    max-width: 95vw;
+    max-height: 90vh;
+    overflow-y: auto;
+    width: 100%;
+}
+.label-overlay-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+}
+.label-overlay-header h2 {
+    margin: 0;
+    font-size: 1.3rem;
+}
+.label-generating {
+    text-align: center;
+    color: #6b7280;
+    padding: 20px;
+}
+.label-image-wrapper {
+    margin-bottom: 12px;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    overflow: hidden;
+}
+.label-image {
+    width: 100%;
+    height: auto;
+    display: block;
+}
+.label-overlay-footer {
+    margin-top: 15px;
+    padding: 12px;
+    background: #f0f9ff;
+    border-radius: 8px;
+    text-align: center;
+    color: #1e40af;
+    font-size: 0.9rem;
+}
+.label-overlay-footer p {
+    margin: 0;
 }
