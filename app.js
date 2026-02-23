@@ -1259,7 +1259,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
     // Labels
     // ============================================
     printLabels() {
-        // Generate labels
+        // Generate labels - one sticker per item
         const container = document.getElementById('label-print-container');
         container.innerHTML = '';
         
@@ -1271,17 +1271,27 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         const poCustomerName = this.currentPO?.customerName || 'N/A';
         
         this.selectedItems.forEach(item => {
-            for (let i = 0; i < item.quantity; i++) {
-                const label = document.createElement('div');
-                label.className = 'label';
-                const itemJob = item.jobNumber || poJobNumber;
-                const itemCustomer = item.customerName || poCustomerName;
-                label.innerHTML = `
-                    <div class="label-line1">PO ${poNumber} | Job ${itemJob} - ${itemCustomer} | ${item.partNo || 'N/A'}</div>
-                    <div class="label-line2">${item.description} | ${storageLocation} | ${dateStr}</div>
-                `;
-                container.appendChild(label);
-            }
+            const label = document.createElement('div');
+            label.className = 'print-label';
+            const itemJob = item.jobNumber || poJobNumber;
+            const itemCustomer = item.customerName || poCustomerName;
+            label.innerHTML = `
+                <div class="label-row label-row-top">
+                    <span class="label-job">Job ${itemJob}</span>
+                    <span class="label-customer">${itemCustomer}</span>
+                </div>
+                <div class="label-row label-row-product">
+                    <span class="label-partno">${item.partNo || 'N/A'}</span>
+                    <span class="label-desc">${item.description}</span>
+                </div>
+                <div class="label-row label-row-bottom">
+                    <span class="label-qty">Qty: ${item.quantity}</span>
+                    <span class="label-location">${storageLocation}</span>
+                    <span class="label-date">${dateStr}</span>
+                    <span class="label-po">PO ${poNumber}</span>
+                </div>
+            `;
+            container.appendChild(label);
         });
         
         window.print();
