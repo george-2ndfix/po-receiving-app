@@ -789,11 +789,17 @@ def allocate_items():
                 results.append({'catalogId': None, 'success': False, 'error': 'Missing catalog ID'})
                 continue
             
-            # Fix quantity: if 0 or missing, default to 1
+            # Fix quantity: if 0 or missing, use quantityOrdered from front-end, then default to 1
             if not quantity or quantity <= 0:
-                quantity = 1
-                item['quantity'] = 1
-                print(f"Fixed quantity for catalog {catalog_id}: defaulting to 1")
+                qty_ordered = item.get('quantityOrdered', 0)
+                if qty_ordered > 0:
+                    quantity = qty_ordered
+                    item['quantity'] = qty_ordered
+                    print(f"Fixed quantity for catalog {catalog_id}: using quantityOrdered={qty_ordered}")
+                else:
+                    quantity = 1
+                    item['quantity'] = 1
+                    print(f"Fixed quantity for catalog {catalog_id}: defaulting to 1 (no quantityOrdered available)")
             
             # Server-side receipt detection (overrides front-end if we have data)
             is_receipted = po_is_receipted or receipt_status == 'fully_receipted'
@@ -841,18 +847,57 @@ def allocate_items():
         
         # ============================================
         # Path 1: Pre-receipt allocation (set storage before Ezybills receipts)
+        # CRITICAL: Must preserve AssignedTo/CostCenter from existing allocations!
+        # The PUT replaces ALL allocations, so we must include AssignedTo.
         # ============================================
         for item in pre_receipt_items:
             catalog_id = item.get('catalogId')
             quantity = item.get('quantity', 1)
             
+            # Use the quantity from the request, but also validate against ordered qty
+            qty_ordered = item.get('quantityOrdered', 0)
+            if qty_ordered > 0 and quantity <= 0:
+                quantity = qty_ordered
+            
             allocation_url = f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/catalogs/{catalog_id}/allocations/'
             
-            # Simpro API requires an ARRAY of allocations
-            payload = [{
+            # FIRST: Fetch existing allocations to preserve AssignedTo/CostCenter
+            existing_assigned_to = None
+            try:
+                existing_resp = simpro_request('GET', allocation_url)
+                if existing_resp.status_code == 200:
+                    existing_allocs = existing_resp.json()
+                    print(f"[PRE-RECEIPT] Existing allocations for catalog {catalog_id}: {existing_allocs}")
+                    if existing_allocs and len(existing_allocs) > 0:
+                        # Preserve the AssignedTo from the first allocation that has one
+                        for existing_alloc in existing_allocs:
+                            if existing_alloc.get('AssignedTo'):
+                                existing_assigned_to = existing_alloc.get('AssignedTo')
+                                print(f"[PRE-RECEIPT] Preserving AssignedTo: {existing_assigned_to}")
+                                break
+                        # Also use the existing quantity if ours seems wrong
+                        if quantity <= 0:
+                            for existing_alloc in existing_allocs:
+                                eq = existing_alloc.get('Quantity', 0)
+                                if eq > 0:
+                                    quantity = eq
+                                    print(f"[PRE-RECEIPT] Using existing quantity: {quantity}")
+                                    break
+            except Exception as ae:
+                print(f"[PRE-RECEIPT] Error fetching existing allocations: {ae}")
+            
+            # Build payload - Simpro API requires an ARRAY of allocations
+            alloc_entry = {
                 'StorageDevice': int(storage_device_id),
                 'Quantity': int(quantity)
-            }]
+            }
+            
+            # CRITICAL: Include AssignedTo to preserve cost center/job assignment
+            if existing_assigned_to:
+                alloc_entry['AssignedTo'] = existing_assigned_to
+                print(f"[PRE-RECEIPT] Including AssignedTo in PUT to preserve cost center")
+            
+            payload = [alloc_entry]
             
             print(f"[PRE-RECEIPT] PUT {allocation_url} with payload: {payload}")
             response = simpro_request('PUT', allocation_url, json=payload)

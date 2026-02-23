@@ -655,13 +655,22 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             this.selectedItems.splice(idx, 1);
             if (qtyInput) { qtyInput.disabled = true; }
         } else {
-            const qty = qtyInput ? parseInt(qtyInput.value) || remaining : remaining;
+            // For fully receipted items (remaining=0), use the ordered quantity
+            let qty;
+            if (item.receiptStatus === 'fully_receipted' || remaining <= 0) {
+                qty = qtyInput ? parseInt(qtyInput.value) || item.quantityOrdered : item.quantityOrdered;
+            } else {
+                qty = qtyInput ? parseInt(qtyInput.value) || remaining : remaining;
+            }
             this.selectedItems.push({
                 index,
                 catalogId: item.catalogId,
                 description: item.description,
                 partNo: item.partNo,
                 quantity: qty,
+                receiptStatus: item.receiptStatus,
+                quantityOrdered: item.quantityOrdered,
+                quantityReceived: item.quantityReceived,
                 jobNumber: item.jobNumber,
                 customerName: item.customerName
             });
@@ -799,8 +808,10 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                     vendorName: this.currentPO.vendorName,
                     items: this.selectedItems.map(item => ({
                         catalogId: item.catalogId,
-                        quantity: item.quantity || item.received || item.ordered || 1,
-                        receiptStatus: item.receiptStatus || 'not_receipted'
+                        quantity: item.quantity || item.quantityOrdered || 1,
+                        receiptStatus: item.receiptStatus || 'not_receipted',
+                        quantityOrdered: item.quantityOrdered || 0,
+                        quantityReceived: item.quantityReceived || 0
                     })),
                     storageDeviceId: this.selectedStorage.id,
                     storageName: this.selectedStorage.name
