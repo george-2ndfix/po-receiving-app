@@ -1436,12 +1436,15 @@ def upload_photos():
                     print(f"Error creating PO folder for PO {po_simpro_id}: {cfe}")
             
             # Upload each photo to PO
+            print(f"PO upload: po_simpro_id={po_simpro_id}, po_folder_id={po_folder_id}, photos count={len(photos)}")
             for photo in photos:
                 base64_data = photo.get('base64', '')
                 filename = photo.get('filename', f'PO_{po_number}_{date_str}.jpg')
                 
                 if ',' in base64_data:
                     base64_data = base64_data.split(',')[1]
+                
+                print(f"PO upload attempt: filename={filename}, base64 length={len(base64_data)}")
                 
                 po_upload_payload = {
                     "Filename": filename,
@@ -1450,20 +1453,36 @@ def upload_photos():
                 }
                 
                 if po_folder_id:
-                    po_upload_payload["Folder"] = po_folder_id
+                    po_upload_payload["Folder"] = int(po_folder_id) if po_folder_id else None
                 
                 try:
                     po_upload_resp = simpro_request('POST', f'/companies/{COMPANY_ID}/vendorOrders/{po_simpro_id}/attachments/files/',
                                                      json=po_upload_payload)
-                    if po_upload_resp.status_code in (200, 201):
+                    print(f"PO upload response: {po_upload_resp.status_code} {po_upload_resp.text[:500]}")
+                    if po_upload_resp.status_code in (200, 201, 202):
                         results.append({'target': f'PO {po_number}', 'filename': filename, 'success': True})
                         po_results.append(True)
                         print(f"Uploaded {filename} to PO {po_simpro_id}")
                     else:
-                        results.append({'target': f'PO {po_number}', 'filename': filename, 'success': False, 'error': f'Status {po_upload_resp.status_code}'})
-                        po_results.append(False)
-                        print(f"Failed upload {filename} to PO {po_simpro_id}: {po_upload_resp.status_code} {po_upload_resp.text}")
+                        # Retry without folder in case folder ID is the issue
+                        print(f"PO upload failed with folder, retrying without folder...")
+                        retry_payload = {
+                            "Filename": filename,
+                            "Public": True,
+                            "Base64Data": base64_data
+                        }
+                        retry_resp = simpro_request('POST', f'/companies/{COMPANY_ID}/vendorOrders/{po_simpro_id}/attachments/files/',
+                                                     json=retry_payload)
+                        print(f"PO retry response: {retry_resp.status_code} {retry_resp.text[:500]}")
+                        if retry_resp.status_code in (200, 201, 202):
+                            results.append({'target': f'PO {po_number}', 'filename': filename, 'success': True})
+                            po_results.append(True)
+                            print(f"Uploaded {filename} to PO {po_simpro_id} (without folder)")
+                        else:
+                            results.append({'target': f'PO {po_number}', 'filename': filename, 'success': False, 'error': f'Status {retry_resp.status_code}: {retry_resp.text[:200]}'})
+                            po_results.append(False)
                 except Exception as ue:
+                    print(f"PO upload exception: {ue}")
                     results.append({'target': f'PO {po_number}', 'filename': filename, 'success': False, 'error': str(ue)})
                     po_results.append(False)
         
