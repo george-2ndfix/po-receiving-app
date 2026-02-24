@@ -605,49 +605,25 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         this.showScreen('verify');
     },
     
-    reprintLabels() {
-        // Build labels for all allocated items in this PO
-        const container = document.getElementById('label-print-container');
-        if (!container) return;
-        
+    async reprintLabels() {
         const po = this.currentPO;
-        const today = new Date().toLocaleDateString('en-AU');
-        container.innerHTML = '';
+        const items = po.items
+            .filter(item => item.storageLocation && item.storageLocation !== 'Stock Holding')
+            .map(item => ({
+                jobNumber: item.jobNumber || po.jobNumber || '',
+                customerName: item.customerName || po.customerName || '',
+                partNo: item.partNo || '',
+                description: item.description,
+                quantity: item.quantityReceived || item.quantityOrdered,
+                storageLocation: item.storageLocation
+            }));
         
-        let labelCount = 0;
-        po.items.forEach(item => {
-            if (!item.storageLocation || item.storageLocation === 'Stock Holding') return;
-            
-            const qty = item.quantityReceived || item.quantityOrdered;
-            for (let i = 0; i < qty; i++) {
-                const label = document.createElement('div');
-                label.className = 'print-label';
-                label.innerHTML = `
-                    <div class="label-row-top">
-                        <span class="label-job">${item.jobNumber ? 'Job ' + item.jobNumber : ''}</span>
-                        <span class="label-customer">${item.customerName || ''}</span>
-                        <span class="label-separator">│</span>
-                        <span class="label-partno">${item.partNo || ''}</span>
-                        <span class="label-desc">${item.description}</span>
-                    </div>
-                    <div class="label-row-bottom">
-                        <span class="label-qty">Qty: ${qty}</span>
-                        <span class="label-location">${item.storageLocation}</span>
-                        <span class="label-date">${today}</span>
-                        <span class="label-po">PO ${po.poNumber}</span>
-                    </div>
-                `;
-                container.appendChild(label);
-                labelCount++;
-            }
-        });
-        
-        if (labelCount === 0) {
+        if (items.length === 0) {
             alert('No allocated items to print labels for.');
             return;
         }
         
-        window.print();
+        await this.generateAndShowLabels(items, po.poNumber);
     },
     
     async lookupLabels() {
@@ -726,50 +702,26 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         }
     },
     
-    printLabelsFromScreen() {
+    async printLabelsFromScreen() {
         if (!this.labelPO) return;
-        
-        const container = document.getElementById('label-print-container');
-        if (!container) return;
-        
         const po = this.labelPO;
-        const today = new Date().toLocaleDateString('en-AU');
-        container.innerHTML = '';
+        const items = po.items
+            .filter(item => item.storageLocation && item.storageLocation !== 'Stock Holding')
+            .map(item => ({
+                jobNumber: item.jobNumber || po.jobNumber || '',
+                customerName: item.customerName || po.customerName || '',
+                partNo: item.partNo || '',
+                description: item.description,
+                quantity: item.quantityReceived || item.quantityOrdered,
+                storageLocation: item.storageLocation
+            }));
         
-        let labelCount = 0;
-        po.items.forEach(item => {
-            if (!item.storageLocation || item.storageLocation === 'Stock Holding') return;
-            
-            const qty = item.quantityReceived || item.quantityOrdered;
-            for (let i = 0; i < qty; i++) {
-                const label = document.createElement('div');
-                label.className = 'print-label';
-                label.innerHTML = `
-                    <div class="label-row-top">
-                        <span class="label-job">${item.jobNumber ? 'Job ' + item.jobNumber : ''}</span>
-                        <span class="label-customer">${item.customerName || ''}</span>
-                        <span class="label-separator">│</span>
-                        <span class="label-partno">${item.partNo || ''}</span>
-                        <span class="label-desc">${item.description}</span>
-                    </div>
-                    <div class="label-row-bottom">
-                        <span class="label-qty">Qty: ${qty}</span>
-                        <span class="label-location">${item.storageLocation}</span>
-                        <span class="label-date">${today}</span>
-                        <span class="label-po">PO ${po.poNumber}</span>
-                    </div>
-                `;
-                container.appendChild(label);
-                labelCount++;
-            }
-        });
-        
-        if (labelCount === 0) {
+        if (items.length === 0) {
             alert('No allocated items to print labels for.');
             return;
         }
         
-        window.print();
+        await this.generateAndShowLabels(items, po.poNumber);
     },
     
     toggleItem(index) {
@@ -1452,41 +1404,72 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
     // ============================================
     // Labels
     // ============================================
-    printLabels() {
-        // Generate labels - one sticker per item
-        const container = document.getElementById('label-print-container');
-        container.innerHTML = '';
-        
-        const dateStr = new Date().toLocaleDateString();
+    async printLabels() {
         const storageLocation = this.selectedStorage?.name || this._lastStorageName || 'Unknown';
         const poNumber = this.currentPO?.poNumber || 'N/A';
-        // PO-level fallbacks (used if item doesn't have per-item job)
-        const poJobNumber = this.currentPO?.jobNumber || 'N/A';
-        const poCustomerName = this.currentPO?.customerName || 'N/A';
+        const poJobNumber = this.currentPO?.jobNumber || '';
+        const poCustomerName = this.currentPO?.customerName || '';
         
-        this.selectedItems.forEach(item => {
-            const label = document.createElement('div');
-            label.className = 'print-label';
-            const itemJob = item.jobNumber || poJobNumber;
-            const itemCustomer = item.customerName || poCustomerName;
-            label.innerHTML = `
-                <div class="label-row label-row-top">
-                    <span class="label-job">Job ${itemJob}</span>
-                    <span class="label-customer">${itemCustomer}</span>
-                    <span class="label-partno">${item.partNo || ''}</span>
-                    <span class="label-desc">${item.description}</span>
-                </div>
-                <div class="label-row label-row-bottom">
-                    <span class="label-qty">Qty: ${item.quantity}</span>
-                    <span class="label-location">${storageLocation}</span>
-                    <span class="label-date">${dateStr}</span>
-                    <span class="label-po">PO ${poNumber}</span>
-                </div>
-            `;
-            container.appendChild(label);
-        });
+        const items = this.selectedItems.map(item => ({
+            jobNumber: item.jobNumber || poJobNumber,
+            customerName: item.customerName || poCustomerName,
+            partNo: item.partNo || '',
+            description: item.description,
+            quantity: item.quantity,
+            storageLocation: storageLocation
+        }));
         
-        window.print();
+        await this.generateAndShowLabels(items, poNumber);
+    },
+
+    async generateAndShowLabels(items, poNumber) {
+        // Show loading overlay
+        const overlay = document.createElement('div');
+        overlay.id = 'label-overlay';
+        overlay.innerHTML = `
+            <div class="label-overlay-content">
+                <div class="label-overlay-header">
+                    <h2>🏷️ Labels Ready</h2>
+                    <button class="btn btn-secondary" onclick="document.getElementById('label-overlay').remove()">✕ Close</button>
+                </div>
+                <p class="label-generating">Generating labels...</p>
+                <div id="label-images-container"></div>
+                <div class="label-overlay-footer">
+                    <p>💡 Tap and hold a label image → <strong>Share</strong> → <strong>iPrint&Label</strong> to print on PT-900W</p>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+        
+        try {
+            const response = await fetch('/api/generate-labels', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.token}`
+                },
+                body: JSON.stringify({ items, poNumber })
+            });
+            
+            if (!response.ok) {
+                throw new Error('Failed to generate labels');
+            }
+            
+            const data = await response.json();
+            const container = document.getElementById('label-images-container');
+            overlay.querySelector('.label-generating').style.display = 'none';
+            
+            container.innerHTML = data.labels.map((label, i) => `
+                <div class="label-image-wrapper">
+                    <img src="data:image/png;base64,${label}" alt="Label ${i+1}" class="label-image" />
+                </div>
+            `).join('');
+            
+        } catch (err) {
+            const container = document.getElementById('label-images-container');
+            overlay.querySelector('.label-generating').style.display = 'none';
+            container.innerHTML = `<p class="error">❌ ${err.message}</p>`;
+        }
     },
     
     // ============================================

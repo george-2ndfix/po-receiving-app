@@ -897,33 +897,40 @@ def allocate_items():
         # ============================================
         receipt_allocations = {}  # catalog_id -> {storage_device_id, storage_name, quantity}
         po_is_receipted = False
+        items_received_flag = False
         
         try:
             receipts_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/receipts/')
             if receipts_resp.status_code == 200:
                 receipts = receipts_resp.json()
                 if receipts and len(receipts) > 0:
-                    # Check each receipt for ItemsReceived flag
+                    # Receipt EXISTS = PO has been financially receipted (by Ezybills or manually)
+                    # Don't require ItemsReceived flag - Ezybills often doesn't tick it
+                    po_is_receipted = True
+                    print(f"Receipt(s) found for PO {po_id}: {len(receipts)} receipt(s)")
+                    
                     for receipt in receipts:
                         receipt_id = receipt.get('ID')
                         detail_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/receipts/{receipt_id}')
                         if detail_resp.status_code == 200:
                             detail = detail_resp.json()
                             if detail.get('ItemsReceived'):
-                                po_is_receipted = True
-                                # Map each catalog's current allocation
-                                for cat in detail.get('Catalogs', []):
-                                    cat_id = cat.get('Catalog', {}).get('ID')
-                                    for alloc in cat.get('Allocations', []):
-                                        sd = alloc.get('StorageDevice', {})
-                                        sd_id = sd.get('ID') if isinstance(sd, dict) else sd
-                                        sd_name = sd.get('Name', 'Unknown') if isinstance(sd, dict) else 'Unknown'
-                                        receipt_allocations[cat_id] = {
-                                            'storage_id': sd_id,
-                                            'storage_name': sd_name,
-                                            'quantity': alloc.get('Quantity', 0)
-                                        }
-            print(f"Server-side receipt check: po_is_receipted={po_is_receipted}, allocations={receipt_allocations}")
+                                items_received_flag = True
+                            # Map each catalog's current allocation regardless of ItemsReceived
+                            for cat in detail.get('Catalogs', []):
+                                cat_id = cat.get('Catalog', {}).get('ID')
+                                for alloc in cat.get('Allocations', []):
+                                    sd = alloc.get('StorageDevice', {})
+                                    sd_id = sd.get('ID') if isinstance(sd, dict) else sd
+                                    sd_name = sd.get('Name', 'Unknown') if isinstance(sd, dict) else 'Unknown'
+                                    receipt_allocations[cat_id] = {
+                                        'storage_id': sd_id,
+                                        'storage_name': sd_name,
+                                        'quantity': alloc.get('Quantity', 0)
+                                    }
+                else:
+                    print(f"No receipts found for PO {po_id} - truly not receipted")
+            print(f"Server-side receipt check: po_is_receipted={po_is_receipted}, ItemsReceived={items_received_flag}, allocations={receipt_allocations}")
         except Exception as e:
             print(f"Receipt check error: {e}")
         
@@ -1013,21 +1020,14 @@ def allocate_items():
             
             allocation_url = f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/catalogs/{catalog_id}/allocations/'
             
-            # FIRST: Fetch existing allocations to preserve AssignedTo/CostCenter
-            existing_assigned_to = None
+            # Fetch existing allocations to get quantity if needed
             try:
                 existing_resp = simpro_request('GET', allocation_url)
                 if existing_resp.status_code == 200:
                     existing_allocs = existing_resp.json()
                     print(f"[PRE-RECEIPT] Existing allocations for catalog {catalog_id}: {existing_allocs}")
                     if existing_allocs and len(existing_allocs) > 0:
-                        # Preserve the AssignedTo from the first allocation that has one
-                        for existing_alloc in existing_allocs:
-                            if existing_alloc.get('AssignedTo'):
-                                existing_assigned_to = existing_alloc.get('AssignedTo')
-                                print(f"[PRE-RECEIPT] Preserving AssignedTo: {existing_assigned_to}")
-                                break
-                        # Also use the existing quantity if ours seems wrong
+                        # Use the existing quantity if ours seems wrong
                         if quantity <= 0:
                             for existing_alloc in existing_allocs:
                                 eq = existing_alloc.get('Quantity', 0)
@@ -1039,15 +1039,12 @@ def allocate_items():
                 print(f"[PRE-RECEIPT] Error fetching existing allocations: {ae}")
             
             # Build payload - Simpro API requires an ARRAY of allocations
+            # NOTE: Do NOT include AssignedTo - it's read-only and causes 422 errors
+            # Simpro preserves existing AssignedTo/CostCenter when only StorageDevice is changed
             alloc_entry = {
                 'StorageDevice': int(storage_device_id),
                 'Quantity': int(quantity)
             }
-            
-            # CRITICAL: Include AssignedTo to preserve cost center/job assignment
-            if existing_assigned_to:
-                alloc_entry['AssignedTo'] = existing_assigned_to
-                print(f"[PRE-RECEIPT] Including AssignedTo in PUT to preserve cost center")
             
             payload = [alloc_entry]
             
@@ -1243,6 +1240,13 @@ def allocate_items():
         print(f"=== ALLOCATION COMPLETE ===")
         print(f"Success count: {success_count}, Results: {results}, Goods Received: {goods_received_set}")
         
+        # Build error summary for failed items
+        error_summary = None
+        if success_count == 0 and results:
+            failed_errors = [r.get('error', 'Unknown') for r in results if not r.get('success')]
+            if failed_errors:
+                error_summary = '; '.join(set(failed_errors))
+        
         return jsonify({
             'success': success_count > 0,
             'results': results,
@@ -1252,7 +1256,8 @@ def allocate_items():
             'allVerified': all_verified if success_count > 0 else False,
             'goodsReceivedSet': goods_received_set,
             'preReceiptCount': len(pre_receipt_items),
-            'stockTransferCount': len(post_receipt_items)
+            'stockTransferCount': len(post_receipt_items),
+            'error': error_summary
         })
         
     except Exception as e:
