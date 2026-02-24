@@ -1423,7 +1423,40 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
     },
 
     async generateAndShowLabels(items, poNumber) {
-        // Show loading overlay
+        // Build HTML labels for browser printing (AirPrint compatible)
+        const today = new Date().toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        
+        let labelsHtml = '';
+        for (const item of items) {
+            const qty = item.quantity || 1;
+            const jobNum = item.jobNumber ? `Job ${item.jobNumber}` : '';
+            const customer = item.customerName || '';
+            const partCode = item.partCode || item.catalogCode || '';
+            const desc = item.description || item.name || '';
+            const location = item.storageLocation || item.storageName || '';
+            
+            // Generate one label per quantity
+            for (let i = 0; i < qty; i++) {
+                labelsHtml += `
+                    <div class="print-label">
+                        <div class="label-line1">
+                            ${jobNum ? `<span class="label-job">${jobNum}</span>` : ''}
+                            ${customer ? `<span class="label-customer">${customer}</span>` : ''}
+                            ${partCode ? `<span class="label-partcode"><strong>${partCode}</strong></span>` : ''}
+                            <span class="label-desc">${desc}</span>
+                        </div>
+                        <div class="label-line2">
+                            <span>Qty: ${qty}</span>
+                            ${location ? `<span>${location}</span>` : ''}
+                            <span>${today}</span>
+                            <span>PO ${poNumber}</span>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+        
+        // Show overlay with preview and print button
         const overlay = document.createElement('div');
         overlay.id = 'label-overlay';
         overlay.innerHTML = `
@@ -1432,44 +1465,16 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                     <h2>🏷️ Labels Ready</h2>
                     <button class="btn btn-secondary" onclick="document.getElementById('label-overlay').remove()">✕ Close</button>
                 </div>
-                <p class="label-generating">Generating labels...</p>
-                <div id="label-images-container"></div>
+                <div id="label-print-area" class="label-print-area">
+                    ${labelsHtml}
+                </div>
                 <div class="label-overlay-footer">
-                    <p>💡 Tap and hold a label image → <strong>Share</strong> → <strong>iPrint&Label</strong> to print on PT-900W</p>
+                    <button class="btn btn-primary btn-large" onclick="window.print()">🖨️ Print Labels</button>
+                    <p style="margin-top:8px; color:#6b7280; font-size:13px;">Select any AirPrint printer from the dialog</p>
                 </div>
             </div>
         `;
         document.body.appendChild(overlay);
-        
-        try {
-            const response = await fetch('/api/generate-labels', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${this.token}`
-                },
-                body: JSON.stringify({ items, poNumber })
-            });
-            
-            if (!response.ok) {
-                throw new Error('Failed to generate labels');
-            }
-            
-            const data = await response.json();
-            const container = document.getElementById('label-images-container');
-            overlay.querySelector('.label-generating').style.display = 'none';
-            
-            container.innerHTML = data.labels.map((label, i) => `
-                <div class="label-image-wrapper">
-                    <img src="data:image/png;base64,${label}" alt="Label ${i+1}" class="label-image" />
-                </div>
-            `).join('');
-            
-        } catch (err) {
-            const container = document.getElementById('label-images-container');
-            overlay.querySelector('.label-generating').style.display = 'none';
-            container.innerHTML = `<p class="error">❌ ${err.message}</p>`;
-        }
     },
     
     // ============================================
