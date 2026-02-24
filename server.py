@@ -896,6 +896,7 @@ def allocate_items():
         # Server-side receipt check (don't trust front-end status alone)
         # ============================================
         receipt_allocations = {}  # catalog_id -> {storage_device_id, storage_name, quantity}
+        catalog_items_received = {}  # catalog_id -> True/False (per-catalog ItemsReceived)
         po_is_receipted = False
         items_received_flag = False
         
@@ -914,11 +915,13 @@ def allocate_items():
                         detail_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/receipts/{receipt_id}')
                         if detail_resp.status_code == 200:
                             detail = detail_resp.json()
-                            if detail.get('ItemsReceived'):
+                            receipt_items_received = detail.get('ItemsReceived', False)
+                            if receipt_items_received:
                                 items_received_flag = True
-                            # Map each catalog's current allocation regardless of ItemsReceived
+                            # Map each catalog's current allocation and ItemsReceived status
                             for cat in detail.get('Catalogs', []):
                                 cat_id = cat.get('Catalog', {}).get('ID')
+                                catalog_items_received[cat_id] = receipt_items_received
                                 for alloc in cat.get('Allocations', []):
                                     sd = alloc.get('StorageDevice', {})
                                     sd_id = sd.get('ID') if isinstance(sd, dict) else sd
@@ -981,21 +984,26 @@ def allocate_items():
                     success_count += 1
                     already_allocated_items.append(item)
                     print(f"Catalog {catalog_id}: Already allocated to {current_storage_name} (target)")
-                elif current_storage_id != STOCK_HOLDING_ID:
-                    # Already allocated to a DIFFERENT non-Stock-Holding location
-                    # Use stock transfer FROM that location
-                    item['source_storage_id'] = current_storage_id
-                    item['source_storage_name'] = current_storage_name
+                elif catalog_items_received.get(catalog_id, False):
+                    # ItemsReceived IS ticked for this catalog - stock is "In Stock" - can use stock transfer
+                    if current_storage_id != STOCK_HOLDING_ID:
+                        item['source_storage_id'] = current_storage_id
+                        item['source_storage_name'] = current_storage_name
                     post_receipt_items.append(item)
-                    print(f"Catalog {catalog_id}: Currently in {current_storage_name} (ID:{current_storage_id}), need transfer to {storage_device_id}")
+                    print(f"Catalog {catalog_id}: In Stock at {current_storage_name}, using stock transfer to {storage_device_id}")
                 else:
-                    # In Stock Holding - standard transfer
-                    post_receipt_items.append(item)
-                    print(f"Catalog {catalog_id}: In Stock Holding, need transfer")
+                    # Receipt EXISTS but ItemsReceived NOT ticked = "In Transit"
+                    # Stock transfer won't work! Use pre-receipt PUT to change allocation
+                    pre_receipt_items.append(item)
+                    print(f"Catalog {catalog_id}: Receipted but In Transit (ItemsReceived=false), using pre-receipt allocation PUT")
             elif is_receipted:
-                # Receipted but no allocation data found - assume Stock Holding
-                post_receipt_items.append(item)
-                print(f"Catalog {catalog_id}: Receipted (no alloc data), assuming Stock Holding")
+                # Receipted but no allocation data found
+                if items_received_flag:
+                    post_receipt_items.append(item)
+                    print(f"Catalog {catalog_id}: Receipted (no alloc data), ItemsReceived=true, using stock transfer")
+                else:
+                    pre_receipt_items.append(item)
+                    print(f"Catalog {catalog_id}: Receipted (no alloc data), ItemsReceived=false, using pre-receipt allocation")
             else:
                 pre_receipt_items.append(item)
                 print(f"Catalog {catalog_id}: Not yet receipted, using pre-receipt allocation")
