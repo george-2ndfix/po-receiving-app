@@ -897,6 +897,7 @@ def allocate_items():
         # ============================================
         receipt_allocations = {}  # catalog_id -> {storage_device_id, storage_name, quantity}
         catalog_items_received = {}  # catalog_id -> True/False (per-catalog ItemsReceived)
+        catalog_receipt_id = {}  # catalog_id -> receipt_id (for PATCH ItemsReceived)
         po_is_receipted = False
         items_received_flag = False
         
@@ -918,10 +919,11 @@ def allocate_items():
                             receipt_items_received = detail.get('ItemsReceived', False)
                             if receipt_items_received:
                                 items_received_flag = True
-                            # Map each catalog's current allocation and ItemsReceived status
+                            # Map each catalog's current allocation, ItemsReceived status, and receipt ID
                             for cat in detail.get('Catalogs', []):
                                 cat_id = cat.get('Catalog', {}).get('ID')
                                 catalog_items_received[cat_id] = receipt_items_received
+                                catalog_receipt_id[cat_id] = receipt_id
                                 for alloc in cat.get('Allocations', []):
                                     sd = alloc.get('StorageDevice', {})
                                     sd_id = sd.get('ID') if isinstance(sd, dict) else sd
@@ -993,17 +995,43 @@ def allocate_items():
                     print(f"Catalog {catalog_id}: In Stock at {current_storage_name}, using stock transfer to {storage_device_id}")
                 else:
                     # Receipt EXISTS but ItemsReceived NOT ticked = "In Transit"
-                    # Stock transfer won't work! Use pre-receipt PUT to change allocation
-                    pre_receipt_items.append(item)
-                    print(f"Catalog {catalog_id}: Receipted but In Transit (ItemsReceived=false), using pre-receipt allocation PUT")
+                    # CRITICAL: Do NOT use pre-receipt PUT - it doubles cost centre entries!
+                    # Instead: tick ItemsReceived on the receipt first, then stock transfer
+                    r_id = catalog_receipt_id.get(catalog_id)
+                    if r_id:
+                        try:
+                            print(f"Catalog {catalog_id}: In Transit - ticking ItemsReceived on receipt {r_id}...")
+                            patch_resp = simpro_request('PATCH', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/receipts/{r_id}', json={'ItemsReceived': True})
+                            print(f"ItemsReceived PATCH response: {patch_resp.status_code} - {patch_resp.text}")
+                            if patch_resp.status_code in (200, 204):
+                                print(f"✅ ItemsReceived set to true for receipt {r_id}")
+                            else:
+                                print(f"⚠️ ItemsReceived PATCH returned {patch_resp.status_code}")
+                        except Exception as ir_err:
+                            print(f"⚠️ Failed to set ItemsReceived: {ir_err}")
+                    
+                    # Now route to stock transfer (stock should be "In Stock" after ticking ItemsReceived)
+                    if current_storage_id != STOCK_HOLDING_ID:
+                        item['source_storage_id'] = current_storage_id
+                        item['source_storage_name'] = current_storage_name
+                    post_receipt_items.append(item)
+                    print(f"Catalog {catalog_id}: Receipted, ItemsReceived now set, using stock transfer from {current_storage_name} to {storage_device_id}")
             elif is_receipted:
                 # Receipted but no allocation data found
-                if items_received_flag:
-                    post_receipt_items.append(item)
-                    print(f"Catalog {catalog_id}: Receipted (no alloc data), ItemsReceived=true, using stock transfer")
-                else:
-                    pre_receipt_items.append(item)
-                    print(f"Catalog {catalog_id}: Receipted (no alloc data), ItemsReceived=false, using pre-receipt allocation")
+                # CRITICAL: NEVER use pre-receipt PUT when receipt exists - it doubles cost centre entries!
+                # Always tick ItemsReceived (if needed) then stock transfer
+                if not items_received_flag:
+                    # Try to tick ItemsReceived on the first receipt
+                    r_id = catalog_receipt_id.get(catalog_id)
+                    if r_id:
+                        try:
+                            print(f"Catalog {catalog_id}: No alloc data, ticking ItemsReceived on receipt {r_id}...")
+                            patch_resp = simpro_request('PATCH', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/receipts/{r_id}', json={'ItemsReceived': True})
+                            print(f"ItemsReceived PATCH response: {patch_resp.status_code}")
+                        except Exception as ir_err:
+                            print(f"⚠️ Failed to set ItemsReceived: {ir_err}")
+                post_receipt_items.append(item)
+                print(f"Catalog {catalog_id}: Receipted (no alloc data), routing to stock transfer")
             else:
                 pre_receipt_items.append(item)
                 print(f"Catalog {catalog_id}: Not yet receipted, using pre-receipt allocation")
