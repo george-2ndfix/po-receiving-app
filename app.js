@@ -585,7 +585,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                     <div class="item-qty-controls">
                         <label class="qty-label">Qty:</label>
                         <input type="number" class="qty-input" id="qty-${index}" 
-                               min="0" max="${remaining}" value="${remaining}"
+                               min="0" max="${remaining > 0 ? remaining : item.quantityOrdered}" value="${remaining > 0 ? remaining : item.quantityOrdered}"
                                onchange="app.updateItemQty(${index})" disabled>
                         <button class="backorder-btn" onclick="app.toggleBackorder(${index})" title="Mark as backordered">
                             BO
@@ -769,9 +769,10 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         if (!qtyInput) return;
         
         const remaining = item.quantityOrdered - item.quantityReceived;
+        const maxQty = remaining > 0 ? remaining : item.quantityOrdered;
         let qty = parseInt(qtyInput.value) || 0;
         if (qty < 0) qty = 0;
-        if (qty > remaining) qty = remaining;
+        if (qty > maxQty) qty = maxQty;
         qtyInput.value = qty;
         
         const sel = this.selectedItems.find(i => i.index === index);
@@ -818,13 +819,17 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             if (checked) {
                 const item = this.currentPO.items[index];
                 const remaining = item.quantityOrdered - item.quantityReceived;
-                const qty = qtyInput ? parseInt(qtyInput.value) || remaining : remaining;
+                const effectiveQty = remaining > 0 ? remaining : item.quantityOrdered;
+                const qty = qtyInput ? parseInt(qtyInput.value) || effectiveQty : effectiveQty;
                 this.selectedItems.push({
                     index,
                     catalogId: item.catalogId,
                     description: item.description,
                     partNo: item.partNo,
                     quantity: qty,
+                    receiptStatus: item.receiptStatus,
+                    quantityOrdered: item.quantityOrdered,
+                    quantityReceived: item.quantityReceived,
                     jobNumber: item.jobNumber,
                     customerName: item.customerName
                 });
@@ -891,6 +896,8 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                     vendorName: this.currentPO.vendorName,
                     items: this.selectedItems.map(item => ({
                         catalogId: item.catalogId,
+                        partNo: item.partNo || '',
+                        description: item.description || '',
                         quantity: item.quantity || item.quantityOrdered || 1,
                         receiptStatus: item.receiptStatus || 'not_receipted',
                         quantityOrdered: item.quantityOrdered || 0,

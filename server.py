@@ -1150,6 +1150,29 @@ def allocate_items():
         # Path 2: Post-receipt stock transfer (move from current location to destination)
         # ============================================
         if post_receipt_items:
+            # Skip service/non-physical items (delivery charges, freight, etc.)
+            SERVICE_PATTERNS = ['SHIP', 'DELIVERY', 'FREIGHT', 'POSTAGE', 'TRANSPORT']
+            physical_items = []
+            for item in post_receipt_items:
+                part_no = str(item.get('partNo', '') or '').upper().strip()
+                desc = str(item.get('description', '') or '').upper().strip()
+                is_service = any(p in part_no or p in desc for p in SERVICE_PATTERNS)
+                if is_service:
+                    print(f"⏭️ Skipping service item: {part_no} - {desc}")
+                    results.append({
+                        'catalogId': item.get('catalogId'),
+                        'success': True,
+                        'quantity': item.get('quantity', 1),
+                        'verified': True,
+                        'method': 'skipped_service',
+                        'message': f'Skipped: {desc} is a service/delivery item (not physical stock)'
+                    })
+                    success_count += 1
+                else:
+                    physical_items.append(item)
+            
+            post_receipt_items = physical_items
+            
             # Group items by source storage device (most will be Stock Holding, but some may be elsewhere)
             by_source = {}
             for item in post_receipt_items:
@@ -1162,6 +1185,53 @@ def allocate_items():
             for source_id, group in by_source.items():
                 source_name = group['name']
                 group_items = group['items']
+                
+                # Pre-check: Query stock levels to skip items with zero stock
+                items_with_stock = []
+                for item in group_items:
+                    catalog_id = item.get('catalogId')
+                    part_no = item.get('partNo', '')
+                    desc = item.get('description', '')
+                    quantity = item.get('quantity', 1)
+                    
+                    try:
+                        stock_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/catalogs/{catalog_id}/stockOnHand/')
+                        if stock_resp.status_code == 200:
+                            stock_data = stock_resp.json()
+                            # Find stock in source device
+                            source_stock = 0
+                            for device in stock_data:
+                                if str(device.get('StorageDevice', {}).get('ID', '')) == str(source_id):
+                                    source_stock = device.get('Quantity', 0)
+                                    break
+                            
+                            if source_stock <= 0:
+                                print(f"⏭️ Skipping {part_no} ({desc}): 0 stock in {source_name}")
+                                results.append({
+                                    'catalogId': catalog_id,
+                                    'success': False,
+                                    'quantity': quantity,
+                                    'method': 'skipped_zero_stock',
+                                    'error': f'No stock available in {source_name} - item may not have arrived yet'
+                                })
+                                continue
+                            
+                            # Cap quantity to available stock
+                            if quantity > source_stock:
+                                print(f"⚠️ Reducing {part_no} qty from {quantity} to {source_stock} (available stock)")
+                                item['quantity'] = int(source_stock)
+                        else:
+                            print(f"⚠️ Could not check stock for catalog {catalog_id}: {stock_resp.status_code}")
+                    except Exception as e:
+                        print(f"⚠️ Stock check error for catalog {catalog_id}: {e}")
+                    
+                    items_with_stock.append(item)
+                
+                if not items_with_stock:
+                    print(f"No items with stock to transfer from {source_name}")
+                    continue
+                
+                group_items = items_with_stock
                 
                 transfer_items = []
                 for item in group_items:
@@ -2154,20 +2224,13 @@ def report_fault():
 def list_fault_reports():
     """List fault reports, optionally filtered by status"""
     try:
-        status = request.args.get('status', '')
+        status = request.args.get('status', None)
         db = get_db()
         if status:
-            reports = db.execute(
-                'SELECT id, reporter_name, reporter_email, description, po_number, job_number, current_screen, error_message, photo_count, staff_user, status, resolution, created_at, resolved_at FROM fault_reports WHERE status = ? ORDER BY created_at DESC',
-                (status,)
-            ).fetchall()
+            reports = db.execute('SELECT id, reporter_name, reporter_email, description, po_number, job_number, current_screen, error_message, photo_count, staff_user, status, created_at, resolved_at FROM fault_reports WHERE status = ? ORDER BY created_at DESC', (status,)).fetchall()
         else:
-            reports = db.execute(
-                'SELECT id, reporter_name, reporter_email, description, po_number, job_number, current_screen, error_message, photo_count, staff_user, status, resolution, created_at, resolved_at FROM fault_reports ORDER BY created_at DESC'
-            ).fetchall()
-        
-        results = [dict(r) for r in reports]
-        return jsonify({'reports': results, 'count': len(results)})
+            reports = db.execute('SELECT id, reporter_name, reporter_email, description, po_number, job_number, current_screen, error_message, photo_count, staff_user, status, created_at, resolved_at FROM fault_reports ORDER BY created_at DESC').fetchall()
+        return jsonify({'reports': [dict(r) for r in reports], 'count': len(reports)})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
