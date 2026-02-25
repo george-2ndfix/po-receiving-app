@@ -2150,6 +2150,27 @@ def report_fault():
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/fault-reports', methods=['GET'])
+def list_fault_reports():
+    """List fault reports, optionally filtered by status"""
+    try:
+        status = request.args.get('status', '')
+        db = get_db()
+        if status:
+            reports = db.execute(
+                'SELECT id, reporter_name, reporter_email, description, po_number, job_number, current_screen, error_message, photo_count, staff_user, status, resolution, created_at, resolved_at FROM fault_reports WHERE status = ? ORDER BY created_at DESC',
+                (status,)
+            ).fetchall()
+        else:
+            reports = db.execute(
+                'SELECT id, reporter_name, reporter_email, description, po_number, job_number, current_screen, error_message, photo_count, staff_user, status, resolution, created_at, resolved_at FROM fault_reports ORDER BY created_at DESC'
+            ).fetchall()
+        
+        results = [dict(r) for r in reports]
+        return jsonify({'reports': results, 'count': len(results)})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/fault-reports/<report_id>', methods=['GET'])
 def get_fault_report(report_id):
     """Fetch a fault report by ID (for Tasklet investigation)"""
