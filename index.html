@@ -1082,6 +1082,55 @@
         </footer>
     </div>
 
+    <!-- Report Issue Floating Button (visible on all screens except login) -->
+    <button id="report-issue-fab" class="report-issue-fab hidden" onclick="app.showReportIssue()">
+        ⚠️
+    </button>
+    
+    <!-- Report Issue Modal -->
+    <div id="report-issue-modal" class="report-modal-overlay hidden">
+        <div class="report-modal">
+            <div class="report-modal-header">
+                <h2>⚠️ Report an Issue</h2>
+                <button class="report-close-btn" onclick="app.hideReportIssue()">✕</button>
+            </div>
+            <div class="report-modal-body">
+                <div class="report-field">
+                    <label for="report-name">Your Name *</label>
+                    <input type="text" id="report-name" placeholder="Enter your name" autocomplete="name">
+                </div>
+                <div class="report-field">
+                    <label for="report-email">Your Email *</label>
+                    <input type="email" id="report-email" placeholder="Enter your email" autocomplete="email">
+                </div>
+                <div class="report-field">
+                    <label for="report-description">What went wrong? *</label>
+                    <textarea id="report-description" rows="4" placeholder="Describe the issue in as much detail as possible..."></textarea>
+                </div>
+                <div class="report-field">
+                    <label>Screenshots / Photos</label>
+                    <div class="report-photo-area">
+                        <input type="file" id="report-photos" accept="image/*" multiple capture="environment" style="display:none">
+                        <button class="btn btn-secondary" onclick="document.getElementById('report-photos').click()">
+                            📷 Add Photos
+                        </button>
+                        <div id="report-photo-preview" class="report-photo-preview"></div>
+                    </div>
+                </div>
+                <div class="report-context" id="report-context">
+                    <!-- Auto-captured context shown here -->
+                </div>
+                <div id="report-status" class="status-message hidden"></div>
+            </div>
+            <div class="report-modal-footer">
+                <button class="btn btn-secondary" onclick="app.hideReportIssue()">Cancel</button>
+                <button class="btn btn-primary" id="report-submit-btn" onclick="app.submitFaultReport()">
+                    📤 Submit Report
+                </button>
+            </div>
+        </div>
+    </div>
+
     <script src="app.js"></script>
 </body>
 </html>

@@ -193,6 +193,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         this.currentStaff = null;
         document.getElementById('login-username').value = '';
         document.getElementById('login-password').value = '';
+        document.getElementById('report-issue-fab')?.classList.add('hidden');
         this.showScreen('login');
     },
     
@@ -211,6 +212,9 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         this.showScreen('home');
         this.loadPicklistCount();
         this.loadReceiptingStatus();
+        
+        // Show report issue button
+        document.getElementById('report-issue-fab')?.classList.remove('hidden');
     },
     
     // ============================================
@@ -1802,6 +1806,183 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         }
     },
 
+    // ============================================
+    // Report Issue
+    // ============================================
+    _reportPhotos: [],
+    
+    showReportIssue() {
+        const modal = document.getElementById('report-issue-modal');
+        modal.classList.remove('hidden');
+        
+        // Pre-fill name from session
+        const nameInput = document.getElementById('report-name');
+        if (!nameInput.value) {
+            const staffName = document.getElementById('staff-name')?.textContent;
+            if (staffName && staffName !== 'Staff') nameInput.value = staffName;
+        }
+        
+        // Auto-capture context
+        this._captureContext();
+        
+        // Set up photo handler
+        const photoInput = document.getElementById('report-photos');
+        photoInput.onchange = (e) => this._handleReportPhotos(e);
+        
+        // Reset
+        this._reportPhotos = [];
+        document.getElementById('report-photo-preview').innerHTML = '';
+        document.getElementById('report-status').classList.add('hidden');
+        document.getElementById('report-submit-btn').disabled = false;
+    },
+    
+    hideReportIssue() {
+        document.getElementById('report-issue-modal').classList.add('hidden');
+    },
+    
+    _captureContext() {
+        const ctx = document.getElementById('report-context');
+        const parts = [];
+        
+        // Current screen
+        const activeScreen = document.querySelector('.screen.active');
+        if (activeScreen) {
+            parts.push(`<p><strong>Screen:</strong> ${activeScreen.id}</p>`);
+        }
+        
+        // Current PO if any
+        if (this.currentPO) {
+            parts.push(`<p><strong>PO:</strong> ${this.currentPO.ID || 'N/A'}</p>`);
+        }
+        if (this.currentJobNumber) {
+            parts.push(`<p><strong>Job:</strong> ${this.currentJobNumber}</p>`);
+        }
+        
+        // Any visible error messages
+        const errors = document.querySelectorAll('.status-message.error:not(.hidden)');
+        errors.forEach(el => {
+            if (el.textContent) parts.push(`<p><strong>Error:</strong> ${el.textContent}</p>`);
+        });
+        
+        ctx.innerHTML = parts.length > 0 
+            ? '<p style="margin-bottom:4px;"><strong>📋 Auto-captured info:</strong></p>' + parts.join('')
+            : '<p>No additional context detected</p>';
+    },
+    
+    _handleReportPhotos(event) {
+        const files = Array.from(event.target.files);
+        const preview = document.getElementById('report-photo-preview');
+        
+        files.forEach(file => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const base64 = e.target.result;
+                this._reportPhotos.push(base64);
+                
+                const wrapper = document.createElement('div');
+                wrapper.style.position = 'relative';
+                wrapper.style.display = 'inline-block';
+                
+                const img = document.createElement('img');
+                img.src = base64;
+                wrapper.appendChild(img);
+                
+                const removeBtn = document.createElement('button');
+                removeBtn.textContent = '✕';
+                removeBtn.style.cssText = 'position:absolute;top:-6px;right:-6px;width:22px;height:22px;background:#ef4444;color:white;border:none;border-radius:50%;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;';
+                removeBtn.onclick = () => {
+                    const idx = this._reportPhotos.indexOf(base64);
+                    if (idx > -1) this._reportPhotos.splice(idx, 1);
+                    wrapper.remove();
+                };
+                wrapper.appendChild(removeBtn);
+                
+                preview.appendChild(wrapper);
+            };
+            reader.readAsDataURL(file);
+        });
+    },
+    
+    async submitFaultReport() {
+        const name = document.getElementById('report-name').value.trim();
+        const email = document.getElementById('report-email').value.trim();
+        const description = document.getElementById('report-description').value.trim();
+        const statusEl = document.getElementById('report-status');
+        const submitBtn = document.getElementById('report-submit-btn');
+        
+        // Validate
+        if (!name || !email || !description) {
+            statusEl.textContent = 'Please fill in all required fields (*)';
+            statusEl.className = 'status-message error';
+            statusEl.classList.remove('hidden');
+            return;
+        }
+        
+        if (!email.includes('@')) {
+            statusEl.textContent = 'Please enter a valid email address';
+            statusEl.className = 'status-message error';
+            statusEl.classList.remove('hidden');
+            return;
+        }
+        
+        // Disable submit
+        submitBtn.disabled = true;
+        submitBtn.textContent = '⏳ Submitting...';
+        statusEl.textContent = 'Sending your report...';
+        statusEl.className = 'status-message info';
+        statusEl.classList.remove('hidden');
+        
+        // Build payload
+        const activeScreen = document.querySelector('.screen.active');
+        const errors = [];
+        document.querySelectorAll('.status-message.error:not(.hidden)').forEach(el => {
+            if (el.textContent && el.id !== 'report-status') errors.push(el.textContent);
+        });
+        
+        const payload = {
+            reporter_name: name,
+            reporter_email: email,
+            description: description,
+            po_number: this.currentPO?.ID || '',
+            job_number: this.currentJobNumber || '',
+            current_screen: activeScreen?.id || '',
+            error_message: errors.join(' | '),
+            photos: this._reportPhotos
+        };
+        
+        try {
+            const resp = await fetch('/api/report-fault', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            
+            const data = await resp.json();
+            
+            if (data.success) {
+                statusEl.textContent = `✅ ${data.message} (Ref: ${data.report_id})`;
+                statusEl.className = 'status-message success';
+                statusEl.classList.remove('hidden');
+                
+                // Clear form after 2s
+                setTimeout(() => {
+                    document.getElementById('report-description').value = '';
+                    document.getElementById('report-photo-preview').innerHTML = '';
+                    this._reportPhotos = [];
+                    this.hideReportIssue();
+                }, 3000);
+            } else {
+                throw new Error(data.error || 'Failed to submit');
+            }
+        } catch (err) {
+            statusEl.textContent = `❌ Failed: ${err.message}`;
+            statusEl.className = 'status-message error';
+            statusEl.classList.remove('hidden');
+            submitBtn.disabled = false;
+            submitBtn.textContent = '📤 Submit Report';
+        }
+    },
+    
     // ============================================
     // Utilities
     // ============================================

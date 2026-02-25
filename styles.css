@@ -1986,3 +1986,177 @@ footer {
 .label-overlay-footer p {
     margin: 0;
 }
+
+/* ============================================
+   Report Issue - Floating Action Button
+   ============================================ */
+.report-issue-fab {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: #ef4444;
+    color: white;
+    border: none;
+    font-size: 24px;
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
+    cursor: pointer;
+    z-index: 900;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+.report-issue-fab:active {
+    transform: scale(0.95);
+    box-shadow: 0 2px 8px rgba(239, 68, 68, 0.4);
+}
+
+/* ============================================
+   Report Issue - Modal Overlay
+   ============================================ */
+.report-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 20px;
+    overflow-y: auto;
+}
+.report-modal {
+    background: white;
+    border-radius: 16px;
+    width: 100%;
+    max-width: 500px;
+    margin-top: 20px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    animation: reportSlideUp 0.3s ease;
+}
+@keyframes reportSlideUp {
+    from { transform: translateY(30px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+}
+.report-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid #e5e7eb;
+}
+.report-modal-header h2 {
+    margin: 0;
+    font-size: 1.2rem;
+    color: #1f2937;
+}
+.report-close-btn {
+    background: none;
+    border: none;
+    font-size: 1.4rem;
+    color: #6b7280;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 8px;
+}
+.report-close-btn:active {
+    background: #f3f4f6;
+}
+.report-modal-body {
+    padding: 20px;
+}
+.report-field {
+    margin-bottom: 16px;
+}
+.report-field label {
+    display: block;
+    font-weight: 600;
+    color: #374151;
+    margin-bottom: 6px;
+    font-size: 0.9rem;
+}
+.report-field input,
+.report-field textarea {
+    width: 100%;
+    padding: 10px 12px;
+    border: 2px solid #e5e7eb;
+    border-radius: 8px;
+    font-size: 1rem;
+    color: #1f2937;
+    box-sizing: border-box;
+    font-family: inherit;
+}
+.report-field input:focus,
+.report-field textarea:focus {
+    border-color: #3b82f6;
+    outline: none;
+}
+.report-field textarea {
+    resize: vertical;
+    min-height: 80px;
+}
+
+/* Photo preview */
+.report-photo-area {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.report-photo-preview {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.report-photo-preview img {
+    width: 72px;
+    height: 72px;
+    object-fit: cover;
+    border-radius: 8px;
+    border: 2px solid #e5e7eb;
+}
+.report-photo-preview .photo-remove {
+    position: relative;
+}
+.report-photo-preview .photo-remove::after {
+    content: '✕';
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    width: 20px;
+    height: 20px;
+    background: #ef4444;
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+}
+
+/* Auto-captured context */
+.report-context {
+    background: #f8fafc;
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 0.85rem;
+    color: #64748b;
+    margin-top: 8px;
+}
+.report-context p {
+    margin: 2px 0;
+}
+
+/* Footer */
+.report-modal-footer {
+    display: flex;
+    gap: 10px;
+    padding: 16px 20px;
+    border-top: 1px solid #e5e7eb;
+    justify-content: flex-end;
+}

@@ -9,6 +9,7 @@ import json
 import hashlib
 import secrets
 import sqlite3
+import uuid
 from datetime import datetime, timedelta
 from functools import wraps
 from flask import Flask, request, jsonify, send_from_directory, session
@@ -130,6 +131,27 @@ def init_db():
             staff_id INTEGER,
             staff_name TEXT,
             created_at TEXT DEFAULT (datetime('now'))
+        )
+    ''')
+    
+    # Fault reports table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS fault_reports (
+            id TEXT PRIMARY KEY,
+            reporter_name TEXT NOT NULL,
+            reporter_email TEXT NOT NULL,
+            description TEXT NOT NULL,
+            po_number TEXT,
+            job_number TEXT,
+            current_screen TEXT,
+            error_message TEXT,
+            photo_count INTEGER DEFAULT 0,
+            photos_base64 TEXT,
+            staff_user TEXT,
+            status TEXT DEFAULT 'new',
+            resolution TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            resolved_at TEXT
         )
     ''')
     
@@ -2037,6 +2059,135 @@ def search_mystery_box():
     results = [dict(row) for row in cursor.fetchall()]
     conn.close()
     return jsonify({'results': results, 'count': len(results)})
+
+# ============================================
+# Fault Report Endpoints
+# ============================================
+FAULT_WEBHOOK_URL = os.environ.get('FAULT_WEBHOOK_URL', '')
+
+@app.route('/api/report-fault', methods=['POST'])
+@login_required
+def report_fault():
+    """Receive fault report from app user and forward to Tasklet webhook"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        reporter_name = data.get('reporter_name', '').strip()
+        reporter_email = data.get('reporter_email', '').strip()
+        description = data.get('description', '').strip()
+        
+        if not reporter_name or not reporter_email or not description:
+            return jsonify({'error': 'Name, email, and description are required'}), 400
+        
+        # Auto-captured context
+        po_number = data.get('po_number', '')
+        job_number = data.get('job_number', '')
+        current_screen = data.get('current_screen', '')
+        error_message = data.get('error_message', '')
+        photos_base64 = data.get('photos', [])  # List of base64-encoded images
+        
+        # Generate unique report ID
+        report_id = str(uuid.uuid4())[:8]
+        
+        # Get staff username from session
+        staff_user = session.get('username', 'unknown')
+        
+        # Store in database
+        db = get_db()
+        db.execute('''
+            INSERT INTO fault_reports (id, reporter_name, reporter_email, description,
+                po_number, job_number, current_screen, error_message,
+                photo_count, photos_base64, staff_user, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new')
+        ''', (report_id, reporter_name, reporter_email, description,
+              po_number, job_number, current_screen, error_message,
+              len(photos_base64), json.dumps(photos_base64), staff_user))
+        db.commit()
+        
+        print(f"=== FAULT REPORT {report_id} ===")
+        print(f"Reporter: {reporter_name} ({reporter_email})")
+        print(f"Description: {description}")
+        print(f"PO: {po_number}, Job: {job_number}")
+        print(f"Screen: {current_screen}")
+        print(f"Error: {error_message}")
+        print(f"Photos: {len(photos_base64)}")
+        
+        # Forward to Tasklet webhook
+        if FAULT_WEBHOOK_URL:
+            try:
+                webhook_payload = {
+                    'report_id': report_id,
+                    'reporter_name': reporter_name,
+                    'reporter_email': reporter_email,
+                    'description': description,
+                    'po_number': po_number,
+                    'job_number': job_number,
+                    'current_screen': current_screen,
+                    'error_message': error_message,
+                    'photo_count': len(photos_base64),
+                    'staff_user': staff_user,
+                    'timestamp': datetime.now().isoformat()
+                }
+                # Don't include photos in webhook (too large) - Tasklet fetches them via API
+                resp = requests.post(FAULT_WEBHOOK_URL, json=webhook_payload, timeout=10)
+                print(f"Webhook sent: {resp.status_code}")
+            except Exception as e:
+                print(f"Webhook failed (report still saved): {e}")
+        else:
+            print("WARNING: FAULT_WEBHOOK_URL not set - report saved but not forwarded")
+        
+        return jsonify({
+            'success': True,
+            'report_id': report_id,
+            'message': 'Issue reported! We\'ll investigate and email you when it\'s resolved.'
+        })
+        
+    except Exception as e:
+        print(f"Error saving fault report: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/fault-reports/<report_id>', methods=['GET'])
+def get_fault_report(report_id):
+    """Fetch a fault report by ID (for Tasklet investigation)"""
+    try:
+        db = get_db()
+        report = db.execute('SELECT * FROM fault_reports WHERE id = ?', (report_id,)).fetchone()
+        if not report:
+            return jsonify({'error': 'Report not found'}), 404
+        
+        result = dict(report)
+        # Parse photos back from JSON
+        if result.get('photos_base64'):
+            result['photos'] = json.loads(result['photos_base64'])
+        else:
+            result['photos'] = []
+        del result['photos_base64']
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/fault-reports/<report_id>/resolve', methods=['POST'])
+def resolve_fault_report(report_id):
+    """Mark a fault report as resolved"""
+    try:
+        data = request.get_json() or {}
+        resolution = data.get('resolution', '')
+        
+        db = get_db()
+        db.execute('''
+            UPDATE fault_reports SET status = 'resolved', resolution = ?,
+                resolved_at = datetime('now') WHERE id = ?
+        ''', (resolution, report_id))
+        db.commit()
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 # ============================================
 # Initialize and Run
