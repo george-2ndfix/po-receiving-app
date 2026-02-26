@@ -71,6 +71,7 @@ def init_db():
             display_name TEXT NOT NULL,
             password_hash TEXT NOT NULL,
             role TEXT NOT NULL DEFAULT 'staff' CHECK(role IN ('admin', 'manager', 'staff')),
+            email TEXT,
             active INTEGER NOT NULL DEFAULT 1,
             created_at TEXT DEFAULT (datetime('now')),
             updated_at TEXT DEFAULT (datetime('now'))
@@ -157,26 +158,39 @@ def init_db():
     
     conn.commit()
     
+    # Add email column if it doesn't exist (migration for existing DBs)
+    try:
+        cursor.execute("ALTER TABLE staff ADD COLUMN email TEXT")
+        print("Added email column to staff table")
+    except:
+        pass  # Column already exists
+    
     # Seed all staff accounts (survives Render restarts)
     # Each staff member is created if they don't already exist
     staff_seed = [
-        ('george', 'George', 'admin', '2ndFix5082'),
-        ('jim', 'Jim', 'manager', '2ndFix5082'),
-        ('cherie', 'Cherie', 'manager', '2ndFix5082'),
-        ('tom', 'Tom', 'manager', '2ndFix5082'),
-        ('tyrese', 'Tyrese', 'staff', 'Tyrese123'),
-        ('mik', 'Mik', 'staff', '2ndFix5082$'),
-        ('ryan', 'Ryan', 'staff', '2ndFix5082$'),
+        ('george', 'George', 'admin', '2ndFix5082', 'george@2ndfix.com.au'),
+        ('jim', 'Jim', 'manager', '2ndFix5082', 'jim@2ndfix.com.au'),
+        ('cherie', 'Cherie', 'manager', '2ndFix5082', None),
+        ('tom', 'Tom', 'manager', '2ndFix5082', 'tom@2ndfix.com.au'),
+        ('tyrese', 'Tyrese', 'staff', 'Tyrese123', None),
+        ('mik', 'Mik', 'staff', '2ndFix5082$', None),
+        ('ryan', 'Ryan', 'staff', '2ndFix5082$', None),
     ]
     
-    for username, display_name, role, password in staff_seed:
+    for username, display_name, role, password, email in staff_seed:
         cursor.execute("SELECT COUNT(*) FROM staff WHERE username = ?", (username,))
         if cursor.fetchone()[0] == 0:
             cursor.execute('''
-                INSERT INTO staff (username, display_name, password_hash, role, active)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (username, display_name, hash_password(password), role, 1))
+                INSERT INTO staff (username, display_name, password_hash, role, active, email)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (username, display_name, hash_password(password), role, 1, email))
             print(f"Created staff account: {username} ({role})")
+        elif email:
+            # Update email for existing staff
+            cursor.execute('UPDATE staff SET email = ? WHERE username = ? AND (email IS NULL OR email != ?)', 
+                          (email, username, email))
+            if cursor.rowcount > 0:
+                print(f"Updated email for {username}: {email}")
     
     conn.commit()
     conn.close()
@@ -257,6 +271,7 @@ def staff_login():
     session['username'] = staff['username']
     session['display_name'] = staff['display_name']
     session['role'] = staff['role']
+    session['email'] = staff['email'] or ''
     
     return jsonify({
         'success': True,
@@ -264,7 +279,8 @@ def staff_login():
             'id': staff['id'],
             'username': staff['username'],
             'displayName': staff['display_name'],
-            'role': staff['role']
+            'role': staff['role'],
+            'email': staff['email'] or ''
         }
     })
 
@@ -284,7 +300,8 @@ def auth_status():
                 'id': session['staff_id'],
                 'username': session['username'],
                 'displayName': session['display_name'],
-                'role': session['role']
+                'role': session['role'],
+                'email': session.get('email', '')
             }
         })
     return jsonify({'authenticated': False})
@@ -298,7 +315,7 @@ def list_staff():
     """List all staff members"""
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute('SELECT id, username, display_name, role, active, created_at FROM staff ORDER BY display_name')
+    cursor.execute('SELECT id, username, display_name, role, email, active, created_at FROM staff ORDER BY display_name')
     staff_list = [dict(row) for row in cursor.fetchall()]
     conn.close()
     return jsonify({'staff': staff_list})

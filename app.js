@@ -1822,11 +1822,15 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         const modal = document.getElementById('report-issue-modal');
         modal.classList.remove('hidden');
         
-        // Pre-fill name from session
+        // Pre-fill name and email from logged-in user
         const nameInput = document.getElementById('report-name');
         if (!nameInput.value) {
-            const staffName = document.getElementById('staff-name')?.textContent;
+            const staffName = this.currentStaff?.displayName || document.getElementById('staff-name')?.textContent;
             if (staffName && staffName !== 'Staff') nameInput.value = staffName;
+        }
+        const emailInput = document.getElementById('report-email');
+        if (!emailInput.value && this.currentStaff?.email) {
+            emailInput.value = this.currentStaff.email;
         }
         
         // Auto-capture context
