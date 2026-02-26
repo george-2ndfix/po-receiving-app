@@ -1832,9 +1832,11 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         // Auto-capture context
         this._captureContext();
         
-        // Set up photo handler
-        const photoInput = document.getElementById('report-photos');
-        photoInput.onchange = (e) => this._handleReportPhotos(e);
+        // Set up photo handlers (camera + library)
+        const cameraInput = document.getElementById('report-photos-camera');
+        const libraryInput = document.getElementById('report-photos-library');
+        cameraInput.onchange = (e) => this._handleReportPhotos(e);
+        libraryInput.onchange = (e) => this._handleReportPhotos(e);
         
         // Reset
         this._reportPhotos = [];

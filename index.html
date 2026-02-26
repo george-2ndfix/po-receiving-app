@@ -1110,10 +1110,16 @@
                 <div class="report-field">
                     <label>Screenshots / Photos</label>
                     <div class="report-photo-area">
-                        <input type="file" id="report-photos" accept="image/*" multiple capture="environment" style="display:none">
-                        <button class="btn btn-secondary" onclick="document.getElementById('report-photos').click()">
-                            📷 Add Photos
-                        </button>
+                        <input type="file" id="report-photos-camera" accept="image/*" multiple capture="environment" style="display:none">
+                        <input type="file" id="report-photos-library" accept="image/*" multiple style="display:none">
+                        <div style="display:flex;gap:8px;margin-bottom:8px;">
+                            <button class="btn btn-secondary" style="flex:1;" onclick="document.getElementById('report-photos-camera').click()">
+                                📷 Camera
+                            </button>
+                            <button class="btn btn-secondary" style="flex:1;" onclick="document.getElementById('report-photos-library').click()">
+                                🖼️ Library
+                            </button>
+                        </div>
                         <div id="report-photo-preview" class="report-photo-preview"></div>
                     </div>
                 </div>
