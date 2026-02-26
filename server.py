@@ -137,6 +137,22 @@ def init_db():
     
     # Fault reports table
     cursor.execute('''
+        CREATE TABLE IF NOT EXISTS error_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            error_type TEXT NOT NULL,
+            po_number TEXT,
+            catalog_id TEXT,
+            staff_user TEXT,
+            error_code INTEGER,
+            error_message TEXT,
+            request_payload TEXT,
+            response_body TEXT,
+            endpoint TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        )
+    ''')
+    
+    cursor.execute('''
         CREATE TABLE IF NOT EXISTS fault_reports (
             id TEXT PRIMARY KEY,
             reporter_name TEXT NOT NULL,
@@ -1156,10 +1172,29 @@ def allocate_items():
                 if not verified:
                     print(f"WARNING: Allocation for catalog {catalog_id} could not be verified!")
             else:
+                error_detail = response.text[:500] if response.text else 'No response body'
+                print(f"❌ PRE-RECEIPT PUT FAILED: PO {po_number}, Catalog {catalog_id}, Status {response.status_code}, Response: {error_detail}")
+                
+                # Log error to DB for debugging
+                try:
+                    import json as json_mod
+                    err_conn = get_db()
+                    err_cursor = err_conn.cursor()
+                    err_cursor.execute('''INSERT INTO error_logs (error_type, po_number, catalog_id, staff_user, error_code, error_message, request_payload, response_body, endpoint)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                        ('pre_receipt_allocation', str(po_number), str(catalog_id), staff_name, 
+                         response.status_code, f'API returned {response.status_code}',
+                         json_mod.dumps(payload), error_detail, allocation_url))
+                    err_conn.commit()
+                    err_conn.close()
+                except Exception as log_err:
+                    print(f"Error logging failed: {log_err}")
+                
                 results.append({
                     'catalogId': catalog_id,
                     'success': False,
                     'error': f'API returned {response.status_code}',
+                    'detail': error_detail,
                     'method': 'pre_receipt_allocation'
                 })
         
@@ -1424,6 +1459,21 @@ def allocate_items():
         
     except Exception as e:
         print(f"Allocation error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/error-logs', methods=['GET'])
+@login_required
+def get_error_logs():
+    """Get recent allocation error logs"""
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM error_logs ORDER BY created_at DESC LIMIT 50')
+        columns = [desc[0] for desc in cursor.description]
+        logs = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        conn.close()
+        return jsonify({'count': len(logs), 'logs': logs})
+    except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/storage/<int:storage_id>/stock', methods=['GET'])

@@ -1007,7 +1007,15 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                 
                 this.showSuccessScreen(data);
             } else {
-                alert('Allocation failed: ' + (data.error || 'Unknown error'));
+                const errMsg = data.error || 'Unknown error';
+                const failedItems = (data.results || []).filter(r => !r.success);
+                let detail = `Allocation failed for PO ${this.currentPO.poNumber}: ${errMsg}`;
+                if (failedItems.length > 0) {
+                    detail += '\n\nFailed items:\n' + failedItems.map(f => 
+                        `• ${f.catalogId}: ${f.error || 'Unknown'}${f.detail ? ' - ' + f.detail.substring(0, 100) : ''}`
+                    ).join('\n');
+                }
+                alert(detail);
                 this.showScreen('storage');
             }
             
