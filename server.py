@@ -1195,15 +1195,13 @@ def allocate_items():
                     quantity = item.get('quantity', 1)
                     
                     try:
-                        stock_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/catalogs/{catalog_id}/stockOnHand/')
+                        # Use storageDevice stock endpoint (catalogs/stockOnHand returns 404)
+                        stock_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/storageDevices/{source_id}/stock/?Catalog.ID={catalog_id}')
                         if stock_resp.status_code == 200:
                             stock_data = stock_resp.json()
-                            # Find stock in source device
                             source_stock = 0
-                            for device in stock_data:
-                                if str(device.get('StorageDevice', {}).get('ID', '')) == str(source_id):
-                                    source_stock = device.get('Quantity', 0)
-                                    break
+                            if stock_data and len(stock_data) > 0:
+                                source_stock = stock_data[0].get('InventoryCount', 0)
                             
                             if source_stock <= 0:
                                 print(f"⏭️ Skipping {part_no} ({desc}): 0 stock in {source_name}")
@@ -1216,14 +1214,33 @@ def allocate_items():
                                 })
                                 continue
                             
+                            print(f"📦 {part_no}: {source_stock} in {source_name}")
+                            
                             # Cap quantity to available stock
                             if quantity > source_stock:
                                 print(f"⚠️ Reducing {part_no} qty from {quantity} to {source_stock} (available stock)")
                                 item['quantity'] = int(source_stock)
                         else:
-                            print(f"⚠️ Could not check stock for catalog {catalog_id}: {stock_resp.status_code}")
+                            # If stock check fails, skip item to avoid 404 on transfer
+                            print(f"⚠️ Could not check stock for catalog {catalog_id}: {stock_resp.status_code} - skipping")
+                            results.append({
+                                'catalogId': catalog_id,
+                                'success': False,
+                                'quantity': quantity,
+                                'method': 'skipped_stock_check_failed',
+                                'error': f'Could not verify stock level in {source_name} (API returned {stock_resp.status_code})'
+                            })
+                            continue
                     except Exception as e:
-                        print(f"⚠️ Stock check error for catalog {catalog_id}: {e}")
+                        print(f"⚠️ Stock check error for catalog {catalog_id}: {e} - skipping")
+                        results.append({
+                            'catalogId': catalog_id,
+                            'success': False,
+                            'quantity': quantity,
+                            'method': 'skipped_stock_check_error',
+                            'error': f'Stock check failed: {str(e)}'
+                        })
+                        continue
                     
                     items_with_stock.append(item)
                 
@@ -1253,7 +1270,7 @@ def allocate_items():
                 print(f"[POST-RECEIPT] Stock Transfer from {source_name} (ID:{source_id}) to {storage_name}")
                 print(f"Transfer payload: {json.dumps(transfer_payload)}")
                 
-                transfer_response = simpro_request('POST', f'/companies/{COMPANY_ID}/stockTransfer', json=transfer_payload)
+                transfer_response = simpro_request('POST', f'/companies/{COMPANY_ID}/stockTransfer/', json=transfer_payload)
                 print(f"Stock Transfer Response: {transfer_response.status_code} - {transfer_response.text}")
                 
                 if transfer_response.status_code in (200, 201, 204):
@@ -1296,7 +1313,7 @@ def allocate_items():
                             }]
                         }
                         
-                        single_resp = simpro_request('POST', f'/companies/{COMPANY_ID}/stockTransfer', json=single_payload)
+                        single_resp = simpro_request('POST', f'/companies/{COMPANY_ID}/stockTransfer/', json=single_payload)
                         if single_resp.status_code in (200, 201, 204):
                             results.append({
                                 'catalogId': catalog_id,
@@ -1487,7 +1504,7 @@ def relocate_items():
         print(f"Payload: {json.dumps(payload)}")
         
         # Execute stock transfer via Simpro API
-        response = simpro_request('POST', f'/companies/{COMPANY_ID}/stockTransfer', json=payload)
+        response = simpro_request('POST', f'/companies/{COMPANY_ID}/stockTransfer/', json=payload)
         print(f"Stock Transfer API Response: {response.status_code} - {response.text}")
         
         if response.status_code in (200, 201, 204):
