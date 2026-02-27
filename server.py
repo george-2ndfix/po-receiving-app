@@ -7,6 +7,7 @@ With Staff Management System
 import os
 import json
 import hashlib
+import time
 import secrets
 import sqlite3
 import uuid
@@ -966,6 +967,10 @@ def allocate_items():
                     po_is_receipted = True
                     print(f"Receipt(s) found for PO {po_id}: {len(receipts)} receipt(s)")
                     
+                    # Store all receipt IDs for fallback PATCH (even if detail fails)
+                    all_receipt_ids = [r.get('ID') for r in receipts if r.get('ID')]
+                    first_receipt_id = all_receipt_ids[0] if all_receipt_ids else None
+                    
                     for receipt in receipts:
                         receipt_id = receipt.get('ID')
                         detail_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/receipts/{receipt_id}')
@@ -1052,7 +1057,7 @@ def allocate_items():
                     # Receipt EXISTS but ItemsReceived NOT ticked = "In Transit"
                     # CRITICAL: Do NOT use pre-receipt PUT - it doubles cost centre entries!
                     # Instead: tick ItemsReceived on the receipt first, then stock transfer
-                    r_id = catalog_receipt_id.get(catalog_id)
+                    r_id = catalog_receipt_id.get(catalog_id) or first_receipt_id
                     if r_id:
                         try:
                             print(f"Catalog {catalog_id}: In Transit - ticking ItemsReceived on receipt {r_id}...")
@@ -1060,6 +1065,9 @@ def allocate_items():
                             print(f"ItemsReceived PATCH response: {patch_resp.status_code} - {patch_resp.text}")
                             if patch_resp.status_code in (200, 204):
                                 print(f"✅ ItemsReceived set to true for receipt {r_id}")
+                                # Give Simpro a moment to process and move stock into Stock Holding
+                                print("Waiting 3 seconds for Simpro to process ItemsReceived...")
+                                time.sleep(3)
                             else:
                                 print(f"⚠️ ItemsReceived PATCH returned {patch_resp.status_code}")
                         except Exception as ir_err:
@@ -1076,13 +1084,18 @@ def allocate_items():
                 # CRITICAL: NEVER use pre-receipt PUT when receipt exists - it doubles cost centre entries!
                 # Always tick ItemsReceived (if needed) then stock transfer
                 if not items_received_flag:
-                    # Try to tick ItemsReceived on the first receipt
-                    r_id = catalog_receipt_id.get(catalog_id)
+                    # Try to tick ItemsReceived - use catalog-specific receipt ID, or fall back to first receipt
+                    r_id = catalog_receipt_id.get(catalog_id) or first_receipt_id
                     if r_id:
                         try:
                             print(f"Catalog {catalog_id}: No alloc data, ticking ItemsReceived on receipt {r_id}...")
                             patch_resp = simpro_request('PATCH', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/receipts/{r_id}', json={'ItemsReceived': True})
                             print(f"ItemsReceived PATCH response: {patch_resp.status_code}")
+                            if patch_resp.status_code in (200, 204):
+                                print(f"✅ ItemsReceived set to true for receipt {r_id}")
+                                # Give Simpro a moment to process and move stock into Stock Holding
+                                print("Waiting 3 seconds for Simpro to process ItemsReceived...")
+                                time.sleep(3)
                         except Exception as ir_err:
                             print(f"⚠️ Failed to set ItemsReceived: {ir_err}")
                 post_receipt_items.append(item)
@@ -1256,15 +1269,31 @@ def allocate_items():
                                 source_stock = stock_data[0].get('InventoryCount', 0)
                             
                             if source_stock <= 0:
-                                print(f"⏭️ Skipping {part_no} ({desc}): 0 stock in {source_name}")
-                                results.append({
-                                    'catalogId': catalog_id,
-                                    'success': False,
-                                    'quantity': quantity,
-                                    'method': 'skipped_zero_stock',
-                                    'error': f'No stock available in {source_name} - item may not have arrived yet'
-                                })
-                                continue
+                                # Retry: Simpro may still be processing ItemsReceived
+                                retried = False
+                                for retry in range(3):
+                                    print(f"⏳ {part_no}: 0 stock in {source_name}, retry {retry+1}/3 (waiting 3s)...")
+                                    time.sleep(3)
+                                    retry_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/storageDevices/{source_id}/stock/?Catalog.ID={catalog_id}')
+                                    if retry_resp.status_code == 200:
+                                        retry_data = retry_resp.json()
+                                        if retry_data and len(retry_data) > 0:
+                                            source_stock = retry_data[0].get('InventoryCount', 0)
+                                            if source_stock > 0:
+                                                print(f"✅ {part_no}: Stock appeared after retry {retry+1}: {source_stock}")
+                                                retried = True
+                                                break
+                                
+                                if source_stock <= 0:
+                                    print(f"⏭️ Skipping {part_no} ({desc}): 0 stock in {source_name} after 3 retries")
+                                    results.append({
+                                        'catalogId': catalog_id,
+                                        'success': False,
+                                        'quantity': quantity,
+                                        'method': 'skipped_zero_stock',
+                                        'error': f'No stock available in {source_name} - item may not have arrived yet. ItemsReceived was ticked but stock did not appear after retries.'
+                                    })
+                                    continue
                             
                             print(f"📦 {part_no}: {source_stock} in {source_name}")
                             
