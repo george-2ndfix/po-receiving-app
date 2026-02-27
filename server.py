@@ -2217,7 +2217,7 @@ def search_mystery_box():
 # ============================================
 # Fault Report Endpoints
 # ============================================
-FAULT_WEBHOOK_URL = os.environ.get('FAULT_WEBHOOK_URL', '')
+FAULT_WEBHOOK_URL = os.environ.get('FAULT_WEBHOOK_URL', 'https://webhooks.tasklet.ai/v1/public/webhook?token=53c558477df26839f9518bab90f10e0c')
 
 @app.route('/api/report-fault', methods=['POST'])
 @login_required
