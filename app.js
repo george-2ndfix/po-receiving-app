@@ -1085,8 +1085,8 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         }
         
         // Label count
-        const totalLabels = this.selectedItems.reduce((sum, item) => sum + item.quantity, 0);
-        document.getElementById('label-count').textContent = `${totalLabels} labels ready to print`;
+        const totalItems = this.selectedItems.length;
+        document.getElementById('label-count').textContent = `${totalItems} item(s) - 1 label ready to print`;
         
         // Show picking slip button (always available after allocation)
         const pickSlipSection = document.getElementById('picking-slip-section');
@@ -1442,38 +1442,39 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
     },
 
     async generateAndShowLabels(items, poNumber) {
-        // Build HTML labels for browser printing (AirPrint compatible)
+        // Build ONE consolidated label for all items (not separate per item)
         const today = new Date().toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit', year: 'numeric' });
         
-        let labelsHtml = '';
-        for (const item of items) {
+        // Get common info from first item
+        const jobNum = items[0]?.jobNumber ? `Job ${items[0].jobNumber}` : '';
+        const customer = items[0]?.customerName || '';
+        const location = items[0]?.storageLocation || items[0]?.storageName || '';
+        const totalQty = items.reduce((sum, i) => sum + (i.quantity || 1), 0);
+        
+        // Build compact items list: "2x BH1BK Handle, 1x BB02 Rail"
+        const itemsList = items.map(item => {
             const qty = item.quantity || 1;
-            const jobNum = item.jobNumber ? `Job ${item.jobNumber}` : '';
-            const customer = item.customerName || '';
             const partCode = item.partCode || item.catalogCode || '';
             const desc = item.description || item.name || '';
-            const location = item.storageLocation || item.storageName || '';
-            
-            // Generate one label per quantity
-            for (let i = 0; i < qty; i++) {
-                labelsHtml += `
-                    <div class="print-label">
-                        <div class="label-line1">
-                            ${jobNum ? `<span class="label-job">${jobNum}</span>` : ''}
-                            ${customer ? `<span class="label-customer">${customer}</span>` : ''}
-                            ${partCode ? `<span class="label-partcode"><strong>${partCode}</strong></span>` : ''}
-                            <span class="label-desc">${desc}</span>
-                        </div>
-                        <div class="label-line2">
-                            <span>Qty: ${qty}</span>
-                            ${location ? `<span>${location}</span>` : ''}
-                            <span>${today}</span>
-                            <span>PO ${poNumber}</span>
-                        </div>
-                    </div>
-                `;
-            }
-        }
+            const label = partCode ? `${partCode} ${desc}` : desc;
+            return `${qty}x ${label}`;
+        }).join(', ');
+        
+        const labelsHtml = `
+            <div class="print-label">
+                <div class="label-line1">
+                    ${jobNum ? `<span class="label-job">${jobNum}</span>` : ''}
+                    ${customer ? `<span class="label-customer">${customer}</span>` : ''}
+                    <span class="label-desc">${itemsList}</span>
+                </div>
+                <div class="label-line2">
+                    <span>Qty: ${totalQty}</span>
+                    ${location ? `<span>${location}</span>` : ''}
+                    <span>${today}</span>
+                    <span>PO ${poNumber}</span>
+                </div>
+            </div>
+        `;
         
         // Show overlay with preview and print button
         const overlay = document.createElement('div');
@@ -1481,14 +1482,14 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         overlay.innerHTML = `
             <div class="label-overlay-content">
                 <div class="label-overlay-header">
-                    <h2>🏷️ Labels Ready</h2>
+                    <h2>🏷️ Label Ready</h2>
                     <button class="btn btn-secondary" onclick="document.getElementById('label-overlay').remove()">✕ Close</button>
                 </div>
                 <div id="label-print-area" class="label-print-area">
                     ${labelsHtml}
                 </div>
                 <div class="label-overlay-footer">
-                    <button class="btn btn-primary btn-large" onclick="window.print()">🖨️ Print Labels</button>
+                    <button class="btn btn-primary btn-large" onclick="window.print()">🖨️ Print Label</button>
                     <p style="margin-top:8px; color:#6b7280; font-size:13px;">Select any AirPrint printer from the dialog</p>
                 </div>
             </div>

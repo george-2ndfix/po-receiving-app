@@ -695,49 +695,64 @@ footer {
 }
 
 @media print {
-    /* Hide everything except labels */
-    body * {
-        visibility: hidden;
+    /* Hide everything except labels - use display:none to prevent blank page */
+    body > *:not(#label-overlay) {
+        display: none !important;
     }
     
-    .label-print-area,
-    .label-print-area * {
-        visibility: visible;
+    #label-overlay {
+        display: block !important;
+        position: static !important;
+        background: none !important;
+        width: 100% !important;
+        height: auto !important;
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+    
+    .label-overlay-content {
+        position: static !important;
+        background: none !important;
+        box-shadow: none !important;
+        border-radius: 0 !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        max-height: none !important;
+        max-width: none !important;
+        width: 100% !important;
+    }
+    
+    .label-overlay-header,
+    .label-overlay-footer {
+        display: none !important;
     }
     
     .label-print-area {
         display: block !important;
-        position: absolute;
-        left: 0;
-        top: 0;
+        position: static !important;
         width: 100%;
         max-height: none;
         overflow: visible;
         padding: 0;
     }
     
-    /* Page setup for 36mm tape */
+    /* Page setup for 36mm tape - auto width for consolidated label */
     @page {
-        size: 100mm 36mm;
+        size: auto 36mm;
         margin: 1mm 2mm;
     }
     
-    /* Individual label - one per item, both lines on one strip */
+    /* Consolidated label - all items on one strip */
     .print-label {
-        page-break-after: always;
         page-break-inside: avoid;
         width: 100%;
-        padding: 0;
+        padding: 2mm 3mm;
         margin: 0;
         box-sizing: border-box;
         font-family: Arial, Helvetica, sans-serif;
         background: white;
         border: none;
         border-radius: 0;
-    }
-    
-    .print-label:last-child {
-        page-break-after: avoid;
     }
 
     .label-line1 {
