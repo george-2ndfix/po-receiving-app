@@ -934,6 +934,7 @@ def allocate_items():
         print(f"Data received: {data}")
         
         po_id = data.get('poId')
+        po_number = data.get('poNumber', po_id)  # Define early - used in error logging
         items = data.get('items', [])
         storage_device_id = data.get('storageDeviceId')
         print(f"PO ID: {po_id}, Storage: {storage_device_id}, Items count: {len(items)}")
