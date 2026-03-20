@@ -1489,8 +1489,8 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                     ${labelsHtml}
                 </div>
                 <div class="label-overlay-footer">
-                    <button class="btn btn-primary btn-large" onclick="window.print()">🖨️ Print Label</button>
-                    <p style="margin-top:8px; color:#6b7280; font-size:13px;">Select any AirPrint printer from the dialog</p>
+                    <button class="btn btn-primary btn-large" id="print-label-action-btn" onclick="window.print(); this.textContent='✅ Label Sent to Printer'; this.classList.remove('btn-primary'); this.classList.add('btn-success'); document.getElementById('print-label-hint').textContent='Tap again to reprint';">🖨️ Print Label</button>
+                    <p id="print-label-hint" style="margin-top:8px; color:#6b7280; font-size:13px;">Select any AirPrint printer from the dialog</p>
                 </div>
             </div>
         `;
