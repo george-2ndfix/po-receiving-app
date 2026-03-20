@@ -1027,6 +1027,24 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
     },
     
     showSuccessScreen(data) {
+        // Show PO number, job number, and customer name
+        const poNum = this.currentPO?.poNumber || '';
+        const jobNum = this.currentPO?.jobNumber || '';
+        const custName = this.currentPO?.customerName || '';
+        
+        const poInfoEl = document.getElementById('success-po-info');
+        if (poInfoEl) {
+            poInfoEl.textContent = poNum ? `PO ${poNum}` : '';
+        }
+        
+        const jobInfoEl = document.getElementById('success-job-info');
+        if (jobInfoEl) {
+            let jobText = '';
+            if (jobNum) jobText = `Job ${jobNum}`;
+            if (custName) jobText += jobText ? ` — ${custName}` : custName;
+            jobInfoEl.textContent = jobText;
+        }
+        
         document.getElementById('success-summary').innerHTML = `
             <strong>${data.successCount}</strong> item(s) → <strong>${this.selectedStorage.name}</strong>
         `;
