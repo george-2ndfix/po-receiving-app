@@ -1009,14 +1009,34 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             } else {
                 const errMsg = data.error || 'Unknown error';
                 const failedItems = (data.results || []).filter(r => !r.success);
-                let detail = `Allocation failed for PO ${this.currentPO.poNumber}: ${errMsg}`;
-                if (failedItems.length > 0) {
-                    detail += '\n\nFailed items:\n' + failedItems.map(f => 
-                        `• ${f.catalogId}: ${f.error || 'Unknown'}${f.detail ? ' - ' + f.detail.substring(0, 100) : ''}`
-                    ).join('\n');
+                
+                // Check for Simpro edit lock error
+                const allDetails = failedItems.map(f => f.detail || f.error || '').join(' ');
+                const lockMatch = allDetails.match(/currently being edited by ([^.]+)/i);
+                
+                if (lockMatch) {
+                    // Friendly lock error with retry
+                    const lockedBy = lockMatch[1].trim();
+                    const jobMatch = allDetails.match(/Related job #(\d+)/i);
+                    const jobNum = jobMatch ? jobMatch[1] : '';
+                    
+                    this.showLockError({
+                        lockedBy: lockedBy,
+                        jobNumber: jobNum,
+                        poNumber: this.currentPO.poNumber,
+                        failedCount: failedItems.length
+                    });
+                } else {
+                    // Generic error
+                    let detail = `Allocation failed for PO ${this.currentPO.poNumber}: ${errMsg}`;
+                    if (failedItems.length > 0) {
+                        detail += '\n\nFailed items:\n' + failedItems.map(f => 
+                            `• ${f.catalogId}: ${f.error || 'Unknown'}${f.detail ? ' - ' + f.detail.substring(0, 100) : ''}`
+                        ).join('\n');
+                    }
+                    alert(detail);
+                    this.showScreen('storage');
                 }
-                alert(detail);
-                this.showScreen('storage');
             }
             
         } catch (error) {
@@ -1119,6 +1139,42 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         }
         
         this.showScreen('success');
+    },
+    
+    showLockError(info) {
+        // Show a friendly lock error dialog with retry
+        const overlay = document.createElement('div');
+        overlay.className = 'lock-error-overlay';
+        overlay.innerHTML = `
+            <div class="lock-error-card">
+                <div class="lock-error-icon">🔒</div>
+                <h2>Job Locked in Simpro</h2>
+                <p class="lock-error-detail">
+                    <strong>${info.lockedBy}</strong> is currently editing 
+                    ${info.jobNumber ? 'Job ' + info.jobNumber : 'this job'} in Simpro.
+                </p>
+                <p class="lock-error-hint">
+                    Ask them to save & close the job, then tap Retry.
+                </p>
+                <div class="lock-error-buttons">
+                    <button class="btn btn-primary btn-large lock-retry-btn">🔄 Retry</button>
+                    <button class="btn btn-secondary lock-cancel-btn">Cancel</button>
+                </div>
+                <p class="lock-error-po">PO ${info.poNumber || ''} · ${info.failedCount || 1} item(s) failed</p>
+            </div>
+        `;
+        
+        document.body.appendChild(overlay);
+        
+        overlay.querySelector('.lock-retry-btn').addEventListener('click', () => {
+            overlay.remove();
+            this.allocateItems();  // Retry the allocation
+        });
+        
+        overlay.querySelector('.lock-cancel-btn').addEventListener('click', () => {
+            overlay.remove();
+            this.showScreen('storage');
+        });
     },
     
     startNewPO() {

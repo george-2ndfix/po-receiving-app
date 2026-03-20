@@ -2182,3 +2182,78 @@ footer {
     border-top: 1px solid #e5e7eb;
     justify-content: flex-end;
 }
+
+/* Lock Error Overlay */
+.lock-error-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    padding: 20px;
+}
+
+.lock-error-card {
+    background: white;
+    border-radius: 16px;
+    padding: 32px 24px;
+    max-width: 380px;
+    width: 100%;
+    text-align: center;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+.lock-error-icon {
+    font-size: 48px;
+    margin-bottom: 12px;
+}
+
+.lock-error-card h2 {
+    color: #dc2626;
+    margin: 0 0 16px 0;
+    font-size: 22px;
+}
+
+.lock-error-detail {
+    font-size: 16px;
+    color: #374151;
+    margin: 0 0 8px 0;
+    line-height: 1.4;
+}
+
+.lock-error-hint {
+    font-size: 14px;
+    color: #6b7280;
+    margin: 0 0 24px 0;
+    font-style: italic;
+}
+
+.lock-error-buttons {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    margin-bottom: 16px;
+}
+
+.lock-error-buttons .btn {
+    flex: 1;
+    min-width: 120px;
+}
+
+.lock-retry-btn {
+    background: #2563eb !important;
+    color: white !important;
+    font-size: 18px !important;
+    padding: 14px 24px !important;
+}
+
+.lock-error-po {
+    font-size: 12px;
+    color: #9ca3af;
+    margin: 0;
+}
