@@ -743,10 +743,23 @@ footer {
         padding: 0;
     }
     
-    /* Page setup for 36mm tape - auto width for consolidated label */
+    /* Default: 36mm tape printer (overridden dynamically for QL-810W) */
     @page {
         size: auto 36mm;
         margin: 1mm 2mm;
+    }
+    
+    /* Brother QL-810W: 38mm continuous labels - slightly larger text to use the extra 2mm */
+    body.printer-ql810w .print-label {
+        padding: 2.5mm 2mm;
+    }
+    body.printer-ql810w .label-line1 {
+        font-size: 10pt;
+        line-height: 1.3;
+    }
+    body.printer-ql810w .label-line2 {
+        font-size: 9pt;
+        line-height: 1.3;
     }
     
     /* Consolidated label - all items on one strip */

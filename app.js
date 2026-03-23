@@ -1551,6 +1551,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         `;
         
         // Show overlay with preview and print button
+        const savedPrinter = localStorage.getItem('labelPrinter') || 'default';
         const overlay = document.createElement('div');
         overlay.id = 'label-overlay';
         overlay.innerHTML = `
@@ -1563,8 +1564,36 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                     ${labelsHtml}
                 </div>
                 <div class="label-overlay-footer">
-                    <button class="btn btn-primary btn-large" id="print-label-action-btn" onclick="window.print(); this.textContent='✅ Label Sent to Printer'; this.classList.remove('btn-primary'); this.classList.add('btn-success'); document.getElementById('print-label-hint').textContent='Tap again to reprint';">🖨️ Print Label</button>
-                    <p id="print-label-hint" style="margin-top:8px; color:#6b7280; font-size:13px;">Select any AirPrint printer from the dialog</p>
+                    <div class="printer-selector" style="margin-bottom:10px;">
+                        <label style="font-size:13px; color:#6b7280; margin-right:8px;">Printer:</label>
+                        <select id="label-printer-select" style="padding:6px 10px; border-radius:6px; border:1px solid #d1d5db; font-size:14px; background:#fff;">
+                            <option value="default" ${savedPrinter === 'default' ? 'selected' : ''}>Default (36mm tape)</option>
+                            <option value="ql810w" ${savedPrinter === 'ql810w' ? 'selected' : ''}>Brother QL-810W (38mm continuous)</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-primary btn-large" id="print-label-action-btn" onclick="
+                        var sel = document.getElementById('label-printer-select').value;
+                        localStorage.setItem('labelPrinter', sel);
+                        document.body.classList.remove('printer-default', 'printer-ql810w');
+                        document.body.classList.add('printer-' + sel);
+                        // Inject dynamic @page for selected printer
+                        var pageStyle = document.getElementById('dynamic-page-style');
+                        if (pageStyle) pageStyle.remove();
+                        pageStyle = document.createElement('style');
+                        pageStyle.id = 'dynamic-page-style';
+                        if (sel === 'ql810w') {
+                            pageStyle.textContent = '@media print { @page { size: auto 38mm; margin: 1mm 1.5mm; } }';
+                        }
+                        document.head.appendChild(pageStyle);
+                        window.print();
+                        document.body.classList.remove('printer-default', 'printer-ql810w');
+                        if (pageStyle) pageStyle.remove();
+                        this.textContent='✅ Label Sent to Printer';
+                        this.classList.remove('btn-primary');
+                        this.classList.add('btn-success');
+                        document.getElementById('print-label-hint').textContent='Tap again to reprint';
+                    ">🖨️ Print Label</button>
+                    <p id="print-label-hint" style="margin-top:8px; color:#6b7280; font-size:13px;">Select printer type above, then tap Print</p>
                 </div>
             </div>
         `;
