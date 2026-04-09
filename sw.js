@@ -1,4 +1,4 @@
-const CACHE_NAME = 'po-receiving-v35';
+const CACHE_NAME = 'po-receiving-v36';
 const urlsToCache = [
   '/styles.css',
   '/storage-locations.json',
@@ -37,7 +37,14 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
   
-  // API calls: network only, no cache fallback (POST/PUT can't be cached)
+  // CRITICAL: Never intercept non-GET requests (POST, PUT, PATCH, DELETE)
+  // iOS Safari has a known bug where service worker interception of POST requests
+  // causes DOMException: "The string did not match the expected pattern"
+  if (event.request.method !== 'GET') {
+    return; // Let the browser handle it directly — do NOT call event.respondWith()
+  }
+  
+  // API GET calls: network only, no cache fallback
   if (url.pathname.startsWith('/api/')) {
     event.respondWith(
       fetch(event.request).catch(() => {

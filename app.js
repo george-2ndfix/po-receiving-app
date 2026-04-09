@@ -889,6 +889,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             const response = await fetch('/api/allocate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                cache: 'no-store',
                 body: JSON.stringify({
                     poId: this.currentPO.poId,
                     poNumber: this.currentPO.poNumber,
@@ -1007,36 +1008,8 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                 
                 this.showSuccessScreen(data);
             } else {
-                const errMsg = data.error || 'Unknown error';
-                const failedItems = (data.results || []).filter(r => !r.success);
-                
-                // Check for Simpro edit lock error
-                const allDetails = failedItems.map(f => f.detail || f.error || '').join(' ');
-                const lockMatch = allDetails.match(/currently being edited by ([^.]+)/i);
-                
-                if (lockMatch) {
-                    // Friendly lock error with retry
-                    const lockedBy = lockMatch[1].trim();
-                    const jobMatch = allDetails.match(/Related job #(\d+)/i);
-                    const jobNum = jobMatch ? jobMatch[1] : '';
-                    
-                    this.showLockError({
-                        lockedBy: lockedBy,
-                        jobNumber: jobNum,
-                        poNumber: this.currentPO.poNumber,
-                        failedCount: failedItems.length
-                    });
-                } else {
-                    // Generic error
-                    let detail = `Allocation failed for PO ${this.currentPO.poNumber}: ${errMsg}`;
-                    if (failedItems.length > 0) {
-                        detail += '\n\nFailed items:\n' + failedItems.map(f => 
-                            `• ${f.catalogId}: ${f.error || 'Unknown'}${f.detail ? ' - ' + f.detail.substring(0, 100) : ''}`
-                        ).join('\n');
-                    }
-                    alert(detail);
-                    this.showScreen('storage');
-                }
+                alert('Allocation failed: ' + (data.error || 'Unknown error'));
+                this.showScreen('storage');
             }
             
         } catch (error) {
@@ -1047,24 +1020,6 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
     },
     
     showSuccessScreen(data) {
-        // Show PO number, job number, and customer name
-        const poNum = this.currentPO?.poNumber || '';
-        const jobNum = this.currentPO?.jobNumber || '';
-        const custName = this.currentPO?.customerName || '';
-        
-        const poInfoEl = document.getElementById('success-po-info');
-        if (poInfoEl) {
-            poInfoEl.textContent = poNum ? `PO ${poNum}` : '';
-        }
-        
-        const jobInfoEl = document.getElementById('success-job-info');
-        if (jobInfoEl) {
-            let jobText = '';
-            if (jobNum) jobText = `Job ${jobNum}`;
-            if (custName) jobText += jobText ? ` — ${custName}` : custName;
-            jobInfoEl.textContent = jobText;
-        }
-        
         document.getElementById('success-summary').innerHTML = `
             <strong>${data.successCount}</strong> item(s) → <strong>${this.selectedStorage.name}</strong>
         `;
@@ -1123,8 +1078,8 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         }
         
         // Label count
-        const totalItems = this.selectedItems.length;
-        document.getElementById('label-count').textContent = `${totalItems} item(s) - 1 label ready to print`;
+        const totalLabels = this.selectedItems.reduce((sum, item) => sum + item.quantity, 0);
+        document.getElementById('label-count').textContent = `${totalLabels} labels ready to print`;
         
         // Show picking slip button (always available after allocation)
         const pickSlipSection = document.getElementById('picking-slip-section');
@@ -1139,42 +1094,6 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         }
         
         this.showScreen('success');
-    },
-    
-    showLockError(info) {
-        // Show a friendly lock error dialog with retry
-        const overlay = document.createElement('div');
-        overlay.className = 'lock-error-overlay';
-        overlay.innerHTML = `
-            <div class="lock-error-card">
-                <div class="lock-error-icon">🔒</div>
-                <h2>Job Locked in Simpro</h2>
-                <p class="lock-error-detail">
-                    <strong>${info.lockedBy}</strong> is currently editing 
-                    ${info.jobNumber ? 'Job ' + info.jobNumber : 'this job'} in Simpro.
-                </p>
-                <p class="lock-error-hint">
-                    Ask them to save & close the job, then tap Retry.
-                </p>
-                <div class="lock-error-buttons">
-                    <button class="btn btn-primary btn-large lock-retry-btn">🔄 Retry</button>
-                    <button class="btn btn-secondary lock-cancel-btn">Cancel</button>
-                </div>
-                <p class="lock-error-po">PO ${info.poNumber || ''} · ${info.failedCount || 1} item(s) failed</p>
-            </div>
-        `;
-        
-        document.body.appendChild(overlay);
-        
-        overlay.querySelector('.lock-retry-btn').addEventListener('click', () => {
-            overlay.remove();
-            this.allocateItems();  // Retry the allocation
-        });
-        
-        overlay.querySelector('.lock-cancel-btn').addEventListener('click', () => {
-            overlay.remove();
-            this.showScreen('storage');
-        });
     },
     
     startNewPO() {
@@ -1516,84 +1435,54 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
     },
 
     async generateAndShowLabels(items, poNumber) {
-        // Build ONE consolidated label for all items (not separate per item)
+        // Build HTML labels for browser printing (AirPrint compatible)
         const today = new Date().toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit', year: 'numeric' });
         
-        // Get common info from first item
-        const jobNum = items[0]?.jobNumber ? `Job ${items[0].jobNumber}` : '';
-        const customer = items[0]?.customerName || '';
-        const location = items[0]?.storageLocation || items[0]?.storageName || '';
-        const totalQty = items.reduce((sum, i) => sum + (i.quantity || 1), 0);
-        
-        // Build compact items list: "2x BH1BK Handle, 1x BB02 Rail"
-        const itemsList = items.map(item => {
+        let labelsHtml = '';
+        for (const item of items) {
             const qty = item.quantity || 1;
+            const jobNum = item.jobNumber ? `Job ${item.jobNumber}` : '';
+            const customer = item.customerName || '';
             const partCode = item.partCode || item.catalogCode || '';
             const desc = item.description || item.name || '';
-            const label = partCode ? `${partCode} ${desc}` : desc;
-            return `${qty}x ${label}`;
-        }).join(', ');
-        
-        const labelsHtml = `
-            <div class="print-label">
-                <div class="label-line1">
-                    ${jobNum ? `<span class="label-job">${jobNum}</span>` : ''}
-                    ${customer ? `<span class="label-customer">${customer}</span>` : ''}
-                    <span class="label-desc">${itemsList}</span>
-                </div>
-                <div class="label-line2">
-                    <span>Qty: ${totalQty}</span>
-                    ${location ? `<span>${location}</span>` : ''}
-                    <span>${today}</span>
-                    <span>PO ${poNumber}</span>
-                </div>
-            </div>
-        `;
+            const location = item.storageLocation || item.storageName || '';
+            
+            // Generate one label per quantity
+            for (let i = 0; i < qty; i++) {
+                labelsHtml += `
+                    <div class="print-label">
+                        <div class="label-line1">
+                            ${jobNum ? `<span class="label-job">${jobNum}</span>` : ''}
+                            ${customer ? `<span class="label-customer">${customer}</span>` : ''}
+                            ${partCode ? `<span class="label-partcode"><strong>${partCode}</strong></span>` : ''}
+                            <span class="label-desc">${desc}</span>
+                        </div>
+                        <div class="label-line2">
+                            <span>Qty: ${qty}</span>
+                            ${location ? `<span>${location}</span>` : ''}
+                            <span>${today}</span>
+                            <span>PO ${poNumber}</span>
+                        </div>
+                    </div>
+                `;
+            }
+        }
         
         // Show overlay with preview and print button
-        const savedPrinter = localStorage.getItem('labelPrinter') || 'default';
         const overlay = document.createElement('div');
         overlay.id = 'label-overlay';
         overlay.innerHTML = `
             <div class="label-overlay-content">
                 <div class="label-overlay-header">
-                    <h2>🏷️ Label Ready</h2>
+                    <h2>🏷️ Labels Ready</h2>
                     <button class="btn btn-secondary" onclick="document.getElementById('label-overlay').remove()">✕ Close</button>
                 </div>
                 <div id="label-print-area" class="label-print-area">
                     ${labelsHtml}
                 </div>
                 <div class="label-overlay-footer">
-                    <div class="printer-selector" style="margin-bottom:10px;">
-                        <label style="font-size:13px; color:#6b7280; margin-right:8px;">Printer:</label>
-                        <select id="label-printer-select" style="padding:6px 10px; border-radius:6px; border:1px solid #d1d5db; font-size:14px; background:#fff;">
-                            <option value="default" ${savedPrinter === 'default' ? 'selected' : ''}>Default (36mm tape)</option>
-                            <option value="ql810w" ${savedPrinter === 'ql810w' ? 'selected' : ''}>Brother QL-810W (38mm continuous)</option>
-                        </select>
-                    </div>
-                    <button class="btn btn-primary btn-large" id="print-label-action-btn" onclick="
-                        var sel = document.getElementById('label-printer-select').value;
-                        localStorage.setItem('labelPrinter', sel);
-                        document.body.classList.remove('printer-default', 'printer-ql810w');
-                        document.body.classList.add('printer-' + sel);
-                        // Inject dynamic @page for selected printer
-                        var pageStyle = document.getElementById('dynamic-page-style');
-                        if (pageStyle) pageStyle.remove();
-                        pageStyle = document.createElement('style');
-                        pageStyle.id = 'dynamic-page-style';
-                        if (sel === 'ql810w') {
-                            pageStyle.textContent = '@media print { @page { size: auto 38mm; margin: 1mm 1.5mm; } }';
-                        }
-                        document.head.appendChild(pageStyle);
-                        window.print();
-                        document.body.classList.remove('printer-default', 'printer-ql810w');
-                        if (pageStyle) pageStyle.remove();
-                        this.textContent='✅ Label Sent to Printer';
-                        this.classList.remove('btn-primary');
-                        this.classList.add('btn-success');
-                        document.getElementById('print-label-hint').textContent='Tap again to reprint';
-                    ">🖨️ Print Label</button>
-                    <p id="print-label-hint" style="margin-top:8px; color:#6b7280; font-size:13px;">Select printer type above, then tap Print</p>
+                    <button class="btn btn-primary btn-large" onclick="window.print()">🖨️ Print Labels</button>
+                    <p style="margin-top:8px; color:#6b7280; font-size:13px;">Select any AirPrint printer from the dialog</p>
                 </div>
             </div>
         `;
@@ -1934,25 +1823,19 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         const modal = document.getElementById('report-issue-modal');
         modal.classList.remove('hidden');
         
-        // Pre-fill name and email from logged-in user
+        // Pre-fill name from session
         const nameInput = document.getElementById('report-name');
         if (!nameInput.value) {
-            const staffName = this.currentStaff?.displayName || document.getElementById('staff-name')?.textContent;
+            const staffName = document.getElementById('staff-name')?.textContent;
             if (staffName && staffName !== 'Staff') nameInput.value = staffName;
-        }
-        const emailInput = document.getElementById('report-email');
-        if (!emailInput.value && this.currentStaff?.email) {
-            emailInput.value = this.currentStaff.email;
         }
         
         // Auto-capture context
         this._captureContext();
         
-        // Set up photo handlers (camera + library)
-        const cameraInput = document.getElementById('report-photos-camera');
-        const libraryInput = document.getElementById('report-photos-library');
-        cameraInput.onchange = (e) => this._handleReportPhotos(e);
-        libraryInput.onchange = (e) => this._handleReportPhotos(e);
+        // Set up photo handler
+        const photoInput = document.getElementById('report-photos');
+        photoInput.onchange = (e) => this._handleReportPhotos(e);
         
         // Reset
         this._reportPhotos = [];
