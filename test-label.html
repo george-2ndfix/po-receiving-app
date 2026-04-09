@@ -3,180 +3,363 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>QL-810W Test Print</title>
+<title>QL-810W Label Setup</title>
 <style>
-  /* ===== SCREEN STYLES ===== */
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
-    background: #f5f5f5; padding: 20px; color: #333;
-  }
-  .screen-only { display: block; }
-  h1 { font-size: 20px; margin-bottom: 4px; }
-  .subtitle { color: #888; font-size: 13px; margin-bottom: 20px; }
-  .controls { background: #fff; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
-  .controls label { font-size: 13px; font-weight: 600; display: block; margin-bottom: 4px; }
-  .controls select { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #ddd; font-size: 15px; margin-bottom: 12px; background: #fafafa; }
-  .preview-box { background: #fff; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
-  .preview-box h3 { font-size: 14px; margin-bottom: 10px; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif; background:#f0f0f0; padding:12px; color:#333; }
+  h1 { font-size:18px; text-align:center; margin-bottom:2px; }
+  .sub { text-align:center; color:#888; font-size:12px; margin-bottom:12px; }
+  .card { background:#fff; border-radius:10px; padding:12px; margin-bottom:10px; }
+  .card h3 { font-size:14px; margin-bottom:8px; color:#2563eb; }
+  .row { display:flex; gap:8px; margin-bottom:8px; }
+  .row > div { flex:1; }
+  label { font-size:11px; font-weight:600; display:block; margin-bottom:3px; color:#555; }
+  select, input { width:100%; padding:8px; border-radius:6px; border:1px solid #ddd; font-size:14px; background:#fafafa; }
+  .preset-btn { display:inline-block; padding:6px 10px; margin:2px; border-radius:6px; border:1px solid #ddd; background:#f8f8f8; font-size:12px; cursor:pointer; }
+  .preset-btn.active { background:#2563eb; color:#fff; border-color:#2563eb; }
+  .canvas-wrap { text-align:center; background:#fffde8; border-radius:8px; padding:8px; margin:8px 0; overflow-x:auto; }
+  .canvas-wrap canvas { border:1px dashed #ccc; }
+  .print-btn { display:block; width:100%; padding:14px; border:none; border-radius:10px; background:#16a34a; color:#fff; font-size:16px; font-weight:600; cursor:pointer; margin-top:8px; }
+  .print-btn:active { background:#15803d; }
+  .info { background:#eff6ff; border-radius:8px; padding:10px; font-size:12px; color:#1e40af; margin-top:8px; line-height:1.5; }
 
-  /* Screen preview of label (simulates rotated output) */
-  .label-preview {
-    background: #fffde8; border: 1px dashed #ccc; border-radius: 4px;
-    padding: 6px 10px; margin-bottom: 8px; overflow: hidden;
-  }
-  .label-preview .line1 { font-size: 11px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .label-preview .line2 { font-size: 9px; color: #555; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
-  .preview-note { text-align: center; color: #aaa; font-size: 11px; margin-top: 8px; }
-
-  .print-btn {
-    display: block; width: 100%; padding: 16px; border: none; border-radius: 12px;
-    background: #2563eb; color: #fff; font-size: 17px; font-weight: 600; cursor: pointer;
-  }
-  .print-btn:active { background: #1d4ed8; }
-
-  /* ===== PRINT STYLES ===== */
-  @page {
-    size: 38mm 90mm;  /* tape width x cut length */
-    margin: 0;
-  }
+  /* Print: ONLY show the canvas image */
   @media print {
-    body { background: none; padding: 0; margin: 0; }
-    .screen-only { display: none !important; }
-
-    .print-label {
-      display: block !important;
-      width: 90mm;
-      height: 38mm;
-      position: relative;
-      page-break-after: always;
-      overflow: hidden;
-      /* Rotate content: origin top-left, rotate 90° CW, shift right by 38mm */
-      transform: rotate(90deg) translateY(-38mm);
-      transform-origin: top left;
-    }
-    .print-label .inner {
-      width: 90mm;
-      height: 38mm;
-      padding: 2mm 3mm;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-    }
-    .print-label .line1 {
-      font-family: Arial, Helvetica, sans-serif;
-      font-size: 11pt;
-      font-weight: 700;
-      line-height: 1.3;
-      white-space: nowrap;
-      overflow: hidden;
-    }
-    .print-label .line2 {
-      font-family: Arial, Helvetica, sans-serif;
-      font-size: 9pt;
-      font-weight: 400;
-      line-height: 1.3;
-      white-space: nowrap;
-      overflow: hidden;
-      margin-top: 1mm;
-    }
-
-    /* Kill ALL decorative elements */
-    * {
-      border: none !important;
-      box-shadow: none !important;
-      text-shadow: none !important;
-      outline: none !important;
-      background: none !important;
-      -webkit-print-color-adjust: exact;
-    }
+    body { background:none; padding:0; margin:0; }
+    body > *:not(#printArea) { display:none !important; }
+    #printArea { display:block !important; }
+    #printArea img { display:block; }
+    @page { margin:0; }
+    * { border:none !important; box-shadow:none !important; background:none !important; }
   }
 </style>
 </head>
 <body>
 
-<!-- ===== SCREEN UI ===== -->
-<div class="screen-only">
-  <h1>🏷️ QL-810W Test Print</h1>
-  <p class="subtitle">KD-2225 — 38mm continuous labels</p>
+<h1>🏷️ QL-810W Label Setup</h1>
+<p class="sub">Tweak settings and reprint — no redeploy needed</p>
 
-  <div class="controls">
-    <label>Label Length (mm)</label>
-    <select id="labelLength">
-      <option value="90" selected>90mm (default)</option>
-      <option value="70">70mm (short)</option>
-      <option value="100">100mm (long)</option>
-    </select>
-
-    <label>Number of test labels</label>
-    <select id="labelCount">
-      <option value="1">1 label</option>
-      <option value="2" selected>2 labels</option>
-      <option value="3">3 labels</option>
-    </select>
+<!-- PRESETS -->
+<div class="card">
+  <h3>Quick Presets</h3>
+  <div id="presets">
+    <span class="preset-btn active" onclick="applyPreset('horiz')">Horizontal Text (along length)</span>
+    <span class="preset-btn" onclick="applyPreset('vert')">Vertical (across width)</span>
+    <span class="preset-btn" onclick="applyPreset('large')">Large Font</span>
+    <span class="preset-btn" onclick="applyPreset('compact')">Compact</span>
   </div>
-
-  <div class="preview-box">
-    <h3>Preview</h3>
-    <div class="label-preview">
-      <div class="line1">Job 5364  LEE | COL-4PNL-2040  Colonial 4 pan…</div>
-      <div class="line2">Qty: 2 · Customer Cupboard · 09/04/2026 · PO 21027</div>
-    </div>
-    <div class="label-preview">
-      <div class="line1">Job 5280  SMITH | HNG-100-SS  Hinge 100mm fi…</div>
-      <div class="line2">Qty: 5 · Shed A2 · 09/04/2026 · PO 20890</div>
-    </div>
-    <p class="preview-note">Labels print at 38mm × <span id="previewLen">90</span>mm (text runs along length)</p>
-  </div>
-
-  <button class="print-btn" onclick="doPrint()">🖨️ Print Test Labels</button>
 </div>
 
-<!-- ===== PRINT-ONLY LABELS (hidden on screen) ===== -->
-<div id="printLabels" style="display:none;"></div>
+<!-- SETTINGS -->
+<div class="card">
+  <h3>⚙️ Label Settings</h3>
+  <div class="row">
+    <div>
+      <label>Tape Width (mm)</label>
+      <input type="number" id="tapeW" value="38" min="12" max="62">
+    </div>
+    <div>
+      <label>Label Length (mm)</label>
+      <input type="number" id="labelL" value="90" min="30" max="150">
+    </div>
+  </div>
+  <div class="row">
+    <div>
+      <label>Line 1 Font (pt)</label>
+      <input type="number" id="font1" value="14" min="6" max="30">
+    </div>
+    <div>
+      <label>Line 2 Font (pt)</label>
+      <input type="number" id="font2" value="11" min="6" max="24">
+    </div>
+  </div>
+  <div class="row">
+    <div>
+      <label>Orientation</label>
+      <select id="orient">
+        <option value="horizontal" selected>Horizontal (text along length)</option>
+        <option value="vertical">Vertical (text across width)</option>
+      </select>
+    </div>
+    <div>
+      <label>DPI</label>
+      <select id="dpi">
+        <option value="203">203 (standard)</option>
+        <option value="300" selected>300 (QL-810W)</option>
+      </select>
+    </div>
+  </div>
+  <div class="row">
+    <div>
+      <label>Padding (mm)</label>
+      <input type="number" id="padMM" value="2" min="0" max="10" step="0.5">
+    </div>
+    <div>
+      <label>Line Spacing (mm)</label>
+      <input type="number" id="lineGap" value="1.5" min="0" max="10" step="0.5">
+    </div>
+  </div>
+  <div class="row">
+    <div>
+      <label>Line 1 Bold</label>
+      <select id="bold1"><option value="bold" selected>Bold</option><option value="normal">Normal</option></select>
+    </div>
+    <div>
+      <label>Line 2 Bold</label>
+      <select id="bold2"><option value="bold">Bold</option><option value="normal" selected>Normal</option></select>
+    </div>
+  </div>
+</div>
+
+<!-- TEST DATA -->
+<div class="card">
+  <h3>📝 Test Label Content</h3>
+  <label>Line 1</label>
+  <input type="text" id="line1" value="Job 5364  LEE | COL-4PNL  Colonial 4 panel door">
+  <div style="height:6px"></div>
+  <label>Line 2</label>
+  <input type="text" id="line2" value="Qty: 2 · Customer Cupboard · 09/04/2026 · PO 21027">
+</div>
+
+<!-- PREVIEW -->
+<div class="card">
+  <h3>👁️ Preview</h3>
+  <div class="canvas-wrap">
+    <canvas id="preview"></canvas>
+  </div>
+  <p style="text-align:center;font-size:11px;color:#999;" id="dimInfo"></p>
+</div>
+
+<!-- PRINT -->
+<button class="print-btn" onclick="doPrint()">🖨️ Print Test Label</button>
+
+<div class="info">
+  <strong>How this works:</strong> The label is pre-rendered as an image (canvas), so the printer gets an image — not HTML text. 
+  This avoids CSS rotation issues. Tweak settings above and the preview updates live. When it looks right, hit Print.
+</div>
+
+<!-- Hidden print area — only this shows when printing -->
+<div id="printArea" style="display:none;"></div>
 
 <script>
-document.getElementById('labelLength').addEventListener('change', function() {
-  document.getElementById('previewLen').textContent = this.value;
-});
+var DPM = 300 / 25.4; // dots per mm at 300 DPI
 
-const testData = [
-  { line1: 'Job 5364  LEE | COL-4PNL-2040  Colonial 4 panel door', line2: 'Qty: 2 · Customer Cupboard · 09/04/2026 · PO 21027' },
-  { line1: 'Job 5280  SMITH | HNG-100-SS  Hinge 100mm fixed pin SS', line2: 'Qty: 5 · Shed A2 · 09/04/2026 · PO 20890' },
-  { line1: 'Job 5100  JONES | SCR-10G-50  Screws 10g x 50mm gal', line2: 'Qty: 20 · Van · 09/04/2026 · PO 20750' }
-];
+function getSettings() {
+  return {
+    tapeW: parseFloat(document.getElementById('tapeW').value),
+    labelL: parseFloat(document.getElementById('labelL').value),
+    font1: parseFloat(document.getElementById('font1').value),
+    font2: parseFloat(document.getElementById('font2').value),
+    orient: document.getElementById('orient').value,
+    dpi: parseInt(document.getElementById('dpi').value),
+    padMM: parseFloat(document.getElementById('padMM').value),
+    lineGap: parseFloat(document.getElementById('lineGap').value),
+    bold1: document.getElementById('bold1').value,
+    bold2: document.getElementById('bold2').value,
+    line1: document.getElementById('line1').value,
+    line2: document.getElementById('line2').value
+  };
+}
+
+function renderLabel(s, targetCanvas) {
+  var dpm = s.dpi / 25.4;
+  var pad = s.padMM * dpm;
+
+  if (s.orient === 'horizontal') {
+    // Canvas physical size = tape width (height) x label length (width)
+    // But we render onto a canvas where:
+    // - canvas width = labelL in pixels (this is the FEED direction = length)
+    // - canvas height = tapeW in pixels (this is the TAPE width = 38mm)
+    var cW = Math.round(s.labelL * dpm);
+    var cH = Math.round(s.tapeW * dpm);
+    targetCanvas.width = cW;
+    targetCanvas.height = cH;
+
+    var ctx = targetCanvas.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, cW, cH);
+    ctx.fillStyle = '#000';
+
+    // Font sizes: pt to pixels at DPI
+    var f1px = s.font1 * (s.dpi / 72);
+    var f2px = s.font2 * (s.dpi / 72);
+    var gap = s.lineGap * dpm;
+
+    // Line 1
+    ctx.font = s.bold1 + ' ' + f1px + 'px Arial, Helvetica, sans-serif';
+    var y1 = pad + f1px;
+    // Center vertically
+    var totalTextH = f1px + gap + f2px;
+    var startY = (cH - totalTextH) / 2 + f1px;
+    ctx.fillText(s.line1, pad, startY);
+
+    // Line 2
+    ctx.font = s.bold2 + ' ' + f2px + 'px Arial, Helvetica, sans-serif';
+    ctx.fillStyle = '#333';
+    ctx.fillText(s.line2, pad, startY + gap + f2px);
+
+    // For printing: the QL-810W tape is 38mm wide, feeds lengthwise.
+    // We need to OUTPUT an image that is 38mm wide x 90mm tall (portrait)
+    // with the text rotated 90° so it reads horizontally when label is turned.
+    // So we create a SECOND canvas that's tapeW x labelL and draw rotated.
+    return { printW: cH, printH: cW }; // swapped for print output
+  } else {
+    // Vertical: text across the 38mm width, simple
+    var cW = Math.round(s.tapeW * dpm);
+    var cH = Math.round(s.labelL * dpm);
+    targetCanvas.width = cW;
+    targetCanvas.height = cH;
+
+    var ctx = targetCanvas.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, cW, cH);
+    ctx.fillStyle = '#000';
+
+    var f1px = s.font1 * (s.dpi / 72);
+    var f2px = s.font2 * (s.dpi / 72);
+    var gap = s.lineGap * dpm;
+
+    ctx.font = s.bold1 + ' ' + f1px + 'px Arial, Helvetica, sans-serif';
+    ctx.fillText(s.line1, pad, pad + f1px);
+
+    ctx.font = s.bold2 + ' ' + f2px + 'px Arial, Helvetica, sans-serif';
+    ctx.fillStyle = '#333';
+    ctx.fillText(s.line2, pad, pad + f1px + gap + f2px);
+
+    return { printW: cW, printH: cH };
+  }
+}
+
+function createPrintImage(s) {
+  // For horizontal: render normally (wide x short), then rotate into a tall x narrow image
+  // For vertical: render directly as narrow x tall
+  if (s.orient === 'horizontal') {
+    var dpm = s.dpi / 25.4;
+    var pad = s.padMM * dpm;
+    var srcW = Math.round(s.labelL * dpm);  // 90mm = long
+    var srcH = Math.round(s.tapeW * dpm);   // 38mm = short
+
+    // Render text normally (left to right) on a wide canvas
+    var srcCanvas = document.createElement('canvas');
+    srcCanvas.width = srcW;
+    srcCanvas.height = srcH;
+    var sctx = srcCanvas.getContext('2d');
+    sctx.fillStyle = '#fff';
+    sctx.fillRect(0, 0, srcW, srcH);
+    sctx.fillStyle = '#000';
+
+    var f1px = s.font1 * (s.dpi / 72);
+    var f2px = s.font2 * (s.dpi / 72);
+    var gap = s.lineGap * dpm;
+    var totalTextH = f1px + gap + f2px;
+    var startY = (srcH - totalTextH) / 2 + f1px;
+
+    sctx.font = s.bold1 + ' ' + f1px + 'px Arial, Helvetica, sans-serif';
+    sctx.fillText(s.line1, pad, startY);
+    sctx.font = s.bold2 + ' ' + f2px + 'px Arial, Helvetica, sans-serif';
+    sctx.fillStyle = '#333';
+    sctx.fillText(s.line2, pad, startY + gap + f2px);
+
+    // Now rotate 90° CW into print canvas (38mm wide x 90mm tall)
+    var pCanvas = document.createElement('canvas');
+    pCanvas.width = srcH;   // 38mm
+    pCanvas.height = srcW;  // 90mm
+    var pctx = pCanvas.getContext('2d');
+    pctx.translate(srcH, 0);
+    pctx.rotate(Math.PI / 2);
+    pctx.drawImage(srcCanvas, 0, 0);
+
+    return pCanvas.toDataURL('image/png');
+  } else {
+    // Vertical: print as-is
+    var c = document.createElement('canvas');
+    renderLabel(s, c);
+    return c.toDataURL('image/png');
+  }
+}
+
+function updatePreview() {
+  var s = getSettings();
+  var canvas = document.getElementById('preview');
+  renderLabel(s, canvas);
+
+  // Scale preview for screen (show at ~2x for readability)
+  var dpm = s.dpi / 25.4;
+  var physW = canvas.width / dpm;
+  var physH = canvas.height / dpm;
+  // Display at 3px per mm for screen
+  var screenScale = 3;
+  canvas.style.width = (physW * screenScale) + 'px';
+  canvas.style.height = (physH * screenScale) + 'px';
+
+  document.getElementById('dimInfo').textContent =
+    'Physical: ' + physW.toFixed(1) + 'mm × ' + physH.toFixed(1) + 'mm (' +
+    canvas.width + ' × ' + canvas.height + 'px @ ' + s.dpi + 'dpi)' +
+    (s.orient === 'horizontal' ? ' — rotated 90° for print' : '');
+}
 
 function doPrint() {
-  const count = parseInt(document.getElementById('labelCount').value);
-  const len = document.getElementById('labelLength').value;
-  const container = document.getElementById('printLabels');
-  container.innerHTML = '';
+  var s = getSettings();
+  var imgData = createPrintImage(s);
+  var pa = document.getElementById('printArea');
 
-  // Update @page size dynamically
-  let styleEl = document.getElementById('dynamicPageSize');
-  if (!styleEl) {
-    styleEl = document.createElement('style');
-    styleEl.id = 'dynamicPageSize';
-    document.head.appendChild(styleEl);
-  }
-  styleEl.textContent = '@page { size: 38mm ' + len + 'mm; margin: 0; }';
-
-  for (let i = 0; i < count; i++) {
-    const d = testData[i % testData.length];
-    const label = document.createElement('div');
-    label.className = 'print-label';
-    label.style.width = len + 'mm';
-    label.innerHTML =
-      '<div class="inner" style="width:' + len + 'mm; height:38mm;">' +
-        '<div class="line1">' + d.line1 + '</div>' +
-        '<div class="line2">' + d.line2 + '</div>' +
-      '</div>';
-    container.appendChild(label);
+  // Calculate print dimensions in mm
+  var printWmm, printHmm;
+  if (s.orient === 'horizontal') {
+    printWmm = s.tapeW;  // 38mm
+    printHmm = s.labelL; // 90mm
+  } else {
+    printWmm = s.tapeW;
+    printHmm = s.labelL;
   }
 
-  container.style.display = 'block';
-  setTimeout(function() { window.print(); }, 300);
+  pa.innerHTML = '<img src="' + imgData + '" style="width:' + printWmm + 'mm;height:' + printHmm + 'mm;display:block;margin:0;padding:0;">';
+
+  // Inject dynamic page size
+  var ps = document.getElementById('dynPage');
+  if (!ps) { ps = document.createElement('style'); ps.id = 'dynPage'; document.head.appendChild(ps); }
+  ps.textContent = '@page{size:' + printWmm + 'mm ' + printHmm + 'mm;margin:0;}';
+
+  pa.style.display = 'block';
+  setTimeout(function() { window.print(); }, 400);
 }
+
+function applyPreset(name) {
+  document.querySelectorAll('.preset-btn').forEach(function(b) { b.classList.remove('active'); });
+  event.target.classList.add('active');
+
+  if (name === 'horiz') {
+    document.getElementById('orient').value = 'horizontal';
+    document.getElementById('font1').value = '14';
+    document.getElementById('font2').value = '11';
+    document.getElementById('labelL').value = '90';
+  } else if (name === 'vert') {
+    document.getElementById('orient').value = 'vertical';
+    document.getElementById('font1').value = '9';
+    document.getElementById('font2').value = '7';
+    document.getElementById('labelL').value = '50';
+  } else if (name === 'large') {
+    document.getElementById('orient').value = 'horizontal';
+    document.getElementById('font1').value = '18';
+    document.getElementById('font2').value = '13';
+    document.getElementById('labelL').value = '100';
+  } else if (name === 'compact') {
+    document.getElementById('orient').value = 'horizontal';
+    document.getElementById('font1').value = '11';
+    document.getElementById('font2').value = '9';
+    document.getElementById('labelL').value = '70';
+  }
+  updatePreview();
+}
+
+// Live update on any change
+document.querySelectorAll('input,select').forEach(function(el) {
+  el.addEventListener('input', updatePreview);
+  el.addEventListener('change', updatePreview);
+});
+
+// Initial render
+updatePreview();
 </script>
 </body>
 </html>
