@@ -1,249 +1,182 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>QL-810W Label Test Print</title>
-    <style>
-        /* Screen styles - preview */
-        body {
-            font-family: Arial, Helvetica, sans-serif;
-            padding: 20px;
-            background: #f3f4f6;
-        }
-        
-        h1 { font-size: 20px; margin-bottom: 4px; }
-        .subtitle { color: #6b7280; margin-bottom: 20px; font-size: 14px; }
-        
-        .controls {
-            background: white;
-            border-radius: 12px;
-            padding: 16px;
-            margin-bottom: 20px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        }
-        .controls label { font-weight: 600; font-size: 14px; display: block; margin-bottom: 6px; }
-        .controls select, .controls input {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid #d1d5db;
-            border-radius: 8px;
-            font-size: 15px;
-            margin-bottom: 12px;
-            box-sizing: border-box;
-        }
-        
-        .preview-area {
-            background: white;
-            border-radius: 12px;
-            padding: 16px;
-            margin-bottom: 20px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        }
-        .preview-area h2 { font-size: 16px; margin-bottom: 12px; }
-        
-        .btn-print {
-            display: block;
-            width: 100%;
-            padding: 16px;
-            background: #2563eb;
-            color: white;
-            border: none;
-            border-radius: 12px;
-            font-size: 18px;
-            font-weight: 600;
-            cursor: pointer;
-        }
-        .btn-print:active { background: #1d4ed8; }
-        
-        /* Label preview on screen */
-        .label-preview {
-            border: 2px dashed #d1d5db;
-            border-radius: 4px;
-            padding: 6px 10px;
-            margin-bottom: 8px;
-            background: #fffbeb;
-            font-family: Arial, Helvetica, sans-serif;
-            /* Simulated 38mm height, auto width */
-            max-width: 100%;
-            overflow: hidden;
-        }
-        
-        .label-line1 {
-            font-size: 13px;
-            line-height: 1.3;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-        .label-line1 span { margin-right: 6px; }
-        .label-job { font-weight: 700; }
-        .label-customer { font-weight: 600; }
-        .label-partcode { font-weight: 700; border-left: 1px solid #999; padding-left: 6px; margin-left: 2px; }
-        .label-desc { color: #374151; }
-        
-        .label-line2 {
-            font-size: 12px;
-            line-height: 1.3;
-            color: #4b5563;
-            margin-top: 2px;
-        }
-        .label-line2 span { margin-right: 8px; }
-        
-        .size-note {
-            font-size: 12px;
-            color: #9ca3af;
-            text-align: center;
-            margin-top: 8px;
-        }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QL-810W Test Print</title>
+<style>
+  /* ===== SCREEN STYLES ===== */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+    background: #f5f5f5; padding: 20px; color: #333;
+  }
+  .screen-only { display: block; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .subtitle { color: #888; font-size: 13px; margin-bottom: 20px; }
+  .controls { background: #fff; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  .controls label { font-size: 13px; font-weight: 600; display: block; margin-bottom: 4px; }
+  .controls select { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #ddd; font-size: 15px; margin-bottom: 12px; background: #fafafa; }
+  .preview-box { background: #fff; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  .preview-box h3 { font-size: 14px; margin-bottom: 10px; }
 
-        /* ========== PRINT STYLES - QL-810W 38mm continuous ========== */
-        @media print {
-            body * { visibility: hidden; }
-            
-            #print-area, #print-area * { visibility: visible; }
-            
-            #print-area {
-                display: block !important;
-                position: absolute;
-                left: 0;
-                top: 0;
-                width: 100%;
-                max-height: none;
-                overflow: visible;
-                padding: 0;
-                margin: 0;
-            }
-            
-            /* 38mm label height, length auto (continuous) */
-            @page {
-                size: 90mm 38mm;
-                margin: 2mm 3mm;
-            }
-            
-            .label-preview {
-                page-break-after: always;
-                page-break-inside: avoid;
-                width: 100%;
-                padding: 1mm 0;
-                margin: 0;
-                box-sizing: border-box;
-                background: white;
-                border: none;
-                border-radius: 0;
-            }
-            
-            .label-preview:last-child {
-                page-break-after: avoid;
-            }
-            
-            .label-line1 {
-                font-size: 11pt;
-                line-height: 1.3;
-                white-space: nowrap;
-                overflow: hidden;
-                margin: 0;
-            }
-            
-            .label-line2 {
-                font-size: 9pt;
-                line-height: 1.3;
-                color: #333;
-                margin: 1mm 0 0 0;
-            }
-            
-            .size-note { display: none; }
-        }
-    </style>
+  /* Screen preview of label (simulates rotated output) */
+  .label-preview {
+    background: #fffde8; border: 1px dashed #ccc; border-radius: 4px;
+    padding: 6px 10px; margin-bottom: 8px; overflow: hidden;
+  }
+  .label-preview .line1 { font-size: 11px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .label-preview .line2 { font-size: 9px; color: #555; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+  .preview-note { text-align: center; color: #aaa; font-size: 11px; margin-top: 8px; }
+
+  .print-btn {
+    display: block; width: 100%; padding: 16px; border: none; border-radius: 12px;
+    background: #2563eb; color: #fff; font-size: 17px; font-weight: 600; cursor: pointer;
+  }
+  .print-btn:active { background: #1d4ed8; }
+
+  /* ===== PRINT STYLES ===== */
+  @page {
+    size: 38mm 90mm;  /* tape width x cut length */
+    margin: 0;
+  }
+  @media print {
+    body { background: none; padding: 0; margin: 0; }
+    .screen-only { display: none !important; }
+
+    .print-label {
+      display: block !important;
+      width: 90mm;
+      height: 38mm;
+      position: relative;
+      page-break-after: always;
+      overflow: hidden;
+      /* Rotate content: origin top-left, rotate 90° CW, shift right by 38mm */
+      transform: rotate(90deg) translateY(-38mm);
+      transform-origin: top left;
+    }
+    .print-label .inner {
+      width: 90mm;
+      height: 38mm;
+      padding: 2mm 3mm;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    .print-label .line1 {
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 11pt;
+      font-weight: 700;
+      line-height: 1.3;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+    .print-label .line2 {
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 9pt;
+      font-weight: 400;
+      line-height: 1.3;
+      white-space: nowrap;
+      overflow: hidden;
+      margin-top: 1mm;
+    }
+
+    /* Kill ALL decorative elements */
+    * {
+      border: none !important;
+      box-shadow: none !important;
+      text-shadow: none !important;
+      outline: none !important;
+      background: none !important;
+      -webkit-print-color-adjust: exact;
+    }
+  }
+</style>
 </head>
 <body>
-    <h1>🏷️ QL-810W Test Print</h1>
-    <p class="subtitle">KD-2225 — 38mm continuous labels</p>
-    
-    <div class="controls">
-        <label for="label-length">Label Length (mm)</label>
-        <select id="label-length" onchange="updatePageSize()">
-            <option value="70">70mm (short)</option>
-            <option value="80">80mm</option>
-            <option value="90" selected>90mm (default)</option>
-            <option value="100">100mm</option>
-            <option value="110">110mm (long)</option>
-        </select>
-        
-        <label for="num-labels">Number of test labels</label>
-        <select id="num-labels" onchange="regenerateLabels()">
-            <option value="1">1 label</option>
-            <option value="2" selected>2 labels</option>
-            <option value="3">3 labels</option>
-            <option value="5">5 labels</option>
-        </select>
+
+<!-- ===== SCREEN UI ===== -->
+<div class="screen-only">
+  <h1>🏷️ QL-810W Test Print</h1>
+  <p class="subtitle">KD-2225 — 38mm continuous labels</p>
+
+  <div class="controls">
+    <label>Label Length (mm)</label>
+    <select id="labelLength">
+      <option value="90" selected>90mm (default)</option>
+      <option value="70">70mm (short)</option>
+      <option value="100">100mm (long)</option>
+    </select>
+
+    <label>Number of test labels</label>
+    <select id="labelCount">
+      <option value="1">1 label</option>
+      <option value="2" selected>2 labels</option>
+      <option value="3">3 labels</option>
+    </select>
+  </div>
+
+  <div class="preview-box">
+    <h3>Preview</h3>
+    <div class="label-preview">
+      <div class="line1">Job 5364  LEE | COL-4PNL-2040  Colonial 4 pan…</div>
+      <div class="line2">Qty: 2 · Customer Cupboard · 09/04/2026 · PO 21027</div>
     </div>
-    
-    <div class="preview-area">
-        <h2>Preview</h2>
-        <div id="print-area"></div>
-        <p class="size-note">Labels print at 38mm × <span id="length-display">90</span>mm</p>
+    <div class="label-preview">
+      <div class="line1">Job 5280  SMITH | HNG-100-SS  Hinge 100mm fi…</div>
+      <div class="line2">Qty: 5 · Shed A2 · 09/04/2026 · PO 20890</div>
     </div>
-    
-    <button class="btn-print" onclick="window.print()">🖨️ Print Test Labels</button>
-    
-    <script>
-        const sampleData = [
-            { job: '5364', customer: 'LEE', partCode: 'COL-4PNL-2040', desc: 'Colonial 4 panel 2040x720x35 SPM door', qty: 2, location: 'Customer Cupboard', po: '21027' },
-            { job: '5280', customer: 'SMITH', partCode: 'HNG-100-SS', desc: 'Hinge 100mm fixed pin stainless steel', qty: 5, location: 'Shed A2', po: '20890' },
-            { job: '5410', customer: 'JONES', partCode: 'LCK-DSL-SC', desc: 'Deadbolt snib lock satin chrome', qty: 1, location: 'Container 3 - Shelf B', po: '21055' },
-            { job: '', customer: '', partCode: 'SCR-10G-50', desc: '10g x 50mm galv screws box/500', qty: 3, location: 'Stock Holding', po: '21100' },
-            { job: '5390', customer: 'BROWN', partCode: 'DR-FRM-2040', desc: 'Door frame set 2040x820 pine primed', qty: 1, location: 'Back Room', po: '21042' },
-        ];
-        
-        const today = new Date().toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit', year: 'numeric' });
-        
-        function generateLabel(item) {
-            const jobHtml = item.job ? `<span class="label-job">Job ${item.job}</span>` : '';
-            const custHtml = item.customer ? `<span class="label-customer">${item.customer}</span>` : '';
-            return `
-                <div class="label-preview">
-                    <div class="label-line1">
-                        ${jobHtml}
-                        ${custHtml}
-                        <span class="label-partcode">${item.partCode}</span>
-                        <span class="label-desc">${item.desc}</span>
-                    </div>
-                    <div class="label-line2">
-                        <span>Qty: ${item.qty}</span>
-                        <span>${item.location}</span>
-                        <span>${today}</span>
-                        <span>PO ${item.po}</span>
-                    </div>
-                </div>
-            `;
-        }
-        
-        function regenerateLabels() {
-            const count = parseInt(document.getElementById('num-labels').value);
-            const area = document.getElementById('print-area');
-            area.innerHTML = '';
-            for (let i = 0; i < count; i++) {
-                area.innerHTML += generateLabel(sampleData[i % sampleData.length]);
-            }
-        }
-        
-        function updatePageSize() {
-            const len = document.getElementById('label-length').value;
-            document.getElementById('length-display').textContent = len;
-            
-            // Update @page size dynamically
-            let styleEl = document.getElementById('dynamic-print-style');
-            if (!styleEl) {
-                styleEl = document.createElement('style');
-                styleEl.id = 'dynamic-print-style';
-                document.head.appendChild(styleEl);
-            }
-            styleEl.textContent = `@media print { @page { size: ${len}mm 38mm; margin: 2mm 3mm; } }`;
-        }
-        
-        // Initial render
-        regenerateLabels();
-    </script>
+    <p class="preview-note">Labels print at 38mm × <span id="previewLen">90</span>mm (text runs along length)</p>
+  </div>
+
+  <button class="print-btn" onclick="doPrint()">🖨️ Print Test Labels</button>
+</div>
+
+<!-- ===== PRINT-ONLY LABELS (hidden on screen) ===== -->
+<div id="printLabels" style="display:none;"></div>
+
+<script>
+document.getElementById('labelLength').addEventListener('change', function() {
+  document.getElementById('previewLen').textContent = this.value;
+});
+
+const testData = [
+  { line1: 'Job 5364  LEE | COL-4PNL-2040  Colonial 4 panel door', line2: 'Qty: 2 · Customer Cupboard · 09/04/2026 · PO 21027' },
+  { line1: 'Job 5280  SMITH | HNG-100-SS  Hinge 100mm fixed pin SS', line2: 'Qty: 5 · Shed A2 · 09/04/2026 · PO 20890' },
+  { line1: 'Job 5100  JONES | SCR-10G-50  Screws 10g x 50mm gal', line2: 'Qty: 20 · Van · 09/04/2026 · PO 20750' }
+];
+
+function doPrint() {
+  const count = parseInt(document.getElementById('labelCount').value);
+  const len = document.getElementById('labelLength').value;
+  const container = document.getElementById('printLabels');
+  container.innerHTML = '';
+
+  // Update @page size dynamically
+  let styleEl = document.getElementById('dynamicPageSize');
+  if (!styleEl) {
+    styleEl = document.createElement('style');
+    styleEl.id = 'dynamicPageSize';
+    document.head.appendChild(styleEl);
+  }
+  styleEl.textContent = '@page { size: 38mm ' + len + 'mm; margin: 0; }';
+
+  for (let i = 0; i < count; i++) {
+    const d = testData[i % testData.length];
+    const label = document.createElement('div');
+    label.className = 'print-label';
+    label.style.width = len + 'mm';
+    label.innerHTML =
+      '<div class="inner" style="width:' + len + 'mm; height:38mm;">' +
+        '<div class="line1">' + d.line1 + '</div>' +
+        '<div class="line2">' + d.line2 + '</div>' +
+      '</div>';
+    container.appendChild(label);
+  }
+
+  container.style.display = 'block';
+  setTimeout(function() { window.print(); }, 300);
+}
+</script>
 </body>
 </html>
