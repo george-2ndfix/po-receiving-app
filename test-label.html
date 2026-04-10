@@ -8,135 +8,141 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: Arial, sans-serif; background: #f0f0f0; padding: 16px; }
 h1 { font-size: 20px; margin-bottom: 8px; }
-.info { font-size: 13px; color: #666; margin-bottom: 16px; }
+.info { font-size: 13px; color: #555; margin-bottom: 16px; background:#fff3cd; padding:8px 12px; border-radius:6px; }
 
-.controls { 
+.controls {
   background: #fff; border-radius: 8px; padding: 16px; margin-bottom: 16px;
   box-shadow: 0 1px 3px rgba(0,0,0,0.1);
 }
-.controls h2 { font-size: 16px; margin-bottom: 12px; }
-.control-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; align-items: center; }
-.control-row label { font-size: 13px; font-weight: bold; min-width: 100px; }
-.control-row input, .control-row select { font-size: 14px; padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px; }
-.control-row input[type=number] { width: 80px; }
+.controls h2 { font-size: 15px; margin-bottom: 10px; }
+.crow { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; align-items: center; }
+.crow label { font-size: 13px; font-weight: bold; min-width: 110px; }
+.crow input, .crow select { font-size: 13px; padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px; }
+.crow input[type=number] { width: 70px; }
 
-.label-section {
-  background: #fff; border-radius: 8px; padding: 16px; margin-bottom: 16px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+/* Screen preview: rotate canvas 90° so it looks horizontal to human eye */
+.label-wrap {
+  display: inline-block;
+  margin-bottom: 20px;
 }
-.label-section h3 { font-size: 14px; margin-bottom: 8px; color: #333; }
-.label-preview { 
-  border: 1px dashed #999; display: inline-block; margin-bottom: 8px;
+.label-preview {
+  display: inline-block;
+  border: 2px dashed #bbb;
   background: #fff;
+  /* We rotate the portrait canvas so it looks horizontal on screen */
+  transform: rotate(90deg);
+  transform-origin: top left;
 }
-canvas { display: block; }
-
-.btn { 
-  background: #2563eb; color: #fff; border: none; padding: 10px 24px; 
-  border-radius: 6px; font-size: 15px; cursor: pointer; margin: 4px;
+.label-outer {
+  /* container sized for the rotated canvas */
+  margin-bottom: 12px;
+  position: relative;
 }
-.btn:hover { background: #1d4ed8; }
-.btn.green { background: #16a34a; }
-.btn.green:hover { background: #15803d; }
 
-.sample-data { font-size: 12px; color: #888; margin-top: 4px; }
+.section {
+  background: #fff; border-radius: 8px; padding: 16px; margin-bottom: 14px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+.section h3 { font-size: 13px; color: #555; margin-bottom: 10px; }
 
+.btn { background:#2563eb; color:#fff; border:none; padding:10px 24px; border-radius:6px; font-size:15px; cursor:pointer; margin:4px; }
+.btn:hover { background:#1d4ed8; }
+.btn.green { background:#16a34a; }
+.btn.green:hover { background:#15803d; }
+
+/* ===================== PRINT STYLES ===================== */
 @media print {
+  /* Portrait page matching canvas exactly */
+  @page {
+    size: 35mm 200mm portrait;
+    margin: 0;
+  }
   body { background: #fff; padding: 0; margin: 0; }
-  .controls, h1, .info, .btn-row, .sample-data, .no-print { display: none !important; }
-  .label-section { box-shadow: none; border: none; padding: 0; margin: 0; page-break-after: always; }
-  .label-section h3 { display: none; }
-  .label-preview { border: none; }
-  canvas { display: block; }
-  @page { margin: 0; padding: 0; }
+  .controls, h1, .info, .btn-row, .section h3, .no-print { display: none !important; }
+  .section {
+    box-shadow: none; border: none; padding: 0; margin: 0;
+    page-break-after: always;
+    display: block;
+  }
+  /* Remove the screen rotation for print */
+  .label-preview {
+    transform: none !important;
+    border: none !important;
+    display: block;
+  }
+  .label-outer, .label-wrap {
+    transform: none !important;
+    display: block;
+  }
+  canvas { display: block; width: 100% !important; height: auto !important; }
 }
 </style>
 </head>
 <body>
 
 <h1>🏷️ QL-810W Label Configurator</h1>
-<p class="info">38mm continuous tape • Adjust settings below, preview updates live</p>
+<div class="info">
+  <strong>How it works:</strong> Canvas is <em>portrait</em> (35mm wide × 200mm tall) — the printer feeds 35mm across the tape and 200mm along the roll. Text is drawn horizontally and will read left→right on the finished label. Screen preview is rotated 90° so you can see it as it will look.
+</div>
 
 <div class="controls">
   <h2>⚙️ Settings</h2>
-  <div class="control-row">
+  <div class="crow">
     <label>Label Length:</label>
-    <input type="number" id="labelLength" value="200" min="50" max="300" step="5"> mm
-    <label style="margin-left:20px">Label Height:</label>
-    <input type="number" id="labelHeight" value="35" min="20" max="38" step="1"> mm
+    <input type="number" id="labelLength" value="200" min="80" max="350" step="5"> mm
+    <label style="margin-left:16px">Label Width:</label>
+    <input type="number" id="labelWidth" value="34" min="20" max="38" step="1"> mm
   </div>
-  <div class="control-row">
+  <div class="crow">
     <label>Font Size:</label>
-    <input type="number" id="fontSize" value="14" min="8" max="28" step="1"> pt
-    <label style="margin-left:20px">Line Spacing:</label>
-    <input type="number" id="lineSpacing" value="1.4" min="1.0" max="2.0" step="0.1">
+    <input type="number" id="fontSize" value="13" min="7" max="22" step="0.5"> pt
+    <label style="margin-left:16px">Line Spacing:</label>
+    <input type="number" id="lineSpacing" value="1.45" min="1.0" max="2.2" step="0.05">
   </div>
-  <div class="control-row">
-    <label>DPI:</label>
-    <select id="dpi">
-      <option value="203">203 (QL-810W native)</option>
-      <option value="300" selected>300 (high quality)</option>
-    </select>
-    <label style="margin-left:20px">Font:</label>
+  <div class="crow">
+    <label>Font:</label>
     <select id="fontFamily">
       <option value="Arial" selected>Arial</option>
       <option value="Helvetica">Helvetica</option>
       <option value="Verdana">Verdana</option>
-      <option value="monospace">Monospace</option>
+    </select>
+    <label style="margin-left:16px">Layout:</label>
+    <select id="layoutMode">
+      <option value="3line" selected>3 Lines</option>
+      <option value="2line">2 Lines</option>
     </select>
   </div>
-  <div class="control-row">
+  <div class="crow">
     <label>Bold Line 1:</label>
     <input type="checkbox" id="boldLine1" checked>
-    <label style="margin-left:20px">Layout:</label>
-    <select id="layoutMode">
-      <option value="2line">2 Lines</option>
-      <option value="3line" selected>3 Lines</option>
+    <label style="margin-left:16px">DPI:</label>
+    <select id="dpi">
+      <option value="203" selected>203 (QL-810W native)</option>
+      <option value="300">300</option>
     </select>
   </div>
 </div>
 
 <div id="labels-container"></div>
 
-<div class="btn-row" style="text-align:center; margin-top:16px;">
-  <button class="btn green" onclick="printLabels()">🖨️ Print All Labels</button>
-  <button class="btn" onclick="renderAll()">🔄 Refresh Previews</button>
+<div class="btn-row no-print" style="text-align:center; margin-top:12px;">
+  <button class="btn green" onclick="window.print()">🖨️ Print All Labels</button>
+  <button class="btn" onclick="renderAll()">🔄 Refresh</button>
 </div>
 
 <script>
-// Sample data - different customer names, products, lengths
 const sampleItems = [
-  {
-    job: '5364', customer: 'LEE', partNumber: 'SPM-2040-720',
-    description: 'Colonial 4 panel 2040x720x35 SPM door',
-    qty: 2, storage: 'Customer Cupboard', po: '21027', date: '09/04/2026'
-  },
-  {
-    job: '5280', customer: 'THOMPSON RESIDENCE', partNumber: 'HNG-100-SS',
-    description: '100mm stainless steel butt hinge',
-    qty: 24, storage: 'Shed', po: '20855', date: '09/04/2026'
-  },
-  {
-    job: '5391', customer: 'JOHNSON & ASSOCIATES PTY LTD', partNumber: 'LCK-ERA-LVR',
-    description: 'ERA lever passage set satin chrome',
-    qty: 6, storage: 'Van - George', po: '21102', date: '09/04/2026'
-  },
-  {
-    job: '5150', customer: 'WU', partNumber: 'DH-CAVITY-2040',
-    description: 'Cavity slider track kit 2040mm',
-    qty: 1, storage: 'Customer Cupboard', po: '20990', date: '09/04/2026'
-  },
-  {
-    job: '5422', customer: 'O\'BRIEN FAMILY TRUST', partNumber: 'FRM-VIC-ASH-140',
-    description: 'Victorian ash frame set 140mm jamb 2100x900',
-    qty: 3, storage: 'Shed', po: '21200', date: '09/04/2026'
-  }
+  { job:'5364', customer:'LEE', partNumber:'SPM-2040-720', description:'Colonial 4 panel 2040x720x35 SPM door', qty:2, storage:'Customer Cupboard', po:'21027', date:'09/04/2026' },
+  { job:'5280', customer:'THOMPSON RESIDENCE', partNumber:'HNG-100-SS', description:'100mm stainless steel butt hinge pair', qty:24, storage:'Shed', po:'20855', date:'09/04/2026' },
+  { job:'5391', customer:'JOHNSON & ASSOCIATES PTY LTD', partNumber:'LCK-ERA-LVR', description:'ERA lever passage set satin chrome', qty:6, storage:'Van - George', po:'21102', date:'09/04/2026' },
+  { job:'5150', customer:'WU', partNumber:'DH-CAV-2040', description:'Cavity slider track kit 2040mm', qty:1, storage:'Customer Cupboard', po:'20990', date:'09/04/2026' },
+  { job:'5422', customer:"O'BRIEN FAMILY TRUST", partNumber:'FRM-ASH-140', description:'Victorian ash frame set 140mm jamb 2100x900', qty:3, storage:'Shed', po:'21200', date:'09/04/2026' }
 ];
 
 function getSettings() {
   return {
     lengthMM: parseFloat(document.getElementById('labelLength').value),
-    heightMM: parseFloat(document.getElementById('labelHeight').value),
+    widthMM:  parseFloat(document.getElementById('labelWidth').value),
     fontSize: parseFloat(document.getElementById('fontSize').value),
     lineSpacing: parseFloat(document.getElementById('lineSpacing').value),
     dpi: parseInt(document.getElementById('dpi').value),
@@ -146,9 +152,7 @@ function getSettings() {
   };
 }
 
-function mmToPx(mm, dpi) {
-  return Math.round(mm * dpi / 25.4);
-}
+function mmToPx(mm, dpi) { return Math.round(mm * dpi / 25.4); }
 
 function formatLines(item, layout) {
   if (layout === '3line') {
@@ -159,109 +163,104 @@ function formatLines(item, layout) {
     ];
   } else {
     return [
-      `Job ${item.job} | ${item.customer} | ${item.partNumber} | ${item.description}`,
-      `Qty: ${item.qty} | ${item.storage} | ${item.date} | PO ${item.po}`
+      `Job ${item.job} | ${item.customer} | ${item.partNumber}`,
+      `${item.description} | Qty:${item.qty} | ${item.storage} | ${item.date} | PO ${item.po}`
     ];
   }
 }
 
-function renderLabel(canvas, item, settings) {
-  const { lengthMM, heightMM, fontSize, lineSpacing, dpi, fontFamily, boldLine1, layout } = settings;
-  
-  const W = mmToPx(lengthMM, dpi);
-  const H = mmToPx(heightMM, dpi);
-  
-  canvas.width = W;
+function renderLabel(canvas, item, s) {
+  // PORTRAIT canvas: W = tape width, H = tape feed length
+  const W = mmToPx(s.widthMM, s.dpi);   // 34mm across tape
+  const H = mmToPx(s.lengthMM, s.dpi);  // 200mm along feed
+
+  canvas.width  = W;
   canvas.height = H;
-  
-  // Scale for display (show at ~50% size for screen)
-  const displayScale = 0.45;
-  canvas.style.width = (W * displayScale) + 'px';
-  canvas.style.height = (H * displayScale) + 'px';
-  
+
+  // Screen display: rotated 90deg via CSS, so show at scale
+  const scale = 1.8;  // px per canvas-px for screen
+  canvas.style.width  = (W * scale) + 'px';
+  canvas.style.height = (H * scale) + 'px';
+
   const ctx = canvas.getContext('2d');
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, W, H);
-  
-  const lines = formatLines(item, layout);
-  const scaledFontSize = fontSize * (dpi / 72); // Convert pt to px at DPI
-  const lineH = scaledFontSize * lineSpacing;
-  
-  // Calculate total text block height
-  const totalTextH = lines.length * lineH;
-  
-  // Vertically center
-  const startY = (H - totalTextH) / 2 + scaledFontSize * 0.85;
-  
-  const padX = mmToPx(3, dpi); // 3mm left/right padding
-  
-  ctx.fillStyle = '#000000';
+
+  const lines = formatLines(item, s.layout);
+  const scaledFS = s.fontSize * (s.dpi / 72);
+  const lineH = scaledFS * s.lineSpacing;
+  const totalH = lines.length * lineH;
+
+  // Vertically center within H (label height = feed direction = H on portrait canvas)
+  const startY = (H - totalH) / 2 + scaledFS * 0.88;
+  const padX = mmToPx(1.5, s.dpi);
+  const maxW = W - padX * 2;
+
+  ctx.fillStyle = '#000';
   ctx.textBaseline = 'alphabetic';
-  
-  for (let i = 0; i < lines.length; i++) {
-    const isBold = (i === 0 && boldLine1);
-    const weight = isBold ? 'bold' : 'normal';
-    let currentFontSize = scaledFontSize;
-    
-    // Auto-shrink if text is too wide
-    ctx.font = `${weight} ${currentFontSize}px ${fontFamily}`;
-    let textW = ctx.measureText(lines[i]).width;
-    const maxW = W - (padX * 2);
-    
-    if (textW > maxW) {
-      currentFontSize = currentFontSize * (maxW / textW) * 0.98;
-      ctx.font = `${weight} ${currentFontSize}px ${fontFamily}`;
+
+  lines.forEach((line, i) => {
+    const bold = (i === 0 && s.boldLine1);
+    let fs = scaledFS;
+    ctx.font = `${bold ? 'bold' : 'normal'} ${fs}px ${s.fontFamily}`;
+
+    // Auto-shrink to fit width
+    let tw = ctx.measureText(line).width;
+    if (tw > maxW) {
+      fs = fs * (maxW / tw) * 0.97;
+      ctx.font = `${bold ? 'bold' : 'normal'} ${fs}px ${s.fontFamily}`;
     }
-    
-    const y = startY + (i * lineH);
-    ctx.fillText(lines[i], padX, y);
-  }
-  
-  return canvas;
+
+    ctx.fillText(line, padX, startY + i * lineH);
+  });
 }
 
 function renderAll() {
-  const settings = getSettings();
+  const s = getSettings();
   const container = document.getElementById('labels-container');
   container.innerHTML = '';
-  
+
   sampleItems.forEach((item, idx) => {
     const section = document.createElement('div');
-    section.className = 'label-section';
-    
-    const title = document.createElement('h3');
-    title.textContent = `Label ${idx + 1}: ${item.customer} — ${item.description.substring(0, 40)}...`;
-    title.className = 'no-print';
-    section.appendChild(title);
-    
+    section.className = 'section';
+
+    const h3 = document.createElement('h3');
+    h3.className = 'no-print';
+    h3.textContent = `Label ${idx+1}: ${item.customer} — ${item.description.substring(0,45)}`;
+    section.appendChild(h3);
+
+    const canvas = document.createElement('canvas');
+    renderLabel(canvas, item, s);
+
+    // The canvas is portrait (narrow-tall).
+    // Wrap it so the CSS rotate looks right on screen.
+    const outer = document.createElement('div');
+    outer.className = 'label-outer';
+    outer.style.height = (canvas.width * 1.8 + 8) + 'px';  // rotated: canvas W becomes display H
+    outer.style.width  = (canvas.height * 1.8 + 8) + 'px'; // rotated: canvas H becomes display W
+
     const preview = document.createElement('div');
     preview.className = 'label-preview';
-    
-    const canvas = document.createElement('canvas');
-    renderLabel(canvas, item, settings);
+    // Rotate so landscape on screen
+    preview.style.transform = 'rotate(90deg)';
+    preview.style.transformOrigin = '0 0';
+    preview.style.position = 'absolute';
+    preview.style.top = '0';
+    preview.style.left = (canvas.width * 1.8) + 'px';
+    preview.style.transform = `rotate(90deg) translateY(-${canvas.width * 1.8}px)`;
+
     preview.appendChild(canvas);
-    section.appendChild(preview);
-    
-    const info = document.createElement('div');
-    info.className = 'sample-data';
-    info.textContent = `${settings.lengthMM}mm × ${settings.heightMM}mm @ ${settings.dpi} DPI = ${canvas.width}×${canvas.height}px`;
-    section.appendChild(info);
-    
+    outer.appendChild(preview);
+    section.appendChild(outer);
     container.appendChild(section);
   });
 }
 
-function printLabels() {
-  window.print();
-}
-
-// Auto-render on setting change
 document.querySelectorAll('.controls input, .controls select').forEach(el => {
   el.addEventListener('change', renderAll);
   el.addEventListener('input', renderAll);
 });
 
-// Initial render
 renderAll();
 </script>
 </body>
