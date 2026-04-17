@@ -1146,6 +1146,18 @@
         </div>
     </div>
 
-    <script src="app.js"></script>
+    <script>
+    // Force unregister old service workers and re-register fresh
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(regs => {
+            regs.forEach(reg => reg.unregister());
+        }).then(() => {
+            setTimeout(() => {
+                navigator.serviceWorker.register('/sw.js?v=1776424322');
+            }, 1000);
+        });
+    }
+    </script>
+    <script src="app.js?v=1776424322"></script>
 </body>
 </html>
