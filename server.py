@@ -2387,6 +2387,118 @@ def resolve_fault_report(report_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
+# ============================================
+# Version Endpoint (for deploy verification)
+# ============================================
+@app.route('/api/version')
+def get_version():
+    return jsonify({'version': '2026-04-17-labels', 'status': 'ok'})
+
+# ============================================
+# Test Label PDF Endpoint
+# ============================================
+@app.route('/api/test-label-pdf')
+def test_label_pdf():
+    """Generate a test label PDF for QL-810W printer (DK-2225 38mm tape)"""
+    try:
+        from reportlab.lib.units import mm
+        from reportlab.lib.pagesizes import landscape
+        from reportlab.pdfgen import canvas as pdf_canvas
+        
+        orientation = request.args.get('o', 'landscape')
+        
+        if orientation == 'portrait':
+            # Portrait: 38mm wide x 200mm tall, text pre-rotated
+            page_w, page_h = 38*mm, 200*mm
+        else:
+            # Landscape: 200mm wide x 38mm tall
+            page_w, page_h = 200*mm, 38*mm
+        
+        buf = io.BytesIO()
+        c = pdf_canvas.Canvas(buf, pagesize=(page_w, page_h))
+        
+        if orientation == 'portrait':
+            # Rotate text 90 degrees for portrait label
+            c.saveState()
+            c.translate(0, 0)
+            c.rotate(90)
+            # Now draw as if landscape (text goes along 200mm length)
+            draw_w, draw_h = page_h, page_w  # 200mm x 38mm drawing space
+            y_base = -draw_h  # Offset for rotation
+            
+            c.setFont("Helvetica-Bold", 11)
+            c.drawString(3*mm, y_base + 28*mm, "Job 12345 - Test Customer Name")
+            c.setFont("Helvetica", 9)
+            c.drawString(3*mm, y_base + 19*mm, "ABC-1234 - Test Catalog Item Description Here")
+            c.setFont("Helvetica", 8)
+            c.drawString(3*mm, y_base + 11*mm, "Qty: 10 - Van Stock (George) - 17/04/2026 - PO 21100")
+            c.restoreState()
+        else:
+            # Landscape: draw normally
+            c.setFont("Helvetica-Bold", 11)
+            c.drawString(3*mm, 28*mm, "Job 12345 - Test Customer Name")
+            c.setFont("Helvetica", 9)
+            c.drawString(3*mm, 19*mm, "ABC-1234 - Test Catalog Item Description Here")
+            c.setFont("Helvetica", 8)
+            c.drawString(3*mm, 11*mm, "Qty: 10 - Van Stock (George) - 17/04/2026 - PO 21100")
+        
+        c.save()
+        buf.seek(0)
+        
+        return send_file(
+            buf,
+            mimetype='application/pdf',
+            as_attachment=False,
+            download_name=f'test-label-{orientation}.pdf'
+        )
+    except ImportError:
+        return jsonify({'error': 'reportlab not installed'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ============================================
+# Dynamic Label PDF Endpoint (for PO items)
+# ============================================
+@app.route('/api/label-pdf', methods=['POST'])
+@login_required
+def generate_label_pdf():
+    """Generate a label PDF for a specific PO item"""
+    try:
+        from reportlab.lib.units import mm
+        from reportlab.pdfgen import canvas as pdf_canvas
+        
+        data = request.get_json()
+        job_info = data.get('jobInfo', 'Unknown Job')
+        catalog_info = data.get('catalogInfo', 'Unknown Item')
+        detail_info = data.get('detailInfo', '')
+        
+        page_w, page_h = 200*mm, 38*mm
+        
+        buf = io.BytesIO()
+        c = pdf_canvas.Canvas(buf, pagesize=(page_w, page_h))
+        
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(3*mm, 28*mm, str(job_info)[:60])
+        c.setFont("Helvetica", 9)
+        c.drawString(3*mm, 19*mm, str(catalog_info)[:70])
+        c.setFont("Helvetica", 8)
+        c.drawString(3*mm, 11*mm, str(detail_info)[:80])
+        
+        c.save()
+        buf.seek(0)
+        
+        return send_file(
+            buf,
+            mimetype='application/pdf',
+            as_attachment=False,
+            download_name='label.pdf'
+        )
+    except ImportError:
+        return jsonify({'error': 'reportlab not installed'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 # ============================================
 # Initialize and Run
 # ============================================
