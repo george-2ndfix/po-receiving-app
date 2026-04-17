@@ -13,7 +13,7 @@ import sqlite3
 import uuid
 from datetime import datetime, timedelta
 from functools import wraps
-from flask import Flask, request, jsonify, send_from_directory, session
+from flask import Flask, request, jsonify, send_from_directory, session, send_file
 import requests
 import io
 import base64
