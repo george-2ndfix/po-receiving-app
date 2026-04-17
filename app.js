@@ -2070,8 +2070,6 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                 wrapper.appendChild(removeBtn);
                 
                 preview.appendChild(wrapper);
-            };
-            reader.readAsDataURL(file);
         });
     },
     
