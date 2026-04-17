@@ -31,6 +31,11 @@ def add_cache_headers(response):
         response.headers['Expires'] = '0'
     return response
 
+# Version check endpoint
+@app.route('/api/version')
+def get_version():
+    return jsonify({'version': '2026-04-17-labels-v2', 'status': 'ok'})
+
 # ============================================
 # Configuration
 # ============================================
