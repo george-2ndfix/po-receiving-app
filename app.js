@@ -1213,10 +1213,14 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         const file = event.target.files[0];
         if (!file) return;
         
-        // Store docket photo as base64
-        const reader = new FileReader();
-        reader.onload = (e) => { this.docketPhoto = e.target.result; };
-        reader.readAsDataURL(file);
+        // Compress and store docket photo as base64
+        try {
+            this.docketPhoto = await this.compressImage(file);
+        } catch(e) {
+            const reader = new FileReader();
+            reader.onload = (ev) => { this.docketPhoto = ev.target.result; };
+            reader.readAsDataURL(file);
+        }
         
         // Show OCR progress
         const ocrProgress = document.getElementById('ocr-progress');
@@ -1354,13 +1358,12 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         }).join('');
     },
 
-    handleIndividualPhoto(index, event) {
+    async handleIndividualPhoto(index, event) {
         const file = event.target.files[0];
         if (!file) return;
         
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            const base64 = e.target.result;
+        try {
+            const base64 = await this.compressImage(file);
             
             // Store photo
             const existing = this.individualPhotos.findIndex(p => p.itemIndex === index);
@@ -1381,8 +1384,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             document.getElementById(`photo-img-${index}`).src = base64;
             document.getElementById(`photo-preview-${index}`).classList.remove('hidden');
             document.getElementById(`photo-capture-${index}`).classList.add('hidden');
-        };
-        reader.readAsDataURL(file);
+        } catch(e) { console.error("Photo compress error:", e); }
     },
 
     removeIndividualPhoto(index) {
@@ -1392,17 +1394,25 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         document.getElementById(`photo-input-${index}`).value = '';
     },
 
-    handleEvidencePhoto(event) {
+    async handleEvidencePhoto(event) {
         const file = event.target.files[0];
         if (file) {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                this.evidencePhoto = e.target.result;
-                document.getElementById('evidence-img').src = e.target.result;
+            try {
+                const compressed = await this.compressImage(file);
+                this.evidencePhoto = compressed;
+                document.getElementById('evidence-img').src = compressed;
                 document.getElementById('evidence-preview').classList.remove('hidden');
                 document.getElementById('evidence-capture').classList.add('hidden');
-            };
-            reader.readAsDataURL(file);
+            } catch(e) {
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    this.evidencePhoto = ev.target.result;
+                    document.getElementById('evidence-img').src = ev.target.result;
+                    document.getElementById('evidence-preview').classList.remove('hidden');
+                    document.getElementById('evidence-capture').classList.add('hidden');
+                };
+                reader.readAsDataURL(file);
+            }
         }
     },
     
@@ -1411,6 +1421,30 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         document.getElementById('evidence-preview').classList.add('hidden');
         document.getElementById('evidence-capture').classList.remove('hidden');
         document.getElementById('evidence-photo').value = '';
+    },
+
+    // ============================================
+    // Image Compression Helper
+    // ============================================
+    compressImage(file, maxDim = 1200, quality = 0.7) {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => {
+                let w = img.width, h = img.height;
+                if (w > maxDim || h > maxDim) {
+                    if (w > h) { h = Math.round(h * maxDim / w); w = maxDim; }
+                    else { w = Math.round(w * maxDim / h); h = maxDim; }
+                }
+                const canvas = document.createElement("canvas");
+                canvas.width = w;
+                canvas.height = h;
+                const ctx = canvas.getContext("2d");
+                ctx.drawImage(img, 0, 0, w, h);
+                resolve(canvas.toDataURL("image/jpeg", quality));
+            };
+            img.onerror = reject;
+            img.src = URL.createObjectURL(file);
+        });
     },
     
     // ============================================
@@ -1857,6 +1891,12 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         document.getElementById('report-photo-preview').innerHTML = '';
         document.getElementById('report-status').classList.add('hidden');
         document.getElementById('report-submit-btn').disabled = false;
+        
+        // Auto-populate email from logged-in user
+        const emailField = document.getElementById('report-email');
+        if (emailField && this.currentStaff?.email) {
+            emailField.value = this.currentStaff.email;
+        }
     },
     
     hideReportIssue() {
@@ -1896,10 +1936,13 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         const files = Array.from(event.target.files);
         const preview = document.getElementById('report-photo-preview');
         
-        files.forEach(file => {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const base64 = e.target.result;
+        files.forEach(async (file) => {
+            let base64;
+            try {
+                base64 = await this.compressImage(file);
+            } catch(e) {
+                base64 = await new Promise(r => { const rd = new FileReader(); rd.onload = ev => r(ev.target.result); rd.readAsDataURL(file); });
+            }
                 this._reportPhotos.push(base64);
                 
                 const wrapper = document.createElement('div');
