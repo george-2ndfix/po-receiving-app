@@ -2479,18 +2479,28 @@ def test_label_pdf():
 @app.route('/api/label-pdf', methods=['POST'])
 @login_required
 def generate_label_pdf():
-    """Generate a label PDF for a specific PO item - auto-fits text to QL-810W label"""
+    """Generate label PDF(s) for QL-810W printer. Accepts single or multiple labels."""
     try:
         from reportlab.lib.units import mm
         from reportlab.pdfgen import canvas as pdf_canvas
         from reportlab.pdfbase.pdfmetrics import stringWidth
         
         data = request.get_json()
-        line1 = data.get('jobInfo', 'Unknown Job')
-        line2 = data.get('catalogInfo', 'Unknown Item')
-        line3 = data.get('detailInfo', '')
         
-        page_w, page_h = 38*mm, 200*mm  # Portrait for QL-810W
+        # Support both single label and array of labels
+        labels = data.get('labels', None)
+        if labels is None:
+            # Single label format (backward compatible)
+            labels = [{
+                'line1': data.get('jobInfo', 'Unknown Job'),
+                'line2': data.get('catalogInfo', 'Unknown Item'),
+                'line3': data.get('detailInfo', '')
+            }]
+        
+        if not labels:
+            return jsonify({'error': 'No labels provided'}), 400
+        
+        page_w, page_h = 38*mm, 200*mm
         margin = 3*mm
         avail_w = page_h - 2*margin
         avail_h = page_w - 2*margin
@@ -2504,27 +2514,36 @@ def generate_label_pdf():
                 size -= 0.5
             return 5
         
-        size1 = auto_fit_font(str(line1), "Helvetica-Bold", 18, avail_w)
-        size2 = auto_fit_font(str(line2), "Helvetica", 14, avail_w)
-        size3 = auto_fit_font(str(line3), "Helvetica", 12, avail_w)
-        
         buf = io.BytesIO()
         c = pdf_canvas.Canvas(buf, pagesize=(page_w, page_h))
         
-        c.saveState()
-        c.rotate(90)
+        for idx, label in enumerate(labels):
+            if idx > 0:
+                c.showPage()
+            
+            l1 = str(label.get('line1', ''))
+            l2 = str(label.get('line2', ''))
+            l3 = str(label.get('line3', ''))
+            
+            size1 = auto_fit_font(l1, "Helvetica-Bold", 18, avail_w)
+            size2 = auto_fit_font(l2, "Helvetica", 14, avail_w)
+            size3 = auto_fit_font(l3, "Helvetica", 12, avail_w)
+            
+            c.saveState()
+            c.rotate(90)
+            
+            line_spacing = avail_h / 3
+            y_base = -page_w + margin
+            
+            c.setFont("Helvetica-Bold", size1)
+            c.drawString(margin, y_base + 2*line_spacing + 2*mm, l1)
+            c.setFont("Helvetica", size2)
+            c.drawString(margin, y_base + line_spacing + 1*mm, l2)
+            c.setFont("Helvetica", size3)
+            c.drawString(margin, y_base + 1*mm, l3)
+            
+            c.restoreState()
         
-        line_spacing = avail_h / 3
-        y_base = -page_w + margin
-        
-        c.setFont("Helvetica-Bold", size1)
-        c.drawString(margin, y_base + 2*line_spacing + 2*mm, str(line1))
-        c.setFont("Helvetica", size2)
-        c.drawString(margin, y_base + line_spacing + 1*mm, str(line2))
-        c.setFont("Helvetica", size3)
-        c.drawString(margin, y_base + 1*mm, str(line3))
-        
-        c.restoreState()
         c.save()
         buf.seek(0)
         
@@ -2532,7 +2551,7 @@ def generate_label_pdf():
             buf,
             mimetype='application/pdf',
             as_attachment=False,
-            download_name='label.pdf'
+            download_name='labels.pdf'
         )
     except ImportError:
         return jsonify({'error': 'reportlab not installed'}), 500
