@@ -2535,9 +2535,9 @@ def generate_label_pdf():
             download_name='label.pdf'
         )
     except ImportError:
-        return jsonify({\'error\': \'reportlab not installed\'}), 500
+        return jsonify({'error': 'reportlab not installed'}), 500
     except Exception as e:
-        return jsonify({\'error\': str(e)}), 500
+        return jsonify({'error': str(e)}), 500
 
 # ============================================
 # Initialize and Run
