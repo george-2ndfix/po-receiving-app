@@ -1094,6 +1094,112 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         }
         
         this.showScreen('success');
+        
+        // Load job intel in background
+        this.loadJobIntel();
+    },
+    
+
+    // ============================================
+    // Job Intel - show stock status for allocated jobs
+    // ============================================
+    async loadJobIntel() {
+        const container = document.getElementById('job-intel-section');
+        const content = document.getElementById('job-intel-content');
+        if (!container || !content) return;
+        
+        // Collect unique numeric job IDs from current PO items
+        const jobIds = new Set();
+        if (this.currentPO?.items) {
+            for (const item of this.currentPO.items) {
+                if (item.jobNumber && /^\d+$/.test(String(item.jobNumber))) {
+                    jobIds.add(String(item.jobNumber));
+                }
+            }
+        }
+        
+        if (jobIds.size === 0) {
+            container.style.display = 'none';
+            return;
+        }
+        
+        container.style.display = 'block';
+        content.innerHTML = '<div class="loading-small">Loading job intel...</div>';
+        
+        try {
+            let html = '';
+            for (const jobId of jobIds) {
+                const resp = await fetch('/api/job-intel', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ job_id: parseInt(jobId) }),
+                    cache: 'no-store'
+                });
+                
+                if (!resp.ok) continue;
+                const data = await resp.json();
+                
+                // Job header
+                html += '<div class="job-intel-card">';
+                html += '<div class="job-intel-header">';
+                html += '<strong>Job ' + jobId + '</strong> &middot; ' + (data.job.customer || 'Unknown');
+                if (data.job.site) html += '<br><small>\ud83d\udccd ' + data.job.site + '</small>';
+                html += '</div>';
+                
+                // Summary progress
+                const s = data.summary;
+                if (s.isComplete) {
+                    html += '<div class="job-intel-complete">\u2705 All ' + s.totalRequired + ' items received &mdash; job materials complete!</div>';
+                } else if (s.totalRequired > 0) {
+                    const pct = Math.round((s.totalAssigned / s.totalRequired) * 100);
+                    html += '<div class="job-intel-progress">';
+                    html += '<div class="progress-bar"><div class="progress-fill" style="width:' + pct + '%"></div></div>';
+                    html += '<span>' + s.totalAssigned + ' of ' + s.totalRequired + ' received &middot; ' + s.totalPending + ' pending</span>';
+                    html += '</div>';
+                }
+                
+                // Storage locations with items already there
+                if (data.storageLocations && data.storageLocations.length > 0) {
+                    html += '<div class="job-intel-storage">';
+                    html += '<div class="storage-title">\ud83d\udce6 Already in storage:</div>';
+                    for (const loc of data.storageLocations) {
+                        html += '<div class="storage-loc">';
+                        html += '<strong>' + loc.name + '</strong>';
+                        for (const item of loc.items.slice(0, 10)) {
+                            const label = (item.partNo ? item.partNo + ' ' : '') + item.name;
+                            html += '<div class="storage-item">&middot; ' + label + ' (&times;' + item.qty + ')</div>';
+                        }
+                        if (loc.items.length > 10) {
+                            html += '<div class="storage-item" style="font-style:italic;">&middot; +' + (loc.items.length - 10) + ' more items</div>';
+                        }
+                        html += '</div>';
+                    }
+                    html += '</div>';
+                }
+                
+                // Pending items
+                const pending = (data.stock || []).filter(s => s.pending > 0);
+                if (pending.length > 0) {
+                    html += '<div class="job-intel-pending">';
+                    html += '<div class="pending-title">\u23f3 Still awaiting:</div>';
+                    for (const item of pending.slice(0, 15)) {
+                        const label = (item.partNo ? item.partNo + ' ' : '') + item.name;
+                        html += '<div class="pending-item">&middot; ' + label + ' (&times;' + item.pending + ')</div>';
+                    }
+                    if (pending.length > 15) {
+                        html += '<div class="pending-item" style="font-style:italic;">&middot; +' + (pending.length - 15) + ' more items</div>';
+                    }
+                    html += '</div>';
+                }
+                
+                html += '</div>';  // close job-intel-card
+            }
+            
+            content.innerHTML = html || '<div>No job data available</div>';
+        } catch (e) {
+            console.error('Job intel error:', e);
+            content.innerHTML = '<div style="color: #f59e0b;">\u26a0\ufe0f Could not load job intel</div>';
+        }
     },
     
     startNewPO() {
