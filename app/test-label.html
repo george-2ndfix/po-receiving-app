@@ -1,335 +1,106 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>QL-810W Label Test</title>
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: Arial, sans-serif; background: #1a1a2e; color: white; padding: 16px; }
-
-  h1 { font-size: 18px; margin-bottom: 4px; }
-  .subtitle { font-size: 12px; color: #aaa; margin-bottom: 14px; }
-
-  .top-bar { background: #16213e; padding: 16px; border-radius: 10px; margin-bottom: 20px; }
-  .btn-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-  .btn { border: none; padding: 10px 18px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: bold; color: white; }
-  .btn-green  { background: #27ae60; }
-  .btn-blue   { background: #2980b9; }
-  .btn-orange { background: #e67e22; }
-  .btn-grey   { background: #555; font-size: 12px; padding: 8px 14px; }
-
-  .labels-area { display: flex; flex-wrap: wrap; gap: 20px; }
-  .label-card { background: #16213e; padding: 12px; border-radius: 10px; text-align: center; }
-  .label-title { font-size: 12px; color: #aaa; margin-bottom: 8px; }
-  .label-card canvas { border: 2px solid #444; display: block; }
-  .label-card .card-btns { margin-top: 8px; display: flex; gap: 6px; justify-content: center; }
-  .label-card .card-btns button { font-size: 11px; padding: 6px 10px; border-radius: 5px; border: none; cursor: pointer; color: white; }
-
-  .instructions { background: #16213e; padding: 16px; border-radius: 10px; margin-top: 20px; font-size: 13px; line-height: 1.7; }
-  .instructions h2 { color: #f39c12; margin-bottom: 8px; font-size: 14px; }
-  .instructions ol { padding-left: 18px; }
-  .instructions li { margin-bottom: 4px; }
-  .tip { background: #0f3460; border-left: 4px solid #3498db; padding: 10px; border-radius: 4px; margin-top: 12px; font-size: 12px; }
-
-  .debug-box { background: #000; color: #0f0; font-family: monospace; font-size: 11px; padding: 10px; border-radius: 6px; margin-top: 12px; white-space: pre; display: none; }
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QL-810W Label Test</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; padding: 20px; }
+        .container { max-width: 600px; margin: 0 auto; }
+        h1 { font-size: 24px; margin-bottom: 8px; }
+        .subtitle { color: #666; margin-bottom: 30px; font-size: 14px; }
+        
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 16px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .card h2 { font-size: 18px; margin-bottom: 4px; }
+        .card .desc { color: #666; font-size: 13px; margin-bottom: 16px; }
+        .card .dims { 
+            display: inline-block; background: #e8f4fd; color: #1976d2; 
+            padding: 3px 10px; border-radius: 20px; font-size: 12px; 
+            font-weight: 600; margin-bottom: 12px;
+        }
+        
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 16px;
+            font-size: 16px;
+            font-weight: 600;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            text-align: center;
+            text-decoration: none;
+            color: white;
+            margin-bottom: 8px;
+        }
+        .btn-blue { background: #1976d2; }
+        .btn-blue:hover { background: #1565c0; }
+        .btn-green { background: #2e7d32; }
+        .btn-green:hover { background: #1b5e20; }
+        
+        .instructions {
+            background: #fff3e0;
+            border-radius: 12px;
+            padding: 20px;
+            margin-top: 16px;
+        }
+        .instructions h3 { font-size: 15px; margin-bottom: 10px; color: #e65100; }
+        .instructions ol { padding-left: 20px; font-size: 14px; line-height: 1.8; }
+        .instructions li { margin-bottom: 4px; }
+        .instructions strong { color: #bf360c; }
+        
+        .preview-info {
+            background: #f1f8e9;
+            border-radius: 8px;
+            padding: 12px 16px;
+            font-size: 13px;
+            color: #33691e;
+            margin-top: 12px;
+        }
+    </style>
 </head>
 <body>
-
-<div class="top-bar">
-  <h1>🏷️ QL-810W Label Test — 38mm Continuous Tape</h1>
-  <p class="subtitle">Canvas rendered at 300 DPI — 449×auto px = 38mm wide physically</p>
-  <div class="btn-row">
-    <button class="btn btn-green" onclick="printAll()">🖨️ Print All Labels</button>
-    <button class="btn btn-blue" onclick="downloadFirst()">⬇️ Download First Label PNG</button>
-    <button class="btn btn-orange" onclick="printFirst()">🖨️ Print First Label Only</button>
-    <button class="btn btn-grey" onclick="toggleDebug()">🔍 Debug Info</button>
-  </div>
-  <div class="debug-box" id="debugBox"></div>
-</div>
-
-<div class="labels-area" id="labelsArea"></div>
-
-<div class="instructions">
-  <h2>⚙️ QL-810W Print Setup — Do This Once</h2>
-  <ol>
-    <li>Click <strong>Print First Label Only</strong> to test with one label</li>
-    <li>A new window opens — your browser print dialog will appear</li>
-    <li>Select <strong>QL-810W</strong> as your printer</li>
-    <li>Paper/Label size: <strong>DK-2225 (38mm continuous)</strong></li>
-    <li>Orientation: <strong>Portrait</strong></li>
-    <li>Margins: <strong>None</strong></li>
-    <li>Scale: <strong>100%</strong> (not "fit to page")</li>
-    <li>Print ✅</li>
-  </ol>
-  <div class="tip">
-    💡 <strong>If scale looks wrong:</strong> Download the PNG instead, open in Photos/Preview, and print at <em>Actual Size</em>. 
-    The PNG is 300 DPI so it will print at exactly 38mm wide.
-  </div>
-</div>
-
-<script>
-// ─── Label Data ───────────────────────────────────────────────────────────
-const labels = [
-  {
-    job: "5364", customer: "LEE",
-    partNo: "SPM-2040-720",
-    description: "Colonial 4 panel 2040x720x35 SPM door",
-    qty: 2, storage: "Customer Cupboard", date: "14/04/2026", po: "21027"
-  },
-  {
-    job: "5391", customer: "O'BRIEN FAMILY TRUST",
-    partNo: "LCK-ERA-SSS",
-    description: "Era Entrance Set Satin Stainless",
-    qty: 6, storage: "Van Stock", date: "14/04/2026", po: "21031"
-  },
-  {
-    job: "5280", customer: "WU",
-    partNo: "HNG-100-BLK",
-    description: "100mm Black Butt Hinge Pair",
-    qty: 24, storage: "Shed", date: "14/04/2026", po: "21019"
-  },
-  {
-    job: "5410", customer: "JOHNSON & ASSOCIATES",
-    partNo: "HDW-DRP-GRY",
-    description: "Heavy duty door roller grey nylon wheel complete assembly",
-    qty: 1, storage: "Customer Cupboard", date: "14/04/2026", po: "21045"
-  }
-];
-
-// ─── Dimensions ───────────────────────────────────────────────────────────
-// 38mm wide × auto height at 300 DPI
-const DPI = 300;
-const MM = 25.4; // mm per inch
-const W = Math.round(38 / MM * DPI);   // 449px  ← physical width of tape
-const PAD = Math.round(2 / MM * DPI);  // ~24px margin each side
-
-// ─── Draw a single label onto a canvas ───────────────────────────────────
-function drawLabel(label) {
-  // First pass: measure how tall we need to be
-  const tempCanvas = document.createElement('canvas');
-  tempCanvas.width = W;
-  tempCanvas.height = 2000;
-  const tempCtx = tempCanvas.getContext('2d');
-
-  const usableW = W - PAD * 2;
-  let y = PAD;
-
-  // Helper: measure wrapped lines
-  function wrapText(ctx, text, maxW, fontSize, bold) {
-    ctx.font = `${bold ? 'bold ' : ''}${fontSize}px Arial`;
-    const words = text.split(' ');
-    const lines = [];
-    let cur = '';
-    for (const w of words) {
-      const test = cur ? `${cur} ${w}` : w;
-      if (ctx.measureText(test).width > maxW) {
-        if (cur) lines.push(cur);
-        cur = w;
-      } else {
-        cur = test;
-      }
-    }
-    if (cur) lines.push(cur);
-    return lines;
-  }
-
-  // Auto-shrink font until it fits on 1 line (or stays wrapped nicely)
-  function fitFontSize(ctx, text, maxW, startSize, minSize, bold) {
-    let fs = startSize;
-    while (fs > minSize) {
-      ctx.font = `${bold ? 'bold ' : ''}${fs}px Arial`;
-      if (ctx.measureText(text).width <= maxW) break;
-      fs -= 1;
-    }
-    return fs;
-  }
-
-  // ── Line 1: Job + Customer ──────────────────────────────────
-  const line1Text = `Job ${label.job}  •  ${label.customer}`;
-  const fs1 = fitFontSize(tempCtx, line1Text, usableW, 54, 28, true);
-  const lh1 = Math.round(fs1 * 1.25);
-  y += lh1;
-
-  // ── Divider ──────────────────────────────────────────────────
-  y += Math.round(3 / MM * DPI * 0.3); // ~3pt gap
-
-  // ── Line 2: Part No ──────────────────────────────────────────
-  const fs2 = fitFontSize(tempCtx, label.partNo, usableW, 44, 22, true);
-  y += Math.round(fs2 * 1.25) + Math.round(4 / MM * DPI * 0.3);
-
-  // ── Line 3: Description (wrapped) ────────────────────────────
-  const fs3 = 36;
-  tempCtx.font = `${fs3}px Arial`;
-  const descLines = wrapText(tempCtx, label.description, usableW, fs3, false);
-  y += descLines.length * Math.round(fs3 * 1.3) + Math.round(4 / MM * DPI * 0.3);
-
-  // ── Divider ──────────────────────────────────────────────────
-  y += Math.round(3 / MM * DPI * 0.3);
-
-  // ── Line 4: Qty + Storage + Date + PO ───────────────────────
-  const bottomText = `Qty: ${label.qty}  •  ${label.storage}  •  ${label.date}  •  PO ${label.po}`;
-  const fs4 = fitFontSize(tempCtx, bottomText, usableW, 32, 18, false);
-  y += Math.round(fs4 * 1.25);
-
-  y += PAD; // bottom padding
-
-  // ── Now draw on correctly-sized canvas ───────────────────────
-  const H = Math.max(y, Math.round(70 / MM * DPI)); // min 70mm tall
-  const canvas = document.createElement('canvas');
-  canvas.width = W;
-  canvas.height = H;
-  const ctx = canvas.getContext('2d');
-
-  // White background
-  ctx.fillStyle = 'white';
-  ctx.fillRect(0, 0, W, H);
-
-  // Thin border
-  ctx.strokeStyle = '#bbb';
-  ctx.lineWidth = 3;
-  ctx.strokeRect(3, 3, W - 6, H - 6);
-
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'alphabetic';
-  ctx.fillStyle = '#000';
-
-  let cy = PAD;
-
-  // Line 1
-  const realFs1 = fitFontSize(ctx, line1Text, usableW, 54, 28, true);
-  ctx.font = `bold ${realFs1}px Arial`;
-  cy += realFs1;
-  ctx.fillText(line1Text, W / 2, cy);
-  cy += Math.round(realFs1 * 0.25);
-
-  // Divider
-  cy += 8;
-  ctx.strokeStyle = '#666';
-  ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.moveTo(PAD, cy); ctx.lineTo(W - PAD, cy); ctx.stroke();
-  cy += 14;
-
-  // Line 2: Part No
-  const realFs2 = fitFontSize(ctx, label.partNo, usableW, 44, 22, true);
-  ctx.font = `bold ${realFs2}px Arial`;
-  ctx.fillStyle = '#111';
-  cy += realFs2;
-  ctx.fillText(label.partNo, W / 2, cy);
-  cy += Math.round(realFs2 * 0.3) + 8;
-
-  // Line 3: Description
-  ctx.font = `${fs3}px Arial`;
-  ctx.fillStyle = '#333';
-  const realDescLines = wrapText(ctx, label.description, usableW, fs3, false);
-  for (const line of realDescLines) {
-    cy += fs3;
-    ctx.fillText(line, W / 2, cy);
-    cy += Math.round(fs3 * 0.3);
-  }
-  cy += 10;
-
-  // Divider
-  ctx.strokeStyle = '#666';
-  ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.moveTo(PAD, cy); ctx.lineTo(W - PAD, cy); ctx.stroke();
-  cy += 14;
-
-  // Line 4: Bottom info
-  const realFs4 = fitFontSize(ctx, bottomText, usableW, 32, 18, false);
-  ctx.font = `${realFs4}px Arial`;
-  ctx.fillStyle = '#222';
-  cy += realFs4;
-  ctx.fillText(bottomText, W / 2, cy);
-
-  return canvas;
-}
-
-// ─── Build label cards ─────────────────────────────────────────────────────
-const allCanvases = [];
-
-function buildCard(label) {
-  const canvas = drawLabel(label);
-  allCanvases.push(canvas);
-
-  const SCALE = 0.33; // screen preview scale
-  const preview = document.createElement('canvas');
-  preview.width  = Math.round(canvas.width  * SCALE);
-  preview.height = Math.round(canvas.height * SCALE);
-  preview.getContext('2d').drawImage(canvas, 0, 0, preview.width, preview.height);
-
-  const card = document.createElement('div');
-  card.className = 'label-card';
-  card.innerHTML = `<div class="label-title">PO ${label.po} — ${label.customer}</div>`;
-  card.appendChild(preview);
-
-  const btnRow = document.createElement('div');
-  btnRow.className = 'card-btns';
-
-  const pBtn = document.createElement('button');
-  pBtn.style.background = '#27ae60';
-  pBtn.textContent = '🖨️ Print';
-  pBtn.onclick = () => openPrintWindow([canvas]);
-  btnRow.appendChild(pBtn);
-
-  const dBtn = document.createElement('button');
-  dBtn.style.background = '#2980b9';
-  dBtn.textContent = '⬇️ PNG';
-  dBtn.onclick = () => {
-    const a = document.createElement('a');
-    a.download = `label-po${label.po}.png`;
-    a.href = canvas.toDataURL('image/png');
-    a.click();
-  };
-  btnRow.appendChild(dBtn);
-
-  card.appendChild(btnRow);
-  return card;
-}
-
-function openPrintWindow(canvases) {
-  const win = window.open('', '_blank', 'width=600,height=800');
-  // 38mm wide, auto height, no margins
-  win.document.write(`<!DOCTYPE html><html><head>
-    <style>
-      * { margin:0; padding:0; }
-      @page { size: 38mm auto; margin: 0; }
-      body { background: white; }
-      img { display: block; width: 38mm; height: auto; page-break-after: always; }
-    </style>
-  </head><body>`);
-  canvases.forEach(c => {
-    win.document.write(`<img src="${c.toDataURL('image/png')}">`);
-  });
-  win.document.write('</body></html>');
-  win.document.close();
-  win.addEventListener('load', () => win.print());
-}
-
-function printAll()   { openPrintWindow(allCanvases); }
-function printFirst() { openPrintWindow([allCanvases[0]]); }
-function downloadFirst() {
-  const a = document.createElement('a');
-  a.download = 'test-label.png';
-  a.href = allCanvases[0].toDataURL('image/png');
-  a.click();
-}
-
-function toggleDebug() {
-  const box = document.getElementById('debugBox');
-  box.style.display = box.style.display === 'none' ? 'block' : 'none';
-  box.textContent =
-    `Canvas width : ${W}px (${(W/DPI*MM).toFixed(1)}mm @ ${DPI}dpi)\n` +
-    `Padding      : ${PAD}px each side\n` +
-    `Usable width : ${W - PAD*2}px\n` +
-    `Screen DPR   : ${window.devicePixelRatio}\n` +
-    `Screen size  : ${screen.width}×${screen.height}`;
-}
-
-// Init
-const area = document.getElementById('labelsArea');
-labels.forEach(l => area.appendChild(buildCard(l)));
-</script>
+    <div class="container">
+        <h1>🏷️ QL-810W Label Test</h1>
+        <p class="subtitle">DK-2225 · 38mm continuous tape · 5 sample labels</p>
+        
+        <div class="card">
+            <h2>Option A — Landscape PDF</h2>
+            <span class="dims">200mm × 38mm page</span>
+            <p class="desc">Page is wide and short. Text reads normally left-to-right. The printer driver maps the 38mm dimension to tape width.</p>
+            <a href="/api/test-label-pdf?o=landscape" class="btn btn-blue">⬇️ Download Landscape PDF</a>
+        </div>
+        
+        <div class="card">
+            <h2>Option B — Portrait PDF</h2>
+            <span class="dims">38mm × 200mm page</span>
+            <p class="desc">Page is narrow and tall (matches tape physical layout). Text is pre-rotated 90° inside the PDF so it reads along the label length.</p>
+            <a href="/api/test-label-pdf?o=portrait" class="btn btn-green">⬇️ Download Portrait PDF</a>
+        </div>
+        
+        <div class="instructions">
+            <h3>🖨️ How to Print</h3>
+            <ol>
+                <li>Download one of the PDFs above</li>
+                <li>Open it in a <strong>PDF viewer</strong> (Preview on Mac, Acrobat on Windows)</li>
+                <li>Go to <strong>File → Print</strong></li>
+                <li>Select <strong>QL-810W</strong> as printer</li>
+                <li>Set paper size to <strong>DK-2225 (38mm)</strong></li>
+                <li>Scale: <strong>Actual Size</strong> (NOT "Fit to Page")</li>
+                <li>Hit Print!</li>
+            </ol>
+        </div>
+        
+        <div class="preview-info">
+            <strong>Each PDF has 5 test labels</strong> with different customer names (short, long, medium) to verify text auto-shrinks properly. Try printing just page 1 first.
+        </div>
+    </div>
 </body>
 </html>
