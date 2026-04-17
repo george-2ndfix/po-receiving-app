@@ -10,6 +10,13 @@ import hashlib
 import time
 import secrets
 import sqlite3
+
+DATABASE_URL = os.environ.get('DATABASE_URL')
+USE_PG = bool(DATABASE_URL)
+
+if USE_PG:
+    import psycopg2
+    import psycopg2.extras
 import uuid
 from datetime import datetime, timedelta
 from functools import wraps
@@ -53,134 +60,321 @@ token_cache = {
 # ============================================
 # Database Setup
 # ============================================
+class DictRow(dict):
+    """Dict that also supports integer index access like sqlite3.Row"""
+    def __init__(self, cols, values):
+        super().__init__(zip(cols, values))
+        self._values = list(values)
+    
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return self._values[key]
+        return super().__getitem__(key)
+
+class PgCursorWrapper:
+    """Wraps a psycopg2 cursor to auto-convert ? to %s and return dict rows"""
+    def __init__(self, cursor):
+        self._cursor = cursor
+    
+    def execute(self, sql, params=None):
+        sql = sql.replace("?", "%s")
+        if params:
+            self._cursor.execute(sql, params)
+        else:
+            self._cursor.execute(sql)
+        return self._cursor
+    
+    def fetchone(self):
+        if not self._cursor.description:
+            return None
+        cols = [desc[0] for desc in self._cursor.description]
+        row = self._cursor.fetchone()
+        if row is None:
+            return None
+        return DictRow(cols, row)
+    
+    def fetchall(self):
+        if not self._cursor.description:
+            return []
+        cols = [desc[0] for desc in self._cursor.description]
+        return [DictRow(cols, row) for row in self._cursor.fetchall()]
+    
+    @property
+    def lastrowid(self):
+        return self._cursor.fetchone()[0] if self._cursor.description else None
+    
+    @property
+    def rowcount(self):
+        return self._cursor.rowcount
+    
+    @property
+    def description(self):
+        return self._cursor.description
+
+class PgConnectionWrapper:
+    """Wraps a psycopg2 connection to return wrapped cursors"""
+    def __init__(self, conn):
+        self._conn = conn
+    
+    def cursor(self):
+        return PgCursorWrapper(self._conn.cursor())
+    
+    def execute(self, sql, params=None):
+        """Allow connection-level execute like SQLite"""
+        cur = self.cursor()
+        cur.execute(sql, params)
+        return cur
+    
+    def commit(self):
+        self._conn.commit()
+    
+    def rollback(self):
+        self._conn.rollback()
+    
+    def close(self):
+        self._conn.close()
+
 def get_db():
-    """Get database connection"""
-    conn = sqlite3.connect(DB_FILE)
-    conn.row_factory = sqlite3.Row
-    return conn
+    """Get database connection - PostgreSQL if DATABASE_URL is set, else SQLite"""
+    if USE_PG:
+        conn = psycopg2.connect(DATABASE_URL)
+        return PgConnectionWrapper(conn)
+    else:
+        conn = sqlite3.connect(DB_FILE)
+        conn.row_factory = sqlite3.Row
+        return conn
 
 def init_db():
     """Initialize database tables"""
     conn = get_db()
     cursor = conn.cursor()
     
-    # Staff table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS staff (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            display_name TEXT NOT NULL,
-            password_hash TEXT NOT NULL,
-            role TEXT NOT NULL DEFAULT 'staff' CHECK(role IN ('admin', 'manager', 'staff')),
-            email TEXT,
-            active INTEGER NOT NULL DEFAULT 1,
-            created_at TEXT DEFAULT (datetime('now')),
-            updated_at TEXT DEFAULT (datetime('now'))
-        )
-    ''')
-    
-    # Allocation logs table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS allocation_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            staff_id INTEGER NOT NULL,
-            staff_name TEXT NOT NULL,
-            po_number TEXT,
-            job_number TEXT,
-            vendor_name TEXT,
-            items_allocated INTEGER,
-            storage_location TEXT,
-            allocation_type TEXT,
-            verified INTEGER DEFAULT 0,
-            created_at TEXT DEFAULT (datetime('now')),
-            FOREIGN KEY (staff_id) REFERENCES staff(id)
-        )
-    ''')
-    
-    # Backorder items table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS backorder_items (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            po_id TEXT NOT NULL,
-            po_number TEXT NOT NULL,
-            catalog_id INTEGER NOT NULL,
-            description TEXT,
-            part_no TEXT,
-            quantity_backordered INTEGER NOT NULL,
-            job_number TEXT,
-            customer_name TEXT,
-            vendor_name TEXT,
-            vendor_email TEXT,
-            staff_id INTEGER,
-            staff_name TEXT,
-            status TEXT DEFAULT 'pending',
-            created_at TEXT DEFAULT (datetime('now')),
-            resolved_at TEXT
-        )
-    ''')
-    
-    # Docket OCR data table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS docket_data (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            po_id TEXT,
-            po_number TEXT,
-            supplier_name TEXT,
-            packing_slip_number TEXT,
-            tracking_number TEXT,
-            delivery_date TEXT,
-            raw_ocr_text TEXT,
-            staff_id INTEGER,
-            staff_name TEXT,
-            created_at TEXT DEFAULT (datetime('now'))
-        )
-    ''')
-    
-    # Fault reports table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS error_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            error_type TEXT NOT NULL,
-            po_number TEXT,
-            catalog_id TEXT,
-            staff_user TEXT,
-            error_code INTEGER,
-            error_message TEXT,
-            request_payload TEXT,
-            response_body TEXT,
-            endpoint TEXT,
-            created_at TEXT DEFAULT (datetime('now'))
-        )
-    ''')
-    
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS fault_reports (
-            id TEXT PRIMARY KEY,
-            reporter_name TEXT NOT NULL,
-            reporter_email TEXT NOT NULL,
-            description TEXT NOT NULL,
-            po_number TEXT,
-            job_number TEXT,
-            current_screen TEXT,
-            error_message TEXT,
-            photo_count INTEGER DEFAULT 0,
-            photos_base64 TEXT,
-            staff_user TEXT,
-            status TEXT DEFAULT 'new',
-            resolution TEXT,
-            created_at TEXT DEFAULT (datetime('now')),
-            resolved_at TEXT
-        )
-    ''')
-    
-    conn.commit()
+    if USE_PG:
+        # PostgreSQL DDL
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS staff (
+                id SERIAL PRIMARY KEY,
+                username TEXT UNIQUE NOT NULL,
+                display_name TEXT NOT NULL,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'staff' CHECK(role IN ('admin', 'manager', 'staff')),
+                email TEXT,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS allocation_logs (
+                id SERIAL PRIMARY KEY,
+                staff_id INTEGER NOT NULL REFERENCES staff(id),
+                staff_name TEXT NOT NULL,
+                po_number TEXT,
+                job_number TEXT,
+                vendor_name TEXT,
+                items_allocated INTEGER,
+                storage_location TEXT,
+                allocation_type TEXT,
+                verified INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS backorder_items (
+                id SERIAL PRIMARY KEY,
+                po_id TEXT NOT NULL,
+                po_number TEXT NOT NULL,
+                catalog_id INTEGER NOT NULL,
+                description TEXT,
+                part_no TEXT,
+                quantity_backordered INTEGER NOT NULL,
+                job_number TEXT,
+                customer_name TEXT,
+                vendor_name TEXT,
+                vendor_email TEXT,
+                staff_id INTEGER,
+                staff_name TEXT,
+                status TEXT DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT NOW(),
+                resolved_at TIMESTAMP
+            )
+        """)
+        
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS docket_data (
+                id SERIAL PRIMARY KEY,
+                po_id TEXT,
+                po_number TEXT,
+                supplier_name TEXT,
+                packing_slip_number TEXT,
+                tracking_number TEXT,
+                delivery_date TEXT,
+                raw_ocr_text TEXT,
+                staff_id INTEGER,
+                staff_name TEXT,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS error_logs (
+                id SERIAL PRIMARY KEY,
+                error_type TEXT NOT NULL,
+                po_number TEXT,
+                catalog_id TEXT,
+                staff_user TEXT,
+                error_code INTEGER,
+                error_message TEXT,
+                request_payload TEXT,
+                response_body TEXT,
+                endpoint TEXT,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS fault_reports (
+                id TEXT PRIMARY KEY,
+                reporter_name TEXT NOT NULL,
+                reporter_email TEXT NOT NULL,
+                description TEXT NOT NULL,
+                po_number TEXT,
+                job_number TEXT,
+                current_screen TEXT,
+                error_message TEXT,
+                photo_count INTEGER DEFAULT 0,
+                photos_base64 TEXT,
+                staff_user TEXT,
+                status TEXT DEFAULT 'new',
+                resolution TEXT,
+                created_at TIMESTAMP DEFAULT NOW(),
+                resolved_at TIMESTAMP
+            )
+        """)
+        
+        conn.commit()
+    else:
+        # SQLite DDL
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS staff (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                display_name TEXT NOT NULL,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'staff' CHECK(role IN ('admin', 'manager', 'staff')),
+                email TEXT,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT DEFAULT (datetime('now')),
+                updated_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS allocation_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                staff_id INTEGER NOT NULL,
+                staff_name TEXT NOT NULL,
+                po_number TEXT,
+                job_number TEXT,
+                vendor_name TEXT,
+                items_allocated INTEGER,
+                storage_location TEXT,
+                allocation_type TEXT,
+                verified INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY (staff_id) REFERENCES staff(id)
+            )
+        """)
+        
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS backorder_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                po_id TEXT NOT NULL,
+                po_number TEXT NOT NULL,
+                catalog_id INTEGER NOT NULL,
+                description TEXT,
+                part_no TEXT,
+                quantity_backordered INTEGER NOT NULL,
+                job_number TEXT,
+                customer_name TEXT,
+                vendor_name TEXT,
+                vendor_email TEXT,
+                staff_id INTEGER,
+                staff_name TEXT,
+                status TEXT DEFAULT 'pending',
+                created_at TEXT DEFAULT (datetime('now')),
+                resolved_at TEXT
+            )
+        """)
+        
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS docket_data (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                po_id TEXT,
+                po_number TEXT,
+                supplier_name TEXT,
+                packing_slip_number TEXT,
+                tracking_number TEXT,
+                delivery_date TEXT,
+                raw_ocr_text TEXT,
+                staff_id INTEGER,
+                staff_name TEXT,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS error_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                error_type TEXT NOT NULL,
+                po_number TEXT,
+                catalog_id TEXT,
+                staff_user TEXT,
+                error_code INTEGER,
+                error_message TEXT,
+                request_payload TEXT,
+                response_body TEXT,
+                endpoint TEXT,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS fault_reports (
+                id TEXT PRIMARY KEY,
+                reporter_name TEXT NOT NULL,
+                reporter_email TEXT NOT NULL,
+                description TEXT NOT NULL,
+                po_number TEXT,
+                job_number TEXT,
+                current_screen TEXT,
+                error_message TEXT,
+                photo_count INTEGER DEFAULT 0,
+                photos_base64 TEXT,
+                staff_user TEXT,
+                status TEXT DEFAULT 'new',
+                resolution TEXT,
+                created_at TEXT DEFAULT (datetime('now')),
+                resolved_at TEXT
+            )
+        """)
+        
+        conn.commit()
     
     # Add email column if it doesn't exist (migration for existing DBs)
     try:
-        cursor.execute("ALTER TABLE staff ADD COLUMN email TEXT")
+        if USE_PG:
+            cursor.execute("ALTER TABLE staff ADD COLUMN IF NOT EXISTS email TEXT")
+            conn.commit()
+        else:
+            cursor.execute("ALTER TABLE staff ADD COLUMN email TEXT")
+            conn.commit()
         print("Added email column to staff table")
-    except:
-        pass  # Column already exists
+    except Exception:
+        if USE_PG:
+            conn.rollback()
     
     # Seed all staff accounts (survives Render restarts)
     # Each staff member is created if they don't already exist
@@ -2379,7 +2573,7 @@ def resolve_fault_report(report_id):
         db = get_db()
         db.execute('''
             UPDATE fault_reports SET status = 'resolved', resolution = ?,
-                resolved_at = datetime('now') WHERE id = ?
+                resolved_at = CURRENT_TIMESTAMP WHERE id = ?
         ''', (resolution, report_id))
         db.commit()
         
@@ -2518,7 +2712,7 @@ def job_intel():
 
 @app.route('/api/version')
 def get_version():
-    return jsonify({'version': '2026-04-17-labels', 'status': 'ok'})
+    return jsonify({'version': '2026-04-18-postgresql', 'status': 'ok'})
 
 # ============================================
 # Test Label PDF Endpoint
