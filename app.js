@@ -1451,7 +1451,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                             <button class="btn btn-secondary btn-small" onclick="document.getElementById('photo-input-${index}').click()">
                                 📷 Photo
                             </button>
-                            <input type="file" accept="image/*" capture="environment" id="photo-input-${index}" hidden
+                            <input type="file" accept="image/*" id="photo-input-${index}" hidden
                                 onchange="app.handleIndividualPhoto(${index}, event)">
                         </div>
                         <div class="photo-item-preview hidden" id="photo-preview-${index}">
