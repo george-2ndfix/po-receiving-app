@@ -1,4 +1,4 @@
-const CACHE_NAME = 'po-receiving-v36';
+const CACHE_NAME = 'po-receiving-v37';
 const urlsToCache = [
   '/styles.css',
   '/storage-locations.json',
@@ -56,15 +56,23 @@ self.addEventListener('fetch', event => {
   }
   
   // HTML, JS, SW: network first, cache fallback for assets only
-  if (url.pathname === '/app.js' || 
-      url.pathname === '/' || 
+  // app.js: ALWAYS network, never cache
+  if (url.pathname === '/app.js') {
+    event.respondWith(
+      fetch(event.request).catch(() => {
+        return new Response('Network unavailable - please refresh', {status: 503, headers: {'Content-Type': 'text/plain'}});
+      })
+    );
+    return;
+  }
+  
+  // index.html, sw.js: network first, no cache fallback
+  if (url.pathname === '/' || 
       url.pathname === '/index.html' ||
       url.pathname === '/sw.js') {
     event.respondWith(
       fetch(event.request).catch(() => {
-        return caches.match(event.request).then(r => 
-          r || new Response('Network unavailable', {status: 503})
-        );
+        return new Response('Network unavailable - please refresh', {status: 503, headers: {'Content-Type': 'text/plain'}});
       })
     );
     return;
