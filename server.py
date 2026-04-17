@@ -2403,46 +2403,62 @@ def test_label_pdf():
     """Generate a test label PDF for QL-810W printer (DK-2225 38mm tape)"""
     try:
         from reportlab.lib.units import mm
-        from reportlab.lib.pagesizes import landscape
         from reportlab.pdfgen import canvas as pdf_canvas
+        from reportlab.pdfbase.pdfmetrics import stringWidth
         
-        orientation = request.args.get('o', 'landscape')
+        # DK-2225: 38mm wide continuous tape
+        page_w, page_h = 38*mm, 200*mm  # Portrait orientation confirmed working
+        margin = 3*mm
+        avail_w = page_h - 2*margin  # 194mm usable width (along tape length)
+        avail_h = page_w - 2*margin  # 32mm usable height
         
-        if orientation == 'portrait':
-            # Portrait: 38mm wide x 200mm tall, text pre-rotated
-            page_w, page_h = 38*mm, 200*mm
-        else:
-            # Landscape: 200mm wide x 38mm tall
-            page_w, page_h = 200*mm, 38*mm
+        # Test data
+        line1 = "Job 12345 \u00b7 Test Customer Name"
+        line2 = "ABC-1234 \u00b7 Test Catalog Item Description Here"
+        line3 = "Qty: 10 \u00b7 Van Stock (George) \u00b7 17/04/2026 \u00b7 PO 21100"
+        
+        def auto_fit_font(text, font_name, max_size, max_width):
+            """Find the largest font size that fits within max_width"""
+            size = max_size
+            while size > 5:
+                w = stringWidth(text, font_name, size)
+                if w <= max_width:
+                    return size
+                size -= 0.5
+            return 5
+        
+        # Calculate auto-fit font sizes (start big, scale down to fit)
+        size1 = auto_fit_font(line1, "Helvetica-Bold", 18, avail_w)
+        size2 = auto_fit_font(line2, "Helvetica", 14, avail_w)
+        size3 = auto_fit_font(line3, "Helvetica", 12, avail_w)
         
         buf = io.BytesIO()
         c = pdf_canvas.Canvas(buf, pagesize=(page_w, page_h))
         
-        if orientation == 'portrait':
-            # Rotate text 90 degrees for portrait label
-            c.saveState()
-            c.translate(0, 0)
-            c.rotate(90)
-            # Now draw as if landscape (text goes along 200mm length)
-            draw_w, draw_h = page_h, page_w  # 200mm x 38mm drawing space
-            y_base = -draw_h  # Offset for rotation
-            
-            c.setFont("Helvetica-Bold", 11)
-            c.drawString(3*mm, y_base + 28*mm, "Job 12345 - Test Customer Name")
-            c.setFont("Helvetica", 9)
-            c.drawString(3*mm, y_base + 19*mm, "ABC-1234 - Test Catalog Item Description Here")
-            c.setFont("Helvetica", 8)
-            c.drawString(3*mm, y_base + 11*mm, "Qty: 10 - Van Stock (George) - 17/04/2026 - PO 21100")
-            c.restoreState()
-        else:
-            # Landscape: draw normally
-            c.setFont("Helvetica-Bold", 11)
-            c.drawString(3*mm, 28*mm, "Job 12345 - Test Customer Name")
-            c.setFont("Helvetica", 9)
-            c.drawString(3*mm, 19*mm, "ABC-1234 - Test Catalog Item Description Here")
-            c.setFont("Helvetica", 8)
-            c.drawString(3*mm, 11*mm, "Qty: 10 - Van Stock (George) - 17/04/2026 - PO 21100")
+        # Rotate for portrait label (text reads along tape length)
+        c.saveState()
+        c.translate(0, 0)
+        c.rotate(90)
         
+        # After rotation: drawing space is 200mm wide x 38mm tall
+        # Y coordinates are negative (rotated coordinate system)
+        # Distribute 3 lines evenly across 32mm height
+        line_spacing = avail_h / 3
+        y_base = -page_w + margin
+        
+        # Line 1 (top) - bold job info
+        c.setFont("Helvetica-Bold", size1)
+        c.drawString(margin, y_base + 2*line_spacing + 2*mm, line1)
+        
+        # Line 2 (middle) - catalog info
+        c.setFont("Helvetica", size2)
+        c.drawString(margin, y_base + line_spacing + 1*mm, line2)
+        
+        # Line 3 (bottom) - details
+        c.setFont("Helvetica", size3)
+        c.drawString(margin, y_base + 1*mm, line3)
+        
+        c.restoreState()
         c.save()
         buf.seek(0)
         
@@ -2450,7 +2466,7 @@ def test_label_pdf():
             buf,
             mimetype='application/pdf',
             as_attachment=False,
-            download_name=f'test-label-{orientation}.pdf'
+            download_name='test-label.pdf'
         )
     except ImportError:
         return jsonify({'error': 'reportlab not installed'}), 500
@@ -2463,28 +2479,52 @@ def test_label_pdf():
 @app.route('/api/label-pdf', methods=['POST'])
 @login_required
 def generate_label_pdf():
-    """Generate a label PDF for a specific PO item"""
+    """Generate a label PDF for a specific PO item - auto-fits text to QL-810W label"""
     try:
         from reportlab.lib.units import mm
         from reportlab.pdfgen import canvas as pdf_canvas
+        from reportlab.pdfbase.pdfmetrics import stringWidth
         
         data = request.get_json()
-        job_info = data.get('jobInfo', 'Unknown Job')
-        catalog_info = data.get('catalogInfo', 'Unknown Item')
-        detail_info = data.get('detailInfo', '')
+        line1 = data.get('jobInfo', 'Unknown Job')
+        line2 = data.get('catalogInfo', 'Unknown Item')
+        line3 = data.get('detailInfo', '')
         
-        page_w, page_h = 200*mm, 38*mm
+        page_w, page_h = 38*mm, 200*mm  # Portrait for QL-810W
+        margin = 3*mm
+        avail_w = page_h - 2*margin
+        avail_h = page_w - 2*margin
+        
+        def auto_fit_font(text, font_name, max_size, max_width):
+            size = max_size
+            while size > 5:
+                w = stringWidth(text, font_name, size)
+                if w <= max_width:
+                    return size
+                size -= 0.5
+            return 5
+        
+        size1 = auto_fit_font(str(line1), "Helvetica-Bold", 18, avail_w)
+        size2 = auto_fit_font(str(line2), "Helvetica", 14, avail_w)
+        size3 = auto_fit_font(str(line3), "Helvetica", 12, avail_w)
         
         buf = io.BytesIO()
         c = pdf_canvas.Canvas(buf, pagesize=(page_w, page_h))
         
-        c.setFont("Helvetica-Bold", 11)
-        c.drawString(3*mm, 28*mm, str(job_info)[:60])
-        c.setFont("Helvetica", 9)
-        c.drawString(3*mm, 19*mm, str(catalog_info)[:70])
-        c.setFont("Helvetica", 8)
-        c.drawString(3*mm, 11*mm, str(detail_info)[:80])
+        c.saveState()
+        c.rotate(90)
         
+        line_spacing = avail_h / 3
+        y_base = -page_w + margin
+        
+        c.setFont("Helvetica-Bold", size1)
+        c.drawString(margin, y_base + 2*line_spacing + 2*mm, str(line1))
+        c.setFont("Helvetica", size2)
+        c.drawString(margin, y_base + line_spacing + 1*mm, str(line2))
+        c.setFont("Helvetica", size3)
+        c.drawString(margin, y_base + 1*mm, str(line3))
+        
+        c.restoreState()
         c.save()
         buf.seek(0)
         
@@ -2495,9 +2535,9 @@ def generate_label_pdf():
             download_name='label.pdf'
         )
     except ImportError:
-        return jsonify({'error': 'reportlab not installed'}), 500
+        return jsonify({\'error\': \'reportlab not installed\'}), 500
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({\'error\': str(e)}), 500
 
 # ============================================
 # Initialize and Run
