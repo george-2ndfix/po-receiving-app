@@ -254,6 +254,44 @@ def init_db():
             )
         """)
         
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS damage_reports (
+                id TEXT PRIMARY KEY,
+                po_number TEXT,
+                po_id TEXT,
+                catalog_id TEXT,
+                item_description TEXT,
+                part_number TEXT,
+                quantity_damaged INTEGER DEFAULT 1,
+                notes TEXT,
+                photo_count INTEGER DEFAULT 0,
+                photos_base64 TEXT,
+                vendor_name TEXT,
+                vendor_id TEXT,
+                job_number TEXT,
+                customer_name TEXT,
+                staff_user TEXT,
+                staff_name TEXT,
+                status TEXT DEFAULT 'new',
+                created_at TIMESTAMP DEFAULT NOW(),
+                resolved_at TIMESTAMP
+            )
+        """)
+        
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS damage_reports (
+                id TEXT PRIMARY KEY, po_number TEXT, po_id TEXT, catalog_id TEXT,
+                item_description TEXT, part_number TEXT,
+                quantity_damaged INTEGER DEFAULT 1, notes TEXT,
+                photo_count INTEGER DEFAULT 0, photos_base64 TEXT,
+                vendor_name TEXT, vendor_id TEXT,
+                job_number TEXT, customer_name TEXT,
+                staff_user TEXT, staff_name TEXT,
+                status TEXT DEFAULT 'new',
+                created_at TIMESTAMP DEFAULT NOW(), resolved_at TIMESTAMP
+            )
+        """)
+        
         conn.commit()
     else:
         # SQLite DDL
@@ -358,6 +396,44 @@ def init_db():
                 resolution TEXT,
                 created_at TEXT DEFAULT (datetime('now')),
                 resolved_at TEXT
+            )
+        """)
+        
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS damage_reports (
+                id TEXT PRIMARY KEY,
+                po_number TEXT,
+                po_id TEXT,
+                catalog_id TEXT,
+                item_description TEXT,
+                part_number TEXT,
+                quantity_damaged INTEGER DEFAULT 1,
+                notes TEXT,
+                photo_count INTEGER DEFAULT 0,
+                photos_base64 TEXT,
+                vendor_name TEXT,
+                vendor_id TEXT,
+                job_number TEXT,
+                customer_name TEXT,
+                staff_user TEXT,
+                staff_name TEXT,
+                status TEXT DEFAULT 'new',
+                created_at TEXT DEFAULT (datetime('now')),
+                resolved_at TEXT
+            )
+        """)
+        
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS damage_reports (
+                id TEXT PRIMARY KEY, po_number TEXT, po_id TEXT, catalog_id TEXT,
+                item_description TEXT, part_number TEXT,
+                quantity_damaged INTEGER DEFAULT 1, notes TEXT,
+                photo_count INTEGER DEFAULT 0, photos_base64 TEXT,
+                vendor_name TEXT, vendor_id TEXT,
+                job_number TEXT, customer_name TEXT,
+                staff_user TEXT, staff_name TEXT,
+                status TEXT DEFAULT 'new',
+                created_at TEXT DEFAULT (datetime('now')), resolved_at TEXT
             )
         """)
         
@@ -2442,6 +2518,8 @@ def search_mystery_box():
 # Fault Report Endpoints
 # ============================================
 FAULT_WEBHOOK_URL = os.environ.get('FAULT_WEBHOOK_URL', 'https://webhooks.tasklet.ai/v1/public/webhook?token=53c558477df26839f9518bab90f10e0c')
+DAMAGE_WEBHOOK_URL = os.environ.get('DAMAGE_WEBHOOK_URL', '')
+DAMAGE_WEBHOOK_URL = os.environ.get('DAMAGE_WEBHOOK_URL', '')
 
 @app.route('/api/report-fault', methods=['POST'])
 @login_required
@@ -2712,7 +2790,7 @@ def job_intel():
 
 @app.route('/api/version')
 def get_version():
-    return jsonify({'version': '2026-04-18-postgresql', 'status': 'ok'})
+    return jsonify({'version': '2026-04-18-damaged-goods', 'status': 'ok'})
 
 # ============================================
 # Test Label PDF Endpoint
@@ -2876,6 +2954,340 @@ def generate_label_pdf():
         return jsonify({'error': 'reportlab not installed'}), 500
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+# ============================================
+# Damage Report Endpoints
+# ============================================
+@app.route('/api/report-damage', methods=['POST'])
+@login_required
+def report_damage():
+    """Receive damage report from app user and forward to Tasklet webhook"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        po_number = data.get('po_number', '')
+        po_id = data.get('po_id', '')
+        catalog_id = data.get('catalog_id', '')
+        item_description = data.get('item_description', '')
+        part_number = data.get('part_number', '')
+        quantity_damaged = data.get('quantity_damaged', 1)
+        notes = data.get('notes', '').strip()
+        photos_base64 = data.get('photos', [])
+        vendor_name = data.get('vendor_name', '')
+        vendor_id = data.get('vendor_id', '')
+        job_number = data.get('job_number', '')
+        customer_name = data.get('customer_name', '')
+        
+        if not item_description:
+            return jsonify({'error': 'Item description is required'}), 400
+        
+        report_id = str(uuid.uuid4())[:8]
+        staff_user = session.get('username', 'unknown')
+        staff_name = session.get('display_name', 'Unknown')
+        
+        db = get_db()
+        db.execute('''
+            INSERT INTO damage_reports (id, po_number, po_id, catalog_id, item_description,
+                part_number, quantity_damaged, notes, photo_count, photos_base64,
+                vendor_name, vendor_id, job_number, customer_name,
+                staff_user, staff_name, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new')
+        ''', (report_id, po_number, po_id, catalog_id, item_description,
+              part_number, quantity_damaged, notes,
+              len(photos_base64), json.dumps(photos_base64),
+              vendor_name, vendor_id, job_number, customer_name,
+              staff_user, staff_name))
+        db.commit()
+        
+        print(f"=== DAMAGE REPORT {report_id} ===")
+        print(f"Staff: {staff_name} ({staff_user})")
+        print(f"PO: {po_number}, Item: {item_description}")
+        print(f"Part: {part_number}, Qty damaged: {quantity_damaged}")
+        print(f"Vendor: {vendor_name}, Job: {job_number}, Customer: {customer_name}")
+        print(f"Notes: {notes}")
+        print(f"Photos: {len(photos_base64)}")
+        
+        if DAMAGE_WEBHOOK_URL:
+            try:
+                webhook_payload = {
+                    'report_id': report_id,
+                    'po_number': po_number,
+                    'po_id': po_id,
+                    'catalog_id': catalog_id,
+                    'item_description': item_description,
+                    'part_number': part_number,
+                    'quantity_damaged': quantity_damaged,
+                    'notes': notes,
+                    'photo_count': len(photos_base64),
+                    'vendor_name': vendor_name,
+                    'vendor_id': vendor_id,
+                    'job_number': job_number,
+                    'customer_name': customer_name,
+                    'staff_user': staff_user,
+                    'staff_name': staff_name,
+                    'timestamp': datetime.now().isoformat()
+                }
+                resp = requests.post(DAMAGE_WEBHOOK_URL, json=webhook_payload, timeout=10)
+                print(f"Damage webhook sent: {resp.status_code}")
+            except Exception as e:
+                print(f"Damage webhook failed (report still saved): {e}")
+        else:
+            print("WARNING: DAMAGE_WEBHOOK_URL not set - report saved but not forwarded")
+        
+        return jsonify({
+            'success': True,
+            'report_id': report_id,
+            'message': 'Damage reported! Supplier and customer will be notified.'
+        })
+        
+    except Exception as e:
+        print(f"Error saving damage report: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/damage-reports', methods=['GET'])
+@login_required
+def list_damage_reports():
+    """List damage reports"""
+    try:
+        status = request.args.get('status', None)
+        po_number = request.args.get('po_number', None)
+        db = get_db()
+        
+        query = '''SELECT id, po_number, item_description, part_number, quantity_damaged,
+                    notes, photo_count, vendor_name, job_number, customer_name,
+                    staff_user, staff_name, status, created_at, resolved_at
+                FROM damage_reports'''
+        conditions = []
+        params = []
+        
+        if status:
+            conditions.append('status = ?')
+            params.append(status)
+        if po_number:
+            conditions.append('po_number = ?')
+            params.append(po_number)
+        
+        if conditions:
+            query += ' WHERE ' + ' AND '.join(conditions)
+        query += ' ORDER BY created_at DESC'
+        
+        reports = db.execute(query, tuple(params)).fetchall()
+        return jsonify({'reports': [dict(r) for r in reports], 'count': len(reports)})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/damage-reports/<report_id>', methods=['GET'])
+def get_damage_report(report_id):
+    """Fetch a damage report by ID (for Tasklet email processing)"""
+    try:
+        db = get_db()
+        report = db.execute('SELECT * FROM damage_reports WHERE id = ?', (report_id,)).fetchone()
+        if not report:
+            return jsonify({'error': 'Report not found'}), 404
+        
+        result = dict(report)
+        if result.get('photos_base64'):
+            result['photos'] = json.loads(result['photos_base64'])
+        else:
+            result['photos'] = []
+        del result['photos_base64']
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/damage-reports/<report_id>/resolve', methods=['POST'])
+@login_required
+def resolve_damage_report(report_id):
+    """Mark a damage report as resolved"""
+    try:
+        data = request.get_json() or {}
+        resolution = data.get('resolution', '')
+        
+        db = get_db()
+        if USE_PG:
+            db.execute('UPDATE damage_reports SET status = %s, resolved_at = NOW() WHERE id = %s',
+                       ('resolved', report_id))
+        else:
+            db.execute("UPDATE damage_reports SET status = 'resolved', resolved_at = datetime('now') WHERE id = ?",
+                       (report_id,))
+        db.commit()
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================
+# Damage Report Endpoints
+# ============================================
+@app.route('/api/report-damage', methods=['POST'])
+@login_required
+def report_damage():
+    """Receive damage report from app user and forward to Tasklet webhook"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        po_number = data.get('po_number', '')
+        po_id = data.get('po_id', '')
+        catalog_id = data.get('catalog_id', '')
+        item_description = data.get('item_description', '')
+        part_number = data.get('part_number', '')
+        quantity_damaged = data.get('quantity_damaged', 1)
+        notes = data.get('notes', '').strip()
+        photos_base64 = data.get('photos', [])
+        vendor_name = data.get('vendor_name', '')
+        vendor_id = data.get('vendor_id', '')
+        job_number = data.get('job_number', '')
+        customer_name = data.get('customer_name', '')
+        
+        if not item_description:
+            return jsonify({'error': 'Item description is required'}), 400
+        
+        report_id = str(uuid.uuid4())[:8]
+        staff_user = session.get('username', 'unknown')
+        staff_name = session.get('display_name', 'Unknown')
+        
+        db = get_db()
+        db.execute('''
+            INSERT INTO damage_reports (id, po_number, po_id, catalog_id, item_description,
+                part_number, quantity_damaged, notes, photo_count, photos_base64,
+                vendor_name, vendor_id, job_number, customer_name,
+                staff_user, staff_name, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new')
+        ''', (report_id, po_number, po_id, catalog_id, item_description,
+              part_number, quantity_damaged, notes,
+              len(photos_base64), json.dumps(photos_base64),
+              vendor_name, vendor_id, job_number, customer_name,
+              staff_user, staff_name))
+        db.commit()
+        
+        print(f"=== DAMAGE REPORT {report_id} ===")
+        print(f"Staff: {staff_name} ({staff_user})")
+        print(f"PO: {po_number}, Item: {item_description}")
+        print(f"Part: {part_number}, Qty damaged: {quantity_damaged}")
+        print(f"Vendor: {vendor_name}, Job: {job_number}, Customer: {customer_name}")
+        print(f"Notes: {notes}")
+        print(f"Photos: {len(photos_base64)}")
+        
+        if DAMAGE_WEBHOOK_URL:
+            try:
+                webhook_payload = {
+                    'report_id': report_id,
+                    'po_number': po_number,
+                    'po_id': po_id,
+                    'catalog_id': catalog_id,
+                    'item_description': item_description,
+                    'part_number': part_number,
+                    'quantity_damaged': quantity_damaged,
+                    'notes': notes,
+                    'photo_count': len(photos_base64),
+                    'vendor_name': vendor_name,
+                    'vendor_id': vendor_id,
+                    'job_number': job_number,
+                    'customer_name': customer_name,
+                    'staff_user': staff_user,
+                    'staff_name': staff_name,
+                    'timestamp': datetime.now().isoformat()
+                }
+                resp = requests.post(DAMAGE_WEBHOOK_URL, json=webhook_payload, timeout=10)
+                print(f"Damage webhook sent: {resp.status_code}")
+            except Exception as e:
+                print(f"Damage webhook failed (report still saved): {e}")
+        else:
+            print("WARNING: DAMAGE_WEBHOOK_URL not set - report saved but not forwarded")
+        
+        return jsonify({
+            'success': True,
+            'report_id': report_id,
+            'message': 'Damage reported! Supplier and customer will be notified.'
+        })
+        
+    except Exception as e:
+        print(f"Error saving damage report: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/damage-reports', methods=['GET'])
+@login_required
+def list_damage_reports():
+    """List damage reports"""
+    try:
+        status = request.args.get('status', None)
+        po_number = request.args.get('po_number', None)
+        db = get_db()
+        
+        query = '''SELECT id, po_number, item_description, part_number, quantity_damaged,
+                    notes, photo_count, vendor_name, job_number, customer_name,
+                    staff_user, staff_name, status, created_at, resolved_at
+                FROM damage_reports'''
+        conditions = []
+        params = []
+        
+        if status:
+            conditions.append('status = ?')
+            params.append(status)
+        if po_number:
+            conditions.append('po_number = ?')
+            params.append(po_number)
+        
+        if conditions:
+            query += ' WHERE ' + ' AND '.join(conditions)
+        query += ' ORDER BY created_at DESC'
+        
+        reports = db.execute(query, tuple(params)).fetchall()
+        return jsonify({'reports': [dict(r) for r in reports], 'count': len(reports)})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/damage-reports/<report_id>', methods=['GET'])
+def get_damage_report(report_id):
+    """Fetch a damage report by ID (for Tasklet email processing)"""
+    try:
+        db = get_db()
+        report = db.execute('SELECT * FROM damage_reports WHERE id = ?', (report_id,)).fetchone()
+        if not report:
+            return jsonify({'error': 'Report not found'}), 404
+        
+        result = dict(report)
+        if result.get('photos_base64'):
+            result['photos'] = json.loads(result['photos_base64'])
+        else:
+            result['photos'] = []
+        del result['photos_base64']
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/damage-reports/<report_id>/resolve', methods=['POST'])
+@login_required
+def resolve_damage_report(report_id):
+    """Mark a damage report as resolved"""
+    try:
+        data = request.get_json() or {}
+        resolution = data.get('resolution', '')
+        
+        db = get_db()
+        if USE_PG:
+            db.execute('UPDATE damage_reports SET status = %s, resolved_at = NOW() WHERE id = %s',
+                       ('resolved', report_id))
+        else:
+            db.execute("UPDATE damage_reports SET status = 'resolved', resolved_at = datetime('now') WHERE id = ?",
+                       (report_id,))
+        db.commit()
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 
 # ============================================
 # Initialize and Run

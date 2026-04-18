@@ -24,7 +24,11 @@ const app = {
     editingStaffId: null,
     
     // Photo mode state
-    photoMode: null, // 'individual', 'group', or 'skip'
+    photoMode: null,
+    
+    // Damage report state
+    _damagePhotos: [],
+    _damageItemIndex: null, // 'individual', 'group', or 'skip'
     individualPhotos: [], // [{itemIndex, description, base64}]
     
     // Relocate state
@@ -589,6 +593,9 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                                onchange="app.updateItemQty(${index})" disabled>
                         <button class="backorder-btn" onclick="app.toggleBackorder(${index})" title="Mark as backordered">
                             BO
+                        </button>
+                        <button class="damage-btn" onclick="app.showDamageModal(${index})" title="Report damaged">
+                            ⚠️
                         </button>
                     </div>
                 </div>
@@ -1974,6 +1981,159 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
     // ============================================
     _reportPhotos: [],
     
+    // ============================================
+    // Damaged Goods Reporting
+    // ============================================
+    showDamageModal(index) {
+        this._damageItemIndex = index;
+        this._damagePhotos = [];
+        const item = this.currentPO.items[index];
+        const po = this.currentPO;
+        
+        const modal = document.getElementById('damage-modal');
+        modal.classList.remove('hidden');
+        
+        document.getElementById('damage-item-name').textContent = item.description;
+        document.getElementById('damage-item-meta').textContent = 
+            (item.partNo ? 'Part: ' + item.partNo + ' | ' : '') + 
+            'PO #' + po.poNumber + ' | ' + (po.vendorName || 'Unknown vendor');
+        
+        const qtyInput = document.getElementById('damage-qty');
+        qtyInput.value = item.quantityOrdered || 1;
+        qtyInput.max = item.quantityOrdered || 99;
+        
+        document.getElementById('damage-notes').value = '';
+        document.getElementById('damage-photo-preview').innerHTML = '';
+        document.getElementById('damage-status').classList.add('hidden');
+        document.getElementById('damage-submit-btn').disabled = false;
+        document.getElementById('damage-submit-btn').innerHTML = '&#9888;&#65039; Report Damage';
+    },
+    
+    hideDamageModal() {
+        document.getElementById('damage-modal').classList.add('hidden');
+        this._damagePhotos = [];
+        this._damageItemIndex = null;
+    },
+    
+    handleDamagePhotos(event) {
+        const files = Array.from(event.target.files);
+        const preview = document.getElementById('damage-photo-preview');
+        
+        files.forEach(async (file) => {
+            if (this._damagePhotos.length >= 5) {
+                alert('Maximum 5 photos per damage report');
+                return;
+            }
+            
+            let base64;
+            try {
+                base64 = await this.compressImage(file);
+            } catch(e) {
+                base64 = await new Promise(r => { const rd = new FileReader(); rd.onload = ev => r(ev.target.result); rd.readAsDataURL(file); });
+            }
+            this._damagePhotos.push(base64);
+            
+            const wrapper = document.createElement('div');
+            wrapper.style.position = 'relative';
+            wrapper.style.display = 'inline-block';
+            
+            const img = document.createElement('img');
+            img.src = base64;
+            wrapper.appendChild(img);
+            
+            const removeBtn = document.createElement('button');
+            removeBtn.textContent = '\u2715';
+            removeBtn.style.cssText = 'position:absolute;top:-6px;right:-6px;width:22px;height:22px;background:#ef4444;color:white;border:none;border-radius:50%;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;';
+            removeBtn.onclick = () => {
+                const idx = this._damagePhotos.indexOf(base64);
+                if (idx > -1) this._damagePhotos.splice(idx, 1);
+                wrapper.remove();
+            };
+            wrapper.appendChild(removeBtn);
+            
+            preview.appendChild(wrapper);
+        });
+        
+        event.target.value = '';
+    },
+    
+    async submitDamageReport() {
+        const statusEl = document.getElementById('damage-status');
+        const submitBtn = document.getElementById('damage-submit-btn');
+        const notes = document.getElementById('damage-notes').value.trim();
+        const qty = parseInt(document.getElementById('damage-qty').value) || 1;
+        
+        if (this._damagePhotos.length === 0) {
+            statusEl.textContent = 'Please take at least one photo of the damaged item';
+            statusEl.className = 'status-message error';
+            statusEl.classList.remove('hidden');
+            return;
+        }
+        
+        submitBtn.disabled = true;
+        submitBtn.textContent = '\u23f3 Submitting...';
+        statusEl.textContent = 'Reporting damage...';
+        statusEl.className = 'status-message info';
+        statusEl.classList.remove('hidden');
+        
+        const item = this.currentPO.items[this._damageItemIndex];
+        const po = this.currentPO;
+        
+        const payload = {
+            po_number: po.poNumber,
+            po_id: po.ID,
+            catalog_id: item.catalogId,
+            item_description: item.description,
+            part_number: item.partNo || '',
+            quantity_damaged: qty,
+            notes: notes,
+            photos: this._damagePhotos,
+            vendor_name: po.vendorName || '',
+            vendor_id: po.vendorID || '',
+            job_number: po.jobNumber || item.jobNumber || '',
+            customer_name: po.customerName || item.customerName || ''
+        };
+        
+        try {
+            const resp = await fetch('/api/report-damage', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            
+            const data = await resp.json();
+            
+            if (data.success) {
+                statusEl.innerHTML = '\u2705 ' + data.message + ' (Ref: ' + data.report_id + ')';
+                statusEl.className = 'status-message success';
+                statusEl.classList.remove('hidden');
+                
+                const card = document.querySelector('.item-card[data-index="' + this._damageItemIndex + '"]');
+                if (card) {
+                    card.classList.add('damaged');
+                    const dmgBadge = document.createElement('div');
+                    dmgBadge.className = 'damage-badge';
+                    dmgBadge.innerHTML = '\u26a0\ufe0f DAMAGED \u2014 Reported';
+                    const details = card.querySelector('.item-details');
+                    if (details) details.appendChild(dmgBadge);
+                }
+                
+                setTimeout(() => {
+                    this.hideDamageModal();
+                }, 2000);
+            } else {
+                throw new Error(data.error || 'Failed to submit');
+            }
+        } catch (err) {
+            statusEl.textContent = '\u274c Failed: ' + err.message;
+            statusEl.className = 'status-message error';
+            statusEl.classList.remove('hidden');
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '&#9888;&#65039; Report Damage';
+        }
+    },
+    
+
     showReportIssue() {
         const modal = document.getElementById('report-issue-modal');
         modal.classList.remove('hidden');

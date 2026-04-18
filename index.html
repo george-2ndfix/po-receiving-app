@@ -1092,6 +1092,53 @@
     </div>
 
     <!-- Report Issue Floating Button (visible on all screens except login) -->
+    <!-- Damaged Goods Modal -->
+    <div id="damage-modal" class="damage-modal-overlay hidden">
+        <div class="damage-modal">
+            <div class="damage-modal-header">
+                <h2>&#9888;&#65039; Report Damaged Item</h2>
+                <button class="damage-close-btn" onclick="app.hideDamageModal()">&#10005;</button>
+            </div>
+            <div class="damage-modal-body">
+                <div class="damage-item-info">
+                    <div id="damage-item-name" class="damage-item-name">Item Name</div>
+                    <div id="damage-item-meta" class="damage-item-meta">Part: --- | PO #--- | Vendor</div>
+                </div>
+                <div class="damage-field">
+                    <label for="damage-qty">Quantity Damaged</label>
+                    <input type="number" id="damage-qty" min="1" max="99" value="1">
+                </div>
+                <div class="damage-field">
+                    <label>Photos of Damage *</label>
+                    <div class="damage-photo-area">
+                        <input type="file" id="damage-photos-camera" accept="image/*" multiple style="display:none" onchange="app.handleDamagePhotos(event)">
+                        <input type="file" id="damage-photos-library" accept="image/*" multiple style="display:none" onchange="app.handleDamagePhotos(event)">
+                        <div style="display:flex;gap:8px;margin-bottom:8px;">
+                            <button class="btn btn-secondary" style="flex:1;" onclick="document.getElementById('damage-photos-camera').click()">
+                                &#128247; Camera
+                            </button>
+                            <button class="btn btn-secondary" style="flex:1;" onclick="document.getElementById('damage-photos-library').click()">
+                                &#128444;&#65039; Library
+                            </button>
+                        </div>
+                        <div id="damage-photo-preview" class="report-photo-preview"></div>
+                    </div>
+                </div>
+                <div class="damage-field">
+                    <label for="damage-notes">Notes (describe the damage)</label>
+                    <textarea id="damage-notes" rows="3" placeholder="Describe the damage - e.g. dented, scratched, wrong colour, missing parts..."></textarea>
+                </div>
+                <div id="damage-status" class="status-message hidden"></div>
+            </div>
+            <div class="damage-modal-footer">
+                <button class="btn btn-secondary" onclick="app.hideDamageModal()">Cancel</button>
+                <button class="btn btn-danger" id="damage-submit-btn" onclick="app.submitDamageReport()">
+                    &#9888;&#65039; Report Damage
+                </button>
+            </div>
+        </div>
+    </div>
+
     <button id="report-issue-fab" class="report-issue-fab hidden" onclick="app.showReportIssue()">
         ⚠️
     </button>
@@ -1153,11 +1200,11 @@
             regs.forEach(reg => reg.unregister());
         }).then(() => {
             setTimeout(() => {
-                navigator.serviceWorker.register('/sw.js?v=1776424322');
+                navigator.serviceWorker.register('/sw.js?v=1776424323');
             }, 1000);
         });
     }
     </script>
-    <script src="app.js?v=1776424322"></script>
+    <script src="app.js?v=1776424323"></script>
 </body>
 </html>
