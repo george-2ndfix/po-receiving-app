@@ -1484,6 +1484,8 @@ def allocate_items():
         
         # ============================================
         # Path 2: Post-receipt stock transfer (move from current location to destination)
+        # Uses POST /stockTransfers/ endpoint — ONE item per request to avoid Simpro batch bug
+        # (Simpro validates qty of item 1 against stock of item 2 when batched — API Forum #2409)
         # ============================================
         if post_receipt_items:
             # Skip service/non-physical items (delivery charges, freight, etc.)
@@ -1494,7 +1496,7 @@ def allocate_items():
                 desc = str(item.get('description', '') or '').upper().strip()
                 is_service = any(p in part_no or p in desc for p in SERVICE_PATTERNS)
                 if is_service:
-                    print(f"⏭️ Skipping service item: {part_no} - {desc}")
+                    print(f"Skipping service item: {part_no} - {desc}")
                     results.append({
                         'catalogId': item.get('catalogId'),
                         'success': True,
@@ -1509,136 +1511,114 @@ def allocate_items():
             
             post_receipt_items = physical_items
             
-            # Group items by source storage device (most will be Stock Holding, but some may be elsewhere)
-            by_source = {}
+            # Process each item INDIVIDUALLY (not batched) to avoid Simpro bug
             for item in post_receipt_items:
+                catalog_id = item.get('catalogId')
+                part_no = item.get('partNo', '')
+                desc = item.get('description', '')
+                quantity = item.get('quantity', 1)
                 source_id = item.get('source_storage_id', STOCK_HOLDING_ID)
                 source_name = item.get('source_storage_name', 'Stock Holding')
-                if source_id not in by_source:
-                    by_source[source_id] = {'name': source_name, 'items': []}
-                by_source[source_id]['items'].append(item)
-            
-            for source_id, group in by_source.items():
-                source_name = group['name']
-                group_items = group['items']
+                
+                if quantity <= 0:
+                    quantity = 1
                 
                 # Pre-check: Query stock levels to skip items with zero stock
-                items_with_stock = []
-                for item in group_items:
-                    catalog_id = item.get('catalogId')
-                    part_no = item.get('partNo', '')
-                    desc = item.get('description', '')
-                    quantity = item.get('quantity', 1)
-                    
-                    try:
-                        # Use storageDevice stock endpoint (catalogs/stockOnHand returns 404)
-                        stock_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/storageDevices/{source_id}/stock/?Catalog.ID={catalog_id}')
-                        if stock_resp.status_code == 200:
-                            stock_data = stock_resp.json()
-                            source_stock = 0
-                            if stock_data and len(stock_data) > 0:
-                                source_stock = stock_data[0].get('InventoryCount', 0)
+                try:
+                    stock_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/storageDevices/{source_id}/stock/?Catalog.ID={catalog_id}')
+                    if stock_resp.status_code == 200:
+                        stock_data = stock_resp.json()
+                        source_stock = 0
+                        if stock_data and len(stock_data) > 0:
+                            source_stock = stock_data[0].get('InventoryCount', 0)
+                        
+                        if source_stock <= 0:
+                            # Retry: Simpro may still be processing ItemsReceived
+                            for retry in range(3):
+                                print(f"Retry {retry+1}/3: {part_no} has 0 stock in {source_name}, waiting 3s...")
+                                time.sleep(3)
+                                retry_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/storageDevices/{source_id}/stock/?Catalog.ID={catalog_id}')
+                                if retry_resp.status_code == 200:
+                                    retry_data = retry_resp.json()
+                                    if retry_data and len(retry_data) > 0:
+                                        source_stock = retry_data[0].get('InventoryCount', 0)
+                                        if source_stock > 0:
+                                            print(f"Stock appeared after retry {retry+1}: {part_no} = {source_stock}")
+                                            break
                             
                             if source_stock <= 0:
-                                # Retry: Simpro may still be processing ItemsReceived
-                                retried = False
-                                for retry in range(3):
-                                    print(f"⏳ {part_no}: 0 stock in {source_name}, retry {retry+1}/3 (waiting 3s)...")
-                                    time.sleep(3)
-                                    retry_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/storageDevices/{source_id}/stock/?Catalog.ID={catalog_id}')
-                                    if retry_resp.status_code == 200:
-                                        retry_data = retry_resp.json()
-                                        if retry_data and len(retry_data) > 0:
-                                            source_stock = retry_data[0].get('InventoryCount', 0)
-                                            if source_stock > 0:
-                                                print(f"✅ {part_no}: Stock appeared after retry {retry+1}: {source_stock}")
-                                                retried = True
-                                                break
-                                
-                                if source_stock <= 0:
-                                    print(f"⏭️ Skipping {part_no} ({desc}): 0 stock in {source_name} after 3 retries")
-                                    results.append({
-                                        'catalogId': catalog_id,
-                                        'success': False,
-                                        'quantity': quantity,
-                                        'method': 'skipped_zero_stock',
-                                        'error': f'No stock available in {source_name} - item may not have arrived yet. ItemsReceived was ticked but stock did not appear after retries.'
-                                    })
-                                    continue
-                            
-                            print(f"📦 {part_no}: {source_stock} in {source_name}")
-                            
-                            # Cap quantity to available stock
-                            if quantity > source_stock:
-                                print(f"⚠️ Reducing {part_no} qty from {quantity} to {source_stock} (available stock)")
-                                item['quantity'] = int(source_stock)
-                        else:
-                            # If stock check fails, skip item to avoid 404 on transfer
-                            print(f"⚠️ Could not check stock for catalog {catalog_id}: {stock_resp.status_code} - skipping")
-                            results.append({
-                                'catalogId': catalog_id,
-                                'success': False,
-                                'quantity': quantity,
-                                'method': 'skipped_stock_check_failed',
-                                'error': f'Could not verify stock level in {source_name} (API returned {stock_resp.status_code})'
-                            })
-                            continue
-                    except Exception as e:
-                        print(f"⚠️ Stock check error for catalog {catalog_id}: {e} - skipping")
+                                print(f"Skipping {part_no} ({desc}): 0 stock in {source_name} after 3 retries")
+                                results.append({
+                                    'catalogId': catalog_id,
+                                    'success': False,
+                                    'quantity': quantity,
+                                    'method': 'skipped_zero_stock',
+                                    'error': f'No stock available in {source_name} - item may not have arrived yet. ItemsReceived was ticked but stock did not appear after retries.'
+                                })
+                                continue
+                        
+                        print(f"Stock check: {part_no} = {source_stock} in {source_name}")
+                        
+                        # Cap quantity to available stock
+                        if quantity > source_stock:
+                            print(f"Reducing {part_no} qty from {quantity} to {source_stock} (available stock)")
+                            quantity = int(source_stock)
+                    else:
+                        print(f"Could not check stock for catalog {catalog_id}: {stock_resp.status_code} - skipping")
                         results.append({
                             'catalogId': catalog_id,
                             'success': False,
                             'quantity': quantity,
-                            'method': 'skipped_stock_check_error',
-                            'error': f'Stock check failed: {str(e)}'
+                            'method': 'skipped_stock_check_failed',
+                            'error': f'Could not verify stock level in {source_name} (API returned {stock_resp.status_code})'
                         })
                         continue
-                    
-                    items_with_stock.append(item)
-                
-                if not items_with_stock:
-                    print(f"No items with stock to transfer from {source_name}")
+                except Exception as e:
+                    print(f"Stock check error for catalog {catalog_id}: {e} - skipping")
+                    results.append({
+                        'catalogId': catalog_id,
+                        'success': False,
+                        'quantity': quantity,
+                        'method': 'skipped_stock_check_error',
+                        'error': f'Stock check failed: {str(e)}'
+                    })
                     continue
                 
-                group_items = items_with_stock
-                
-                transfer_items = []
-                for item in group_items:
-                    catalog_id = item.get('catalogId')
-                    quantity = item.get('quantity', 1)
-                    if quantity <= 0:
-                        quantity = 1
-                    transfer_items.append({
+                # Execute stock transfer — one item per POST request
+                transfer_payload = {
+                    'SourceStorageDeviceID': int(source_id),
+                    'Items': [{
                         'CatalogID': int(catalog_id),
                         'DestinationStorageDeviceID': int(storage_device_id),
                         'Quantity': int(quantity)
-                    })
-                
-                transfer_payload = {
-                    'SourceStorageDeviceID': int(source_id),
-                    'Items': transfer_items
+                    }]
                 }
                 
-                print(f"[POST-RECEIPT] Stock Transfer from {source_name} (ID:{source_id}) to {storage_name}")
+                print(f"[STOCK TRANSFER] {part_no} x{quantity}: {source_name} (ID:{source_id}) -> {storage_name} (ID:{storage_device_id})")
                 print(f"Transfer payload: {json.dumps(transfer_payload)}")
                 
-                transfer_response = simpro_request('POST', f'/companies/{COMPANY_ID}/stockTransfer/', json=transfer_payload)
+                # Try stockTransfers/ (plural) first, fall back to stockTransfer/ (singular)
+                transfer_response = simpro_request('POST', f'/companies/{COMPANY_ID}/stockTransfers/', json=transfer_payload)
+                if transfer_response.status_code == 404:
+                    print(f"stockTransfers/ returned 404, trying stockTransfer/ (singular)...")
+                    transfer_response = simpro_request('POST', f'/companies/{COMPANY_ID}/stockTransfer/', json=transfer_payload)
+                
                 print(f"Stock Transfer Response: {transfer_response.status_code} - {transfer_response.text}")
                 
                 if transfer_response.status_code in (200, 201, 204):
-                    for item in group_items:
-                        results.append({
-                            'catalogId': item.get('catalogId'),
-                            'success': True,
-                            'quantity': item.get('quantity', 1),
-                            'verified': True,
-                            'method': 'stock_transfer',
-                            'message': f'Transferred from {source_name} to {storage_name}'
-                        })
-                        success_count += 1
-                    print(f"✅ Stock transfer successful: {len(group_items)} items moved from {source_name} to {storage_name}")
+                    results.append({
+                        'catalogId': catalog_id,
+                        'success': True,
+                        'quantity': quantity,
+                        'verified': True,
+                        'method': 'stock_transfer',
+                        'message': f'Transferred from {source_name} to {storage_name}'
+                    })
+                    success_count += 1
+                    print(f"Stock transfer SUCCESS: {part_no} x{quantity} -> {storage_name}")
                 else:
                     error_msg = f'Stock Transfer API returned {transfer_response.status_code}'
+                    error_detail_text = transfer_response.text[:500] if transfer_response.text else ''
                     try:
                         error_detail = transfer_response.json()
                         if isinstance(error_detail, dict) and 'Message' in error_detail:
@@ -1646,46 +1626,32 @@ def allocate_items():
                     except:
                         pass
                     
-                    print(f"❌ Stock transfer failed: {error_msg}")
+                    print(f"Stock transfer FAILED for {part_no}: {error_msg}")
                     
-                    # If batch transfer failed, try items individually
-                    print(f"Retrying items individually...")
-                    for item in group_items:
-                        catalog_id = item.get('catalogId')
-                        quantity = item.get('quantity', 1)
-                        if quantity <= 0:
-                            quantity = 1
-                        
-                        single_payload = {
-                            'SourceStorageDeviceID': int(source_id),
-                            'Items': [{
-                                'CatalogID': int(catalog_id),
-                                'DestinationStorageDeviceID': int(storage_device_id),
-                                'Quantity': int(quantity)
-                            }]
-                        }
-                        
-                        single_resp = simpro_request('POST', f'/companies/{COMPANY_ID}/stockTransfer/', json=single_payload)
-                        if single_resp.status_code in (200, 201, 204):
-                            results.append({
-                                'catalogId': catalog_id,
-                                'success': True,
-                                'quantity': quantity,
-                                'verified': True,
-                                'method': 'stock_transfer',
-                                'message': f'Transferred from {source_name} to {storage_name}'
-                            })
-                            success_count += 1
-                            print(f"✅ Individual transfer success: catalog {catalog_id}")
-                        else:
-                            results.append({
-                                'catalogId': catalog_id,
-                                'success': False,
-                                'error': f'Stock transfer from {source_name} failed: {single_resp.status_code}',
-                                'method': 'stock_transfer'
-                            })
-                            print(f"❌ Individual transfer failed: catalog {catalog_id} - {single_resp.status_code}")
-        
+                    # Log error to DB for debugging
+                    try:
+                        import json as json_mod
+                        err_conn = get_db()
+                        err_cursor = err_conn.cursor()
+                        err_cursor.execute(
+                            """INSERT INTO error_logs (error_type, po_number, catalog_id, staff_user, error_code, error_message, request_payload, response_body, endpoint)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                            ('stock_transfer', str(po_number), str(catalog_id), session.get('display_name', 'Unknown'),
+                             transfer_response.status_code, error_msg,
+                             json_mod.dumps(transfer_payload), error_detail_text,
+                             f'/companies/{COMPANY_ID}/stockTransfers/'))
+                        err_conn.commit()
+                        err_conn.close()
+                    except Exception as log_err:
+                        print(f"Error logging failed: {log_err}")
+                    
+                    results.append({
+                        'catalogId': catalog_id,
+                        'success': False,
+                        'error': error_msg,
+                        'method': 'stock_transfer'
+                    })
+
         # Log the allocation
         staff_id = session.get('staff_id')
         staff_name = session.get('display_name', 'Unknown')
@@ -1845,36 +1811,67 @@ def relocate_items():
         if source_id == dest_id:
             return jsonify({'error': 'Source and destination cannot be the same'}), 400
         
-        # Build Stock Transfer API payload
+        # Build list of valid items to transfer
         transfer_items = []
         for item in items:
             catalog_id = item.get('catalogId')
             quantity = item.get('quantity', 1)
             if catalog_id:
                 transfer_items.append({
-                    'CatalogID': int(catalog_id),
-                    'DestinationStorageDeviceID': int(dest_id),
-                    'Quantity': int(quantity)
+                    'catalogId': int(catalog_id),
+                    'quantity': int(quantity),
+                    'partNo': item.get('partNo', ''),
+                    'description': item.get('description', '')
                 })
         
         if not transfer_items:
             return jsonify({'error': 'No valid items to transfer'}), 400
         
-        payload = {
-            'SourceStorageDeviceID': int(source_id),
-            'Items': transfer_items
-        }
-        
         print(f"=== STOCK TRANSFER REQUEST ===")
         print(f"From: {source_name} (ID: {source_id}) -> To: {dest_name} (ID: {dest_id})")
         print(f"Items: {len(transfer_items)}")
-        print(f"Payload: {json.dumps(payload)}")
         
-        # Execute stock transfer via Simpro API
-        response = simpro_request('POST', f'/companies/{COMPANY_ID}/stockTransfer/', json=payload)
-        print(f"Stock Transfer API Response: {response.status_code} - {response.text}")
+        # Execute stock transfers INDIVIDUALLY (Simpro has a documented batch bug — API Forum #2409)
+        success_count = 0
+        results = []
         
-        if response.status_code in (200, 201, 204):
+        for ti in transfer_items:
+            payload = {
+                'SourceStorageDeviceID': int(source_id),
+                'Items': [{
+                    'CatalogID': ti['catalogId'],
+                    'DestinationStorageDeviceID': int(dest_id),
+                    'Quantity': ti['quantity']
+                }]
+            }
+            
+            print(f"[TRANSFER] {ti['partNo']} x{ti['quantity']}: {source_name} -> {dest_name}")
+            print(f"Payload: {json.dumps(payload)}")
+            
+            # Try stockTransfers/ (plural) first, fall back to stockTransfer/ (singular)
+            response = simpro_request('POST', f'/companies/{COMPANY_ID}/stockTransfers/', json=payload)
+            if response.status_code == 404:
+                print(f"stockTransfers/ returned 404, trying stockTransfer/ (singular)...")
+                response = simpro_request('POST', f'/companies/{COMPANY_ID}/stockTransfer/', json=payload)
+            
+            print(f"Response: {response.status_code} - {response.text}")
+            
+            if response.status_code in (200, 201, 204):
+                success_count += 1
+                results.append({'catalogId': ti['catalogId'], 'success': True})
+                print(f"Transfer SUCCESS: {ti['partNo']}")
+            else:
+                error_msg = f'API returned {response.status_code}'
+                try:
+                    err = response.json()
+                    if isinstance(err, dict) and 'Message' in err:
+                        error_msg = err['Message']
+                except:
+                    pass
+                results.append({'catalogId': ti['catalogId'], 'success': False, 'error': error_msg})
+                print(f"Transfer FAILED: {ti['partNo']} - {error_msg}")
+        
+        if success_count > 0:
             # Log the transfer
             staff_id = session.get('staff_id')
             log_allocation(
@@ -1883,36 +1880,35 @@ def relocate_items():
                 po_number='',
                 job_number='',
                 vendor_name='',
-                items_count=len(transfer_items),
+                items_count=success_count,
                 storage_location=f'{source_name} → {dest_name}',
                 allocation_type='stock_transfer',
                 verified=1
             )
             
             print(f"=== STOCK TRANSFER COMPLETE ===")
-            print(f"Transferred {len(transfer_items)} item(s) from {source_name} to {dest_name}")
+            print(f"Transferred {success_count}/{len(transfer_items)} item(s) from {source_name} to {dest_name}")
             
             return jsonify({
                 'success': True,
-                'message': f'Successfully transferred {len(transfer_items)} item(s) from {source_name} to {dest_name}',
-                'transferredCount': len(transfer_items),
+                'message': f'Successfully transferred {success_count}/{len(transfer_items)} item(s) from {source_name} to {dest_name}',
+                'transferredCount': success_count,
+                'totalItems': len(transfer_items),
+                'results': results,
                 'transferredBy': staff_name
             })
         else:
-            error_msg = f'Simpro API returned {response.status_code}'
-            try:
-                error_detail = response.json()
-                if isinstance(error_detail, dict) and 'Message' in error_detail:
-                    error_msg = error_detail['Message']
-            except:
-                error_msg = response.text or error_msg
+            # All failed
+            error_msgs = [r.get('error', 'Unknown') for r in results if not r.get('success')]
+            error_summary = '; '.join(set(error_msgs)) if error_msgs else 'All transfers failed'
             
             print(f"=== STOCK TRANSFER FAILED ===")
-            print(f"Error: {error_msg}")
+            print(f"Error: {error_summary}")
             
             return jsonify({
                 'success': False,
-                'error': error_msg
+                'error': error_summary,
+                'results': results
             }), 400
         
     except Exception as e:
