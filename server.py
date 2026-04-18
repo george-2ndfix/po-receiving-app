@@ -2519,7 +2519,6 @@ def search_mystery_box():
 # ============================================
 FAULT_WEBHOOK_URL = os.environ.get('FAULT_WEBHOOK_URL', 'https://webhooks.tasklet.ai/v1/public/webhook?token=53c558477df26839f9518bab90f10e0c')
 DAMAGE_WEBHOOK_URL = os.environ.get('DAMAGE_WEBHOOK_URL', '')
-DAMAGE_WEBHOOK_URL = os.environ.get('DAMAGE_WEBHOOK_URL', '')
 
 @app.route('/api/report-fault', methods=['POST'])
 @login_required
@@ -3012,6 +3011,7 @@ def report_damage():
         if DAMAGE_WEBHOOK_URL:
             try:
                 webhook_payload = {
+                    'type': 'damage_report',
                     'report_id': report_id,
                     'po_number': po_number,
                     'po_id': po_id,
