@@ -1597,11 +1597,8 @@ def allocate_items():
                 print(f"[STOCK TRANSFER] {part_no} x{quantity}: {source_name} (ID:{source_id}) -> {storage_name} (ID:{storage_device_id})")
                 print(f"Transfer payload: {json.dumps(transfer_payload)}")
                 
-                # Try stockTransfers/ (plural) first, fall back to stockTransfer/ (singular)
-                transfer_response = simpro_request('POST', f'/companies/{COMPANY_ID}/stockTransfers/', json=transfer_payload)
-                if transfer_response.status_code == 404:
-                    print(f"stockTransfers/ returned 404, trying stockTransfer/ (singular)...")
-                    transfer_response = simpro_request('POST', f'/companies/{COMPANY_ID}/stockTransfer/', json=transfer_payload)
+                # POST to stockTransfer/ (singular — verified working endpoint)
+                transfer_response = simpro_request('POST', f'/companies/{COMPANY_ID}/stockTransfer/', json=transfer_payload)
                 
                 print(f"Stock Transfer Response: {transfer_response.status_code} - {transfer_response.text}")
                 
@@ -1848,11 +1845,8 @@ def relocate_items():
             print(f"[TRANSFER] {ti['partNo']} x{ti['quantity']}: {source_name} -> {dest_name}")
             print(f"Payload: {json.dumps(payload)}")
             
-            # Try stockTransfers/ (plural) first, fall back to stockTransfer/ (singular)
-            response = simpro_request('POST', f'/companies/{COMPANY_ID}/stockTransfers/', json=payload)
-            if response.status_code == 404:
-                print(f"stockTransfers/ returned 404, trying stockTransfer/ (singular)...")
-                response = simpro_request('POST', f'/companies/{COMPANY_ID}/stockTransfer/', json=payload)
+            # POST to stockTransfer/ (singular — verified working endpoint)
+            response = simpro_request('POST', f'/companies/{COMPANY_ID}/stockTransfer/', json=payload)
             
             print(f"Response: {response.status_code} - {response.text}")
             
@@ -2785,7 +2779,7 @@ def job_intel():
 
 @app.route('/api/version')
 def get_version():
-    return jsonify({'version': '2026-04-18-damaged-goods', 'status': 'ok'})
+    return jsonify({'version': '2026-04-19-stock-transfer-fix', 'status': 'ok'})
 
 # ============================================
 # Test Label PDF Endpoint
