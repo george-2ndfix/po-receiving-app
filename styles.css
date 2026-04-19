@@ -31,7 +31,7 @@
 body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
     background: var(--gray-100);
-    min-height: 100vh;
+    min-height: 100%;
     color: var(--gray-800);
     font-size: 16px;
     line-height: 1.5;
@@ -40,7 +40,7 @@ body {
 /* Screen Management */
 .screen {
     display: none;
-    min-height: 100vh;
+    min-height: 100dvh;
     flex-direction: column;
 }
 
