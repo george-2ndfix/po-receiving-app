@@ -29,6 +29,8 @@
 }
 
 body {
+    overscroll-behavior: none;
+    touch-action: manipulation;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
     background: var(--gray-100);
     min-height: 100%;
