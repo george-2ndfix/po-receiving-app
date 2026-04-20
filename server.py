@@ -1803,7 +1803,7 @@ def get_storage_stock(storage_id):
 @app.route('/api/stock-search', methods=['POST'])
 @login_required
 def stock_search():
-    """Search for stock locations by job or PO number"""
+    """Search for stock locations by job or PO number — uses PO allocation data"""
     try:
         data = request.get_json()
         search_type = data.get('searchType', 'po')
@@ -1814,9 +1814,9 @@ def stock_search():
         
         print(f"=== STOCK SEARCH: {search_type} = {search_value} ===")
         
-        catalog_items = {}
         job_info = None
         po_list = []
+        found_items = []
         
         def lookup_job_customer(jid):
             """Inline job+customer lookup"""
@@ -1839,8 +1839,99 @@ def stock_search():
                 print(f"Error looking up job {jid}: {e}")
             return {'jobNumber': str(jid), 'customerName': ''}
         
+        # Get all storage device names for lookup
+        all_devices = {}
+        try:
+            dev_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/storageDevices/')
+            if dev_resp.status_code == 200:
+                for dev in dev_resp.json():
+                    all_devices[dev['ID']] = dev.get('Name', f"Storage {dev['ID']}")
+        except:
+            pass
+        
+        def process_po(po_id, po_no):
+            """Get items and their locations from a PO using allocations"""
+            # Get catalog items on this PO
+            cats_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/catalogs/')
+            if cats_resp.status_code != 200:
+                print(f"Failed to get catalogs for PO {po_id}: {cats_resp.status_code}")
+                return
+            
+            for cat_item in cats_resp.json():
+                cat = cat_item.get('Catalog', {})
+                cat_id = cat.get('ID')
+                if not cat_id:
+                    continue
+                
+                part_no = cat.get('PartNo', '')
+                description = cat.get('Name', cat_item.get('Description', 'Unknown Item'))
+                
+                # Get allocations for this catalog item — this tells us WHERE it is
+                try:
+                    alloc_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/catalogs/{cat_id}/allocations/')
+                    if alloc_resp.status_code == 200:
+                        for alloc in alloc_resp.json():
+                            qty_obj = alloc.get('Quantity', {})
+                            qty_total = qty_obj.get('Total', 0)
+                            qty_received = qty_obj.get('Received', 0)
+                            
+                            # Get storage device from allocation
+                            sd = alloc.get('StorageDevice', {})
+                            sd_id = None
+                            sd_name = 'Not Allocated'
+                            
+                            if isinstance(sd, dict) and sd.get('ID'):
+                                sd_id = sd['ID']
+                                sd_name = sd.get('Name') or all_devices.get(sd_id, f'Storage {sd_id}')
+                            elif isinstance(sd, int) and sd > 0:
+                                sd_id = sd
+                                sd_name = all_devices.get(sd_id, f'Storage {sd_id}')
+                            
+                            # Get job info from allocation
+                            alloc_job = alloc.get('AssignedTo', {}).get('Job')
+                            alloc_section = alloc.get('AssignedTo', {}).get('Section')
+                            alloc_cc = alloc.get('AssignedTo', {}).get('CostCenter')
+                            
+                            # Only include if there is received quantity in a storage location
+                            if qty_received > 0 and sd_id:
+                                found_items.append({
+                                    'catalogId': cat_id,
+                                    'partNo': part_no,
+                                    'description': description,
+                                    'quantity': qty_received,
+                                    'quantityOrdered': qty_total,
+                                    'storageId': sd_id,
+                                    'storageName': sd_name,
+                                    'poId': po_id,
+                                    'poOrderNo': po_no,
+                                    'jobId': alloc_job,
+                                    'sectionId': alloc_section,
+                                    'costCenterId': alloc_cc
+                                })
+                            elif qty_total > 0 and qty_received == 0:
+                                # Item ordered but not yet received
+                                found_items.append({
+                                    'catalogId': cat_id,
+                                    'partNo': part_no,
+                                    'description': description,
+                                    'quantity': 0,
+                                    'quantityOrdered': qty_total,
+                                    'storageId': sd_id,
+                                    'storageName': sd_name if sd_id else 'Awaiting Receipt',
+                                    'poId': po_id,
+                                    'poOrderNo': po_no,
+                                    'jobId': alloc_job,
+                                    'sectionId': alloc_section,
+                                    'costCenterId': alloc_cc,
+                                    'awaitingReceipt': True
+                                })
+                    else:
+                        print(f"Allocations failed for catalog {cat_id}: {alloc_resp.status_code}")
+                except Exception as e:
+                    print(f"Error getting allocations for catalog {cat_id}: {e}")
+        
         if search_type == 'po':
-            # Search by PO ID (users enter PO IDs, not OrderNo)
+            # Search by PO ID
             resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/?ID={search_value}')
             if resp.status_code != 200:
                 return jsonify({'error': 'Failed to search Simpro'}), 500
@@ -1862,24 +1953,10 @@ def stock_search():
                         if job_no:
                             job_info = lookup_job_customer(job_no)
                 
-                # Use /catalogs/ endpoint (not /items/)
-                cats_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/catalogs/')
-                if cats_resp.status_code == 200:
-                    for cat_item in cats_resp.json():
-                        cat = cat_item.get('Catalog', {})
-                        cat_id = cat.get('ID')
-                        if cat_id and cat_id not in catalog_items:
-                            catalog_items[cat_id] = {
-                                'catalogId': cat_id,
-                                'partNo': cat.get('PartNo', ''),
-                                'description': cat.get('Name', cat_item.get('Description', 'Unknown Item')),
-                                'poOrderNo': po_no
-                            }
-                else:
-                    print(f"Failed to get catalogs for PO {po_id}: {cats_resp.status_code}")
+                process_po(po_id, po_no)
         
         elif search_type == 'job':
-            # Search for job
+            # Search for job first
             resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/?search={search_value}')
             if resp.status_code != 200:
                 return jsonify({'error': 'Failed to search Simpro'}), 500
@@ -1891,107 +1968,36 @@ def stock_search():
             job_id = job['ID']
             job_info = lookup_job_customer(job_id)
             
-            # Find POs for this job
-            po_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/?AssignedTo.Job={job_id}')
-            if po_resp.status_code != 200:
-                # Fallback - get recent POs and filter
-                po_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/?Page=1&Pagesize=200')
-            
+            # Find all POs assigned to this job
+            po_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/?Page=1&Pagesize=100')
             if po_resp.status_code == 200:
                 for po in po_resp.json():
-                    # Check if this PO belongs to our job
-                    assigned = po.get('AssignedTo', {})
-                    if assigned.get('Job') == job_id or search_type != 'job':
-                        pass  # Include this PO
-                    
                     po_id = po['ID']
-                    
-                    # Verify this PO is for the right job
+                    # Check if this PO belongs to our job
                     full_po = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}')
                     if full_po.status_code == 200:
                         po_data = full_po.json()
                         po_job = po_data.get('AssignedTo', {}).get('Job')
-                        if po_job != job_id:
-                            continue
-                    
-                    po_no = str(po_id)
-                    po_list.append({'id': po_id, 'orderNo': po_no})
-                    
-                    cats_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/catalogs/')
-                    if cats_resp.status_code == 200:
-                        for cat_item in cats_resp.json():
-                            cat = cat_item.get('Catalog', {})
-                            cat_id = cat.get('ID')
-                            if cat_id and cat_id not in catalog_items:
-                                catalog_items[cat_id] = {
-                                    'catalogId': cat_id,
-                                    'partNo': cat.get('PartNo', ''),
-                                    'description': cat.get('Name', cat_item.get('Description', 'Unknown Item')),
-                                    'poOrderNo': po_no
-                                }
+                        if po_job == job_id:
+                            po_no = str(po_id)
+                            po_list.append({'id': po_id, 'orderNo': po_no})
+                            process_po(po_id, po_no)
         
-        if not catalog_items:
-            return jsonify({'error': 'No items found for this search'}), 404
+        # Sort: received items first (by storage), then awaiting receipt
+        found_items.sort(key=lambda x: (
+            1 if x.get('awaitingReceipt') else 0,
+            x.get('storageName', ''),
+            x.get('partNo', '')
+        ))
         
-        print(f"Found {len(catalog_items)} catalog items across {len(po_list)} POs")
-        
-        # Get storage device IDs from catalog allocations
-        device_ids = set()
-        device_names = {}
-        
-        for po in po_list:
-            for cat_id in catalog_items:
-                try:
-                    alloc_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po["id"]}/catalogs/{cat_id}/allocations/')
-                    if alloc_resp.status_code == 200:
-                        for alloc in alloc_resp.json():
-                            sd = alloc.get('StorageDevice', {})
-                            if isinstance(sd, dict) and sd.get('ID'):
-                                sd_id = sd['ID']
-                                device_ids.add(sd_id)
-                                if sd.get('Name'):
-                                    device_names[sd_id] = sd['Name']
-                except Exception as e:
-                    print(f"Error getting allocations for catalog {cat_id}: {e}")
-        
-        # Always check Stock Holding (ID: 3) as fallback
-        device_ids.add(3)
-        device_names.setdefault(3, 'Stock Holding')
-        
-        print(f"Checking {len(device_ids)} storage devices: {device_ids}")
-        
-        # Query those devices for current stock
-        target_ids = set(catalog_items.keys())
-        found_items = []
-        
-        for dev_id in device_ids:
-            try:
-                stock_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/storageDevices/{dev_id}/stock/')
-                if stock_resp.status_code == 200:
-                    for stock in stock_resp.json():
-                        cat = stock.get('Catalog', {})
-                        cat_id = cat.get('ID')
-                        qty = stock.get('Quantity', 0)
-                        if cat_id in target_ids and qty > 0:
-                            found_items.append({
-                                **catalog_items[cat_id],
-                                'quantity': qty,
-                                'storageId': dev_id,
-                                'storageName': device_names.get(dev_id, f'Storage {dev_id}')
-                            })
-            except Exception as e:
-                print(f"Error checking device {dev_id}: {e}")
-        
-        # Sort by storage name then part number
-        found_items.sort(key=lambda x: (x['storageName'], x.get('partNo', '')))
-        
-        print(f"Found {len(found_items)} items in storage")
+        print(f"Found {len(found_items)} item allocations across {len(po_list)} POs")
+        for item in found_items:
+            print(f"  {item['partNo']} x{item['quantity']}/{item['quantityOrdered']} @ {item['storageName']}")
         
         return jsonify({
             'job': job_info,
             'pos': po_list,
             'items': found_items,
-            'totalCatalogItems': len(catalog_items),
             'searchType': search_type,
             'searchValue': search_value
         })
