@@ -1225,6 +1225,7 @@ def allocate_items():
         receipt_allocations = {}  # catalog_id -> {storage_device_id, storage_name, quantity}
         catalog_items_received = {}  # catalog_id -> True/False (per-catalog ItemsReceived)
         catalog_receipt_id = {}  # catalog_id -> receipt_id (for PATCH ItemsReceived)
+        receipted_catalog_ids = set()  # Track which catalogs actually appear in a receipt
         po_is_receipted = False
         items_received_flag = False
         
@@ -1253,6 +1254,8 @@ def allocate_items():
                             # Map each catalog's current allocation, ItemsReceived status, and receipt ID
                             for cat in detail.get('Catalogs', []):
                                 cat_id = cat.get('Catalog', {}).get('ID')
+                                if cat_id:
+                                    receipted_catalog_ids.add(cat_id)
                                 catalog_items_received[cat_id] = receipt_items_received
                                 catalog_receipt_id[cat_id] = receipt_id
                                 for alloc in cat.get('Allocations', []):
@@ -1266,7 +1269,7 @@ def allocate_items():
                                     }
                 else:
                     print(f"No receipts found for PO {po_id} - truly not receipted")
-            print(f"Server-side receipt check: po_is_receipted={po_is_receipted}, ItemsReceived={items_received_flag}, allocations={receipt_allocations}")
+            print(f"Server-side receipt check: po_is_receipted={po_is_receipted}, ItemsReceived={items_received_flag}, receipted_catalogs={receipted_catalog_ids}, allocations={receipt_allocations}")
         except Exception as e:
             print(f"Receipt check error: {e}")
         
@@ -1296,8 +1299,11 @@ def allocate_items():
                     item['quantity'] = 1
                     print(f"Fixed quantity for catalog {catalog_id}: defaulting to 1 (no quantityOrdered available)")
             
-            # Server-side receipt detection (overrides front-end if we have data)
-            is_receipted = po_is_receipted or receipt_status == 'fully_receipted'
+            # Server-side receipt detection — per-ITEM, not per-PO
+            # A PO can be partially receipted (some items in receipt, some not)
+            # Only treat an item as receipted if THIS catalog appears in a receipt
+            item_in_receipt = catalog_id and (int(catalog_id) in receipted_catalog_ids)
+            is_receipted = item_in_receipt or receipt_status == 'fully_receipted'
             
             if is_receipted and catalog_id in receipt_allocations:
                 current_alloc = receipt_allocations[catalog_id]
@@ -1350,8 +1356,8 @@ def allocate_items():
                         item['source_storage_name'] = current_storage_name
                     post_receipt_items.append(item)
                     print(f"Catalog {catalog_id}: Receipted, ItemsReceived now set, using stock transfer from {current_storage_name} to {storage_device_id}")
-            elif is_receipted:
-                # Receipted but no allocation data found
+            elif is_receipted and item_in_receipt:
+                # Receipted AND this specific catalog is in a receipt, but no allocation data found
                 # CRITICAL: NEVER use pre-receipt PUT when receipt exists - it doubles cost centre entries!
                 # Always tick ItemsReceived (if needed) then stock transfer
                 if not items_received_flag:
@@ -1371,6 +1377,12 @@ def allocate_items():
                             print(f"⚠️ Failed to set ItemsReceived: {ir_err}")
                 post_receipt_items.append(item)
                 print(f"Catalog {catalog_id}: Receipted (no alloc data), routing to stock transfer")
+            elif is_receipted and not item_in_receipt:
+                # PO has receipts but THIS specific catalog item is NOT in any receipt
+                # This happens with partially-supplied POs (e.g. back-ordered items arriving later)
+                # Use pre-receipt allocation since this item has no stock yet
+                pre_receipt_items.append(item)
+                print(f"Catalog {catalog_id}: PO partially receipted but THIS item not in any receipt - using pre-receipt allocation")
             else:
                 pre_receipt_items.append(item)
                 print(f"Catalog {catalog_id}: Not yet receipted, using pre-receipt allocation")
