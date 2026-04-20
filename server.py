@@ -1994,10 +1994,17 @@ def stock_search():
         for item in found_items:
             print(f"  {item['partNo']} x{item['quantity']}/{item['quantityOrdered']} @ {item['storageName']}")
         
+        # Count items
+        received_items = [i for i in found_items if not i.get('awaitingReceipt')]
+        awaiting_items = [i for i in found_items if i.get('awaitingReceipt')]
+        
         return jsonify({
             'job': job_info,
             'pos': po_list,
             'items': found_items,
+            'receivedCount': len(received_items),
+            'awaitingCount': len(awaiting_items),
+            'totalCatalogItems': len(found_items),
             'searchType': search_type,
             'searchValue': search_value
         })
