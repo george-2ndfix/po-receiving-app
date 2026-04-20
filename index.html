@@ -143,6 +143,14 @@
                     </div>
                     <div class="option-arrow">→</div>
                 </button>
+                <button class="home-option" id="option-sop">
+                    <div class="option-icon">📖</div>
+                    <div class="option-content">
+                        <h3>SOP / Help</h3>
+                        <p>How to use this app</p>
+                    </div>
+                    <div class="option-arrow">→</div>
+                </button>
             </div>
             
             <div class="home-alerts" id="home-alerts">
@@ -1213,6 +1221,271 @@
         ⚠️
     </button>
     
+    
+    <!-- SOP / Help Screen -->
+    <div id="screen-sop" class="screen">
+        <header>
+            <button class="back-btn" data-screen="home">← Back</button>
+            <h1>📖 SOP / Help</h1>
+        </header>
+        <main>
+            <div class="sop-content">
+                <h2>2nd Fix Doors &amp; Hardware — PO Receiving App</h2>
+                <p class="sop-subtitle"><strong>Standard Operating Procedure (SOP)</strong><br>Version 2.0 | 21 April 2026</p>
+
+                <div class="sop-toc">
+                    <h3>Contents</h3>
+                    <ol>
+                        <li><a href="#sop-overview">Overview</a></li>
+                        <li><a href="#sop-login">Logging In</a></li>
+                        <li><a href="#sop-receiving">PO Receiving</a></li>
+                        <li><a href="#sop-damaged">Damaged Goods</a></li>
+                        <li><a href="#sop-backorders">Back Orders</a></li>
+                        <li><a href="#sop-allocation">Stock Allocation</a></li>
+                        <li><a href="#sop-labels">Label Printing</a></li>
+                        <li><a href="#sop-relocate">Relocate Stock</a></li>
+                        <li><a href="#sop-jobintel">Job Intel</a></li>
+                        <li><a href="#sop-faults">Fault Reporting</a></li>
+                        <li><a href="#sop-orders">Orders Email</a></li>
+                        <li><a href="#sop-cache">Clearing Cache</a></li>
+                        <li><a href="#sop-troubleshooting">Troubleshooting</a></li>
+                        <li><a href="#sop-quickref">Quick Reference</a></li>
+                    </ol>
+                </div>
+
+                <hr>
+
+                <section id="sop-overview">
+                    <h3>1. Overview</h3>
+                    <p>The <strong>PO Receiving App</strong> is a web-based tool built for 2nd Fix Doors &amp; Hardware to streamline receiving purchase orders, allocating stock, printing labels, reporting damage, relocating stock, and reporting faults. It connects directly to <strong>Simpro</strong> so all changes sync automatically.</p>
+                    <p><strong>What it replaces:</strong></p>
+                    <ul>
+                        <li>Manual PO receiving in Simpro</li>
+                        <li>Paper-based stock tracking</li>
+                        <li>Phone calls/texts to report faulty or damaged items</li>
+                        <li>Manual label writing</li>
+                        <li>Handwritten filing slips</li>
+                    </ul>
+                </section>
+
+                <hr>
+
+                <section id="sop-login">
+                    <h3>2. Logging In</h3>
+                    <ol>
+                        <li>Open browser → <strong>po-receiving-app.onrender.com</strong></li>
+                        <li>Enter your username (first name, lowercase) and password: <code>2ndFix5082</code></li>
+                        <li>Tap <strong>Login</strong></li>
+                    </ol>
+                    <table>
+                        <thead><tr><th>Person</th><th>Username</th></tr></thead>
+                        <tbody>
+                            <tr><td>George</td><td><code>george</code></td></tr>
+                            <tr><td>Jim</td><td><code>jim</code></td></tr>
+                            <tr><td>Tom</td><td><code>tom</code></td></tr>
+                            <tr><td>Tyrese</td><td><code>tyrese</code></td></tr>
+                            <tr><td>Princess</td><td><code>princess</code></td></tr>
+                        </tbody>
+                    </table>
+                    <p><strong>Tips:</strong> Bookmark the app on your home screen. You stay logged in between sessions. First load may take 10–15 seconds if the server was sleeping.</p>
+                </section>
+
+                <hr>
+
+                <section id="sop-receiving">
+                    <h3>3. Purchase Order Receiving</h3>
+                    <h4>Step 1: Select the PO</h4>
+                    <ol>
+                        <li>Tap <strong>Receive from PO</strong> on home screen</li>
+                        <li>You’ll see open POs from Simpro (PO number, supplier, item count)</li>
+                        <li>Tap the PO to receive</li>
+                    </ol>
+                    <h4>Step 2: Review Items</h4>
+                    <p>Each item shows: description, part number, qty ordered, qty already received, qty remaining.</p>
+                    <h4>Step 3: Receive Items</h4>
+                    <p><strong>Option A — Barcode Scanning (Recommended):</strong> Tap barcode icon → scan with camera → adjust qty → Confirm</p>
+                    <p><strong>Option B — Manual Entry:</strong> Find item → tap it → enter qty → Confirm</p>
+                    <h4>Step 4: Complete</h4>
+                    <p>PO status updates in Simpro automatically. Partial receipts keep the PO open.</p>
+                    <div class="sop-warning">⚠️ Double-check quantities before confirming — they sync to Simpro immediately!</div>
+                </section>
+
+                <hr>
+
+                <section id="sop-damaged">
+                    <h3>4. Damaged Goods Reporting</h3>
+                    <ol>
+                        <li>While receiving a PO, tap the red <strong>⚠️ Damaged</strong> button next to the item</li>
+                        <li>Take up to 5 photos of the damage</li>
+                        <li>Add notes describing the damage clearly</li>
+                        <li>Tap <strong>Submit</strong></li>
+                    </ol>
+                    <p><strong>What happens automatically:</strong></p>
+                    <ul>
+                        <li>✅ Emails the supplier with photos and damage details</li>
+                        <li>✅ Emails the customer about the damage and reorder</li>
+                        <li>✅ Updates PO status to “PO : Items Damaged”</li>
+                        <li>✅ Saves the report for tracking</li>
+                    </ul>
+                    <p><strong>Tip:</strong> Always include photos and be specific. Report immediately when you open the box.</p>
+                </section>
+
+                <hr>
+
+                <section id="sop-backorders">
+                    <h3>5. Back Orders</h3>
+                    <p>During PO receiving, mark items as <strong>Back Order</strong>. The app updates PO status to “PO : Back Order” and notifies the customer automatically.</p>
+                </section>
+
+                <hr>
+
+                <section id="sop-allocation">
+                    <h3>6. Stock Allocation &amp; Job Materials</h3>
+                    <h4>Step 1: Select items to allocate</h4>
+                    <p>After receiving, select items and tap <strong>“Allocate Selected →”</strong></p>
+                    <h4>Step 2: Review Job Materials (job orders)</h4>
+                    <p>For job orders, the Job Materials screen shows all materials for that job, where existing items are stored, and a progress bar. The app suggests putting new items in the same location.</p>
+                    <h4>Step 3: Choose storage location</h4>
+                    <p>Accept the suggestion or choose a different location → Confirm Allocation</p>
+                    <h4>What happens:</h4>
+                    <ul>
+                        <li>Stock allocated in Simpro to chosen location</li>
+                        <li>Delivery photos uploaded to the job with location in filename</li>
+                        <li>Labels generated ready to print</li>
+                    </ul>
+                    <p><strong>Tip:</strong> Always allocate immediately. Check Job Materials to avoid splitting a job across multiple boxes.</p>
+                </section>
+
+                <hr>
+
+                <section id="sop-labels">
+                    <h3>7. Label Printing</h3>
+                    <p><strong>Printer:</strong> Brother QL-810W | <strong>Labels:</strong> DK-2225 (38mm continuous)</p>
+                    <ol>
+                        <li>After allocating, tap <strong>Print Labels</strong></li>
+                        <li>PDF opens with item labels + filing label (last page, job orders only)</li>
+                        <li>Print at <strong>Actual Size</strong> (never “Fit to Page”), portrait orientation</li>
+                        <li>Stick filing label on paper PO/pack slip → file in job bag</li>
+                    </ol>
+                </section>
+
+                <hr>
+
+                <section id="sop-relocate">
+                    <h3>8. Relocate Stock</h3>
+                    <p>Move items between storage locations after receiving.</p>
+                    <ol>
+                        <li>Tap <strong>Relocate Stock</strong> on home screen</li>
+                        <li>Search by Job or PO number</li>
+                        <li>Tick items to move (greyed out ⏳ items can’t be moved yet)</li>
+                        <li>Choose new location → Confirm Move</li>
+                    </ol>
+                    <p>The app handles the 3-step Simpro process automatically with rollback on failure.</p>
+                </section>
+
+                <hr>
+
+                <section id="sop-jobintel">
+                    <h3>9. Job Intel</h3>
+                    <p>Quickly look up job info without opening Simpro.</p>
+                    <ol>
+                        <li>Tap <strong>Job Intel</strong> or enter a job number</li>
+                        <li>See: job name, site address, contact details, status, notes</li>
+                    </ol>
+                    <p>Use when you’re unsure which job stock belongs to, need a site contact number, or checking before dispatch.</p>
+                </section>
+
+                <hr>
+
+                <section id="sop-faults">
+                    <h3>10. Fault Reporting</h3>
+                    <ol>
+                        <li>Tap <strong>Report Fault</strong> from the menu</li>
+                        <li>Name and email auto-filled from your login</li>
+                        <li>Enter: item description, PO/job number, fault description</li>
+                        <li>Add up to 3 photos (📷 Camera or 🖼️ Gallery)</li>
+                        <li>Tap <strong>Submit</strong></li>
+                    </ol>
+                    <p>An automatic investigation is triggered. George is notified. No manual follow-up needed.</p>
+                </section>
+
+                <hr>
+
+                <section id="sop-orders">
+                    <h3>11. Orders Email (orders@2ndfix.com.au)</h3>
+                    <p>Shared mailbox for all PO/supplier communications. All damage reports and back order notifications go from this address.</p>
+                    <p><strong>Access in Outlook:</strong> Profile icon → Open another mailbox → type <code>orders@2ndfix.com.au</code></p>
+                    <ul>
+                        <li>✅ Reply to supplier/customer emails from orders@ when needed</li>
+                        <li>✅ Check if someone already replied first</li>
+                        <li>❌ Don’t use personal email for PO correspondence</li>
+                        <li>❌ Don’t delete emails from the shared mailbox</li>
+                    </ul>
+                </section>
+
+                <hr>
+
+                <section id="sop-cache">
+                    <h3>12. Clearing Your Cache</h3>
+                    <h4>iPhone (Safari)</h4>
+                    <p>Settings → Safari → Clear History and Website Data → Confirm → Reopen app</p>
+                    <h4>iPhone (Chrome)</h4>
+                    <p>Chrome → … → Settings → Privacy → Clear Browsing Data → Cached Images and Files → Clear</p>
+                    <h4>Android (Chrome)</h4>
+                    <p>Chrome → ⋮ → Settings → Privacy → Clear browsing data → Cached images and files → Clear</p>
+                    <h4>Quickest Method 🏆</h4>
+                    <p>Delete the app from home screen → Reopen in browser → Add to Home Screen again</p>
+                </section>
+
+                <hr>
+
+                <section id="sop-troubleshooting">
+                    <h3>13. Troubleshooting</h3>
+                    <table>
+                        <thead><tr><th>Problem</th><th>Solution</th></tr></thead>
+                        <tbody>
+                            <tr><td>App slow to load</td><td>Server sleeps after 15min inactivity. Wait 10–15 seconds.</td></tr>
+                            <tr><td>Can’t find PO</td><td>Only open POs appear. Check PO number in Simpro.</td></tr>
+                            <tr><td>Barcode doesn’t match</td><td>Use manual entry. Let George know to update catalogue.</td></tr>
+                            <tr><td>Can’t log in</td><td>Username = lowercase first name. Password = <code>2ndFix5082</code>. Try clearing cache.</td></tr>
+                            <tr><td>Labels printing wrong</td><td>Use <strong>Actual Size</strong>. Check QL-810W is on Wi-Fi. Check DK-2225 roll.</td></tr>
+                            <tr><td>Wrong quantity received</td><td>Contact George immediately for manual correction in Simpro.</td></tr>
+                            <tr><td>App shows error</td><td>Screenshot it. Use Report Fault or send to George.</td></tr>
+                            <tr><td>Can’t move stock</td><td>Items must be received first. ⏳ items are still awaiting receipt.</td></tr>
+                        </tbody>
+                    </table>
+                </section>
+
+                <hr>
+
+                <section id="sop-quickref">
+                    <h3>14. Quick Reference</h3>
+                    <table>
+                        <thead><tr><th>Item</th><th>Detail</th></tr></thead>
+                        <tbody>
+                            <tr><td><strong>App URL</strong></td><td>po-receiving-app.onrender.com</td></tr>
+                            <tr><td><strong>Password</strong></td><td><code>2ndFix5082</code></td></tr>
+                            <tr><td><strong>Orders Email</strong></td><td>orders@2ndfix.com.au</td></tr>
+                            <tr><td><strong>Label Printer</strong></td><td>Brother QL-810W (DK-2225)</td></tr>
+                            <tr><td><strong>Print Setting</strong></td><td>Always Actual Size, portrait</td></tr>
+                        </tbody>
+                    </table>
+                    <h4>Daily Workflow</h4>
+                    <div class="sop-workflow">
+                        <p>1. Stock arrives → 2. Open PO App → Receive from PO → 3. Scan/enter items → 4. Report damaged items (⚠️ button) → 5. Allocate stock → Choose storage → 6. Print labels → Stick on items → 7. Filing label on paper PO → File in job bag → 8. Put stock away → 9. Report any faults</p>
+                    </div>
+                    <h4>Emergency Contacts</h4>
+                    <ul>
+                        <li><strong>George:</strong> george@2ndfix.com.au</li>
+                        <li><strong>Orders:</strong> orders@2ndfix.com.au</li>
+                    </ul>
+                </section>
+
+                <p class="sop-footer"><em>This SOP is maintained by Tasklet AI on behalf of 2nd Fix Doors &amp; Hardware. Last updated 21 April 2026.</em></p>
+            </div>
+        </main>
+    </div>
+
     <!-- Report Issue Modal -->
     <div id="report-issue-modal" class="report-modal-overlay hidden">
         <div class="report-modal">
