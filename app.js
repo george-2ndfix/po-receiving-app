@@ -47,6 +47,22 @@ const app = {
     init() {
         this.bindEvents();
         this.checkAuthStatus();
+        
+        // Prevent iOS keyboard bounce on login inputs
+        document.querySelectorAll('#screen-login input').forEach(input => {
+            input.addEventListener('focus', () => {
+                setTimeout(() => window.scrollTo(0, 0), 50);
+                setTimeout(() => window.scrollTo(0, 0), 150);
+                setTimeout(() => window.scrollTo(0, 0), 300);
+            });
+        });
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener('resize', () => {
+                if (document.getElementById('screen-login').classList.contains('active')) {
+                    window.scrollTo(0, 0);
+                }
+            });
+        }
     },
     
     bindEvents() {
@@ -138,20 +154,48 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
     // Authentication
     // ============================================
     async checkAuthStatus() {
-        try {
-            const response = await fetch('/api/auth/status');
-            const data = await response.json();
-            
-            if (data.authenticated) {
-                this.currentStaff = data.staff;
-                this.showHomeScreen();
-            } else {
-                this.showScreen('login');
+        // Try server auth check with retries
+        for (let attempt = 0; attempt < 3; attempt++) {
+            try {
+                const response = await fetch('/api/auth/status');
+                const data = await response.json();
+
+                if (data.authenticated) {
+                    this.currentStaff = data.staff;
+                    localStorage.setItem('po_auth_cache', JSON.stringify({
+                        staff: data.staff,
+                        timestamp: Date.now()
+                    }));
+                    this.showHomeScreen();
+                    return;
+                } else {
+                    localStorage.removeItem('po_auth_cache');
+                    this.showScreen('login');
+                    return;
+                }
+            } catch (error) {
+                console.error('Auth check attempt ' + (attempt + 1) + ' failed:', error);
+                if (attempt < 2) {
+                    await new Promise(r => setTimeout(r, (attempt + 1) * 1500));
+                }
             }
-        } catch (error) {
-            console.error('Auth check failed:', error);
-            this.showScreen('login');
         }
+
+        // All retries failed - server is down. Check localStorage cache
+        const cached = localStorage.getItem('po_auth_cache');
+        if (cached) {
+            try {
+                const { staff, timestamp } = JSON.parse(cached);
+                if (Date.now() - timestamp < 24 * 60 * 60 * 1000) {
+                    console.log('Using cached auth - server unreachable');
+                    this.currentStaff = staff;
+                    this.showHomeScreen();
+                    return;
+                }
+            } catch(e) {}
+        }
+
+        this.showScreen('login');
     },
     
     async login() {
