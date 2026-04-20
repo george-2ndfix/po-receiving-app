@@ -2910,25 +2910,60 @@ def generate_label_pdf():
             l1 = str(label.get('line1', ''))
             l2 = str(label.get('line2', ''))
             l3 = str(label.get('line3', ''))
+            label_type = label.get('type', 'item')
             
-            size1 = auto_fit_font(l1, "Helvetica-Bold", 18, avail_w)
-            size2 = auto_fit_font(l2, "Helvetica", 14, avail_w)
-            size3 = auto_fit_font(l3, "Helvetica", 12, avail_w)
-            
-            c.saveState()
-            c.rotate(90)
-            
-            line_spacing = avail_h / 3
-            y_base = -page_w + margin
-            
-            c.setFont("Helvetica-Bold", size1)
-            c.drawString(margin, y_base + 2*line_spacing + 2*mm, l1)
-            c.setFont("Helvetica", size2)
-            c.drawString(margin, y_base + line_spacing + 1*mm, l2)
-            c.setFont("Helvetica", size3)
-            c.drawString(margin, y_base + 1*mm, l3)
-            
-            c.restoreState()
+            if label_type == 'filing':
+                # Compact filing label - shorter, all bold, for sticking on paperwork
+                filing_h = 80*mm
+                c.setPageSize((page_w, filing_h))
+                filing_avail_w = filing_h - 2*margin
+                filing_avail_h = page_w - 2*margin
+                
+                size1 = auto_fit_font(l1, "Helvetica-Bold", 24, filing_avail_w)
+                size2 = auto_fit_font(l2, "Helvetica-Bold", 20, filing_avail_w)
+                size3 = auto_fit_font(l3, "Helvetica-Bold", 18, filing_avail_w)
+                
+                c.saveState()
+                c.rotate(90)
+                
+                line_spacing = filing_avail_h / 3
+                y_base = -page_w + margin
+                
+                # Draw a thin border to make it visually distinct
+                c.setStrokeColorRGB(0.3, 0.3, 0.3)
+                c.setLineWidth(0.5)
+                c.rect(margin, y_base, filing_avail_w, filing_avail_h)
+                
+                c.setFont("Helvetica-Bold", size1)
+                c.drawString(margin + 2*mm, y_base + 2*line_spacing + 2*mm, l1)
+                c.setFont("Helvetica-Bold", size2)
+                c.drawString(margin + 2*mm, y_base + line_spacing + 1*mm, l2)
+                c.setFont("Helvetica-Bold", size3)
+                c.drawString(margin + 2*mm, y_base + 1*mm, l3)
+                
+                c.restoreState()
+                # Reset page size for any subsequent labels
+                c.setPageSize((page_w, page_h))
+            else:
+                # Standard item label
+                size1 = auto_fit_font(l1, "Helvetica-Bold", 18, avail_w)
+                size2 = auto_fit_font(l2, "Helvetica", 14, avail_w)
+                size3 = auto_fit_font(l3, "Helvetica", 12, avail_w)
+                
+                c.saveState()
+                c.rotate(90)
+                
+                line_spacing = avail_h / 3
+                y_base = -page_w + margin
+                
+                c.setFont("Helvetica-Bold", size1)
+                c.drawString(margin, y_base + 2*line_spacing + 2*mm, l1)
+                c.setFont("Helvetica", size2)
+                c.drawString(margin, y_base + line_spacing + 1*mm, l2)
+                c.setFont("Helvetica", size3)
+                c.drawString(margin, y_base + 1*mm, l3)
+                
+                c.restoreState()
         
         c.save()
         buf.seek(0)
