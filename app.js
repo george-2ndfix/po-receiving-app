@@ -2298,11 +2298,20 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                 let totalFailed = 0;
                 let lastData = null;
                 const groupList = Object.values(groups);
+                const filteredGroups = groupList.filter(g => String(g.sourceId) !== String(this.relocateDestId));
+                const skippedCount = groupList.reduce((sum, g) => 
+                    String(g.sourceId) === String(this.relocateDestId) ? sum + g.items.length : sum, 0);
                 
-                for (let i = 0; i < groupList.length; i++) {
-                    const group = groupList[i];
+                if (filteredGroups.length === 0) {
+                    alert('All selected items are already at that destination.');
+                    this.showScreen('relocate-dest');
+                    return;
+                }
+                
+                for (let i = 0; i < filteredGroups.length; i++) {
+                    const group = filteredGroups[i];
                     document.getElementById('processing-detail').textContent = 
-                        `Moving from ${group.sourceName} (${i + 1}/${groupList.length})`;
+                        `Moving from ${group.sourceName} (${i + 1}/${filteredGroups.length})`;
                     
                     const response = await fetch('/api/stock-move', {
                         method: 'POST',
@@ -2332,15 +2341,16 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                 
                 if (totalSuccess > 0) {
                     // Build multi-source success
-                    const sourceNames = groupList.map(g => g.sourceName).join(', ');
+                    const sourceNames = filteredGroups.map(g => g.sourceName).join(', ');
                     this.relocateSourceName = sourceNames;
                     this.showRelocateSuccess({
                         success: true,
                         successCount: totalSuccess,
-                        failedCount: totalFailed
+                        failedCount: totalFailed,
+                        skippedCount: skippedCount
                     });
                 } else {
-                    alert('Relocation failed');
+                    alert('Relocation failed - no items could be moved. Items may have already been moved or are no longer at the expected location.');
                     this.showScreen('relocate-dest');
                 }
             } else {
