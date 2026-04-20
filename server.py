@@ -719,6 +719,11 @@ def update_staff(staff_id):
         updates.append('active = ?')
         params.append(1 if data['active'] else 0)
     
+    if 'email' in data:
+        email_val = data['email'].strip() if data['email'] else None
+        updates.append('email = ?')
+        params.append(email_val)
+    
     if updates:
         updates.append('updated_at = datetime("now")')
         params.append(staff_id)
