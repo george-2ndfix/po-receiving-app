@@ -48,19 +48,26 @@ const app = {
         this.bindEvents();
         this.checkAuthStatus();
         
-        // Prevent iOS keyboard bounce on login inputs
-        document.querySelectorAll('#screen-login input').forEach(input => {
-            input.addEventListener('focus', () => {
-                setTimeout(() => window.scrollTo(0, 0), 50);
-                setTimeout(() => window.scrollTo(0, 0), 150);
-                setTimeout(() => window.scrollTo(0, 0), 300);
-            });
-        });
+        // Nuclear iOS bounce prevention on login screen
+        const loginScreen = document.getElementById('screen-login');
+        loginScreen.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+        }, { passive: false });
+        
+        // Also prevent scroll on window when login is active
+        document.addEventListener('touchmove', (e) => {
+            if (loginScreen.classList.contains('active')) {
+                e.preventDefault();
+            }
+        }, { passive: false });
+        
+        // Keep window at 0,0 whenever login screen is shown
         if (window.visualViewport) {
             window.visualViewport.addEventListener('resize', () => {
-                if (document.getElementById('screen-login').classList.contains('active')) {
-                    window.scrollTo(0, 0);
-                }
+                window.scrollTo(0, 0);
+            });
+            window.visualViewport.addEventListener('scroll', () => {
+                window.scrollTo(0, 0);
             });
         }
     },
