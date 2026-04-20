@@ -1281,7 +1281,10 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         
         // Label count
         const totalLabels = this.selectedItems.reduce((sum, item) => sum + item.quantity, 0);
-        document.getElementById('label-count').textContent = `${totalLabels} labels ready to print`;
+        const hasJobForLabels = this.currentPO?.jobNumber && this.currentPO.jobNumber !== 'N/A' && this.currentPO.jobNumber !== 'Stock';
+        document.getElementById('label-count').textContent = hasJobForLabels 
+            ? `${totalLabels} item labels + 1 filing label`
+            : `${totalLabels} labels ready to print`;
         
         // Show picking slip button (always available after allocation)
         const pickSlipSection = document.getElementById('picking-slip-section');
@@ -1797,6 +1800,19 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             for (let i = 0; i < qty; i++) {
                 labels.push({ line1, line2, line3 });
             }
+        }
+        
+        // Add filing label at the end (for job orders only, not stock)
+        const filingJobNum = items.length > 0 ? (items[0].jobNumber || '') : '';
+        if (filingJobNum && filingJobNum !== 'N/A' && filingJobNum !== 'Stock') {
+            const filingCustomer = items[0].customerName || '';
+            const filingLocation = items[0].storageLocation || items[0].storageName || '';
+            labels.push({
+                type: 'filing',
+                line1: 'FILE: Job ' + filingJobNum,
+                line2: filingCustomer,
+                line3: filingLocation ? ('>> ' + filingLocation) : ''
+            });
         }
         
         if (labels.length === 0) {
