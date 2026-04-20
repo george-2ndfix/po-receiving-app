@@ -1950,31 +1950,14 @@ def stock_search():
                     true_qty = cc_qty
                     awaiting = False
                 elif po_qty_received > 0:
-                    # PO says received but CC says 0 assigned - item may have been consumed/moved
-                    # Fall through to storage device check like the else branch
-                    found_in_storage = False
-                    check_device_id = cc_data.get('storageId') or po_storage.get('ID')
-                    if check_device_id:
-                        sd_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/storageDevices/{check_device_id}/stock/?Catalog.ID={catalog_id}')
-                        if sd_resp.status_code == 200:
-                            sd_items = sd_resp.json()
-                            if sd_items:
-                                found_in_storage = True
-                                sd_item = sd_items[0]
-                                sd_qty = sd_item.get('InStock', sd_item.get('Quantity', 1))
-                                if isinstance(sd_qty, dict):
-                                    sd_qty = sd_qty.get('InStock', 1)
-                                true_storage_id = check_device_id
-                                true_storage_name = cc_data.get('storageName') or po_storage.get('Name', 'Unknown')
-                                true_qty = sd_qty if isinstance(sd_qty, (int, float)) else 1
-                                awaiting = False
-                                print(f"  {part_no}: Found in storage device {true_storage_name} via PO received check")
-                    
-                    if not found_in_storage:
-                        true_storage_id = po_storage.get('ID')
-                        true_storage_name = po_storage.get('Name', 'Unknown')
-                        true_qty = 0
-                        awaiting = True
+                    # PO says received but CC shows 0 assigned
+                    # CC assigned qty is authoritative - if 0, item has been consumed/moved/not actually there
+                    # Mark as awaiting receipt since we cannot confirm physical location
+                    true_storage_id = po_storage.get('ID')
+                    true_storage_name = po_storage.get('Name', 'Unknown')
+                    true_qty = 0
+                    awaiting = True
+                    print(f"  {part_no}: PO received but CC assigned=0, marking as awaiting")
                 else:
                     # PO says 0 received AND CC says 0 assigned
                     # Check storage device stock as fallback (item may have been received outside normal flow)
