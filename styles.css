@@ -28,12 +28,21 @@
     --gray-900: #111827;
 }
 
+html {
+    overflow: hidden;
+    height: 100%;
+    overscroll-behavior: none;
+}
+
 body {
     overscroll-behavior: none;
     touch-action: manipulation;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
     background: var(--gray-100);
-    min-height: 100%;
+    height: 100%;
+    overflow: hidden;
+    position: fixed;
+    width: 100%;
     color: var(--gray-800);
     font-size: 16px;
     line-height: 1.5;
@@ -2667,4 +2676,13 @@ footer {
 #screen-splash .spinner {
     width: 32px;
     height: 32px;
+}
+
+/* Login screen - no scrolling at all */
+#screen-login {
+    overflow: hidden !important;
+}
+#screen-login main {
+    overflow: hidden;
+    height: 100dvh;
 }
