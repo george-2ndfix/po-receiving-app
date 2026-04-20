@@ -1952,7 +1952,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             if (data.job) {
                 banner.innerHTML = '<div class="job-title">Job ' + (data.job.jobNumber || '') + '</div>' +
                     '<div class="job-detail">' + (data.job.customerName || '') + '</div>' +
-                    '<div class="job-detail">' + data.pos.length + ' PO(s) | ' + data.items.length + ' items in storage | ' + data.totalCatalogItems + ' total on order</div>';
+                    '<div class="job-detail">' + data.pos.length + ' PO(s) | ' + (data.receivedCount || 0) + ' received | ' + (data.awaitingCount || 0) + ' awaiting receipt</div>';
                 banner.classList.remove('hidden');
             } else {
                 banner.classList.add('hidden');
@@ -1991,16 +1991,21 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                     '</div>';
                 
                 group.items.forEach(item => {
-                    html += '<div class="item-card" data-index="' + item.globalIndex + '">' +
-                        '<label class="item-checkbox">' +
-                        '<input type="checkbox" onchange="app.toggleSearchItem(' + item.globalIndex + ')">' +
-                        '<span class="checkmark"></span>' +
-                        '</label>' +
-                        '<div class="item-details">' +
+                    const isAwaiting = item.awaitingReceipt;
+                    html += '<div class="item-card' + (isAwaiting ? ' awaiting-item' : '') + '" data-index="' + item.globalIndex + '">';
+                    if (!isAwaiting) {
+                        html += '<label class="item-checkbox">' +
+                            '<input type="checkbox" onchange="app.toggleSearchItem(' + item.globalIndex + ')">' +
+                            '<span class="checkmark"></span>' +
+                            '</label>';
+                    } else {
+                        html += '<div class="awaiting-badge">\u23f3</div>';
+                    }
+                    html += '<div class="item-details">' +
                         '<div class="item-name">' + (item.description || 'Unknown Item') + '</div>' +
                         '<div class="item-meta">' +
                         (item.partNo ? '<span class="item-part">' + item.partNo + '</span>' : '') +
-                        '<span class="item-qty">Qty: ' + item.quantity + '</span>' +
+                        '<span class="item-qty">' + (isAwaiting ? 'Ordered: ' + item.quantityOrdered + ' (not received)' : 'Qty: ' + item.quantity) + '</span>' +
                         (item.poOrderNo ? '<span class="item-job">PO: ' + item.poOrderNo + '</span>' : '') +
                         '</div></div></div>';
                 });
