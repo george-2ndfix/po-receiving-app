@@ -38,6 +38,9 @@ const app = {
     relocateSelectedItems: [],
     relocateDestId: null,
     relocateDestName: null,
+    relocateMode: 'location',
+    relocateSearchResults: null,
+    relocateMultiSource: false,
     suggestedStorageId: null,
     suggestedStorageName: null,
     
@@ -1878,8 +1881,222 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         }
     },
     
+
     // ============================================
-    // Relocate Stock
+    // Move Stock - Search by Job/PO
+    // ============================================
+    setRelocateMode(mode) {
+        this.relocateMode = mode;
+        
+        // Toggle active button
+        document.getElementById('relocate-mode-location').classList.toggle('active', mode === 'location');
+        document.getElementById('relocate-mode-search').classList.toggle('active', mode === 'search');
+        
+        // Show/hide sections
+        const locationMode = document.getElementById('relocate-location-mode');
+        const searchMode = document.getElementById('relocate-search-mode');
+        
+        if (mode === 'location') {
+            locationMode.classList.remove('hidden');
+            searchMode.classList.add('hidden');
+            document.getElementById('load-source-items-btn').style.display = '';
+        } else {
+            locationMode.classList.add('hidden');
+            searchMode.classList.remove('hidden');
+            // In search mode, the footer button text changes
+            const btn = document.getElementById('load-source-items-btn');
+            btn.style.display = 'none';
+        }
+    },
+    
+    updateSearchPlaceholder() {
+        const searchType = document.querySelector('input[name="relocate-search-type"]:checked').value;
+        const input = document.getElementById('relocate-search-input');
+        input.placeholder = searchType === 'po' ? 'Enter PO number...' : 'Enter job number...';
+    },
+    
+    async searchStockByJobPO() {
+        const searchType = document.querySelector('input[name="relocate-search-type"]:checked').value;
+        const searchValue = document.getElementById('relocate-search-input').value.trim();
+        
+        if (!searchValue) {
+            this.showStatus('relocate-search-status', 'Please enter a number', 'error');
+            return;
+        }
+        
+        this.showStatus('relocate-search-status', 'Searching storage locations...', 'loading');
+        document.getElementById('relocate-search-results').classList.add('hidden');
+        document.getElementById('relocate-search-btn').disabled = true;
+        
+        try {
+            const response = await fetch('/api/stock-search', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ searchType, searchValue })
+            });
+            
+            const data = await response.json();
+            
+            if (data.error) {
+                this.showStatus('relocate-search-status', data.error, 'error');
+                document.getElementById('relocate-search-btn').disabled = false;
+                return;
+            }
+            
+            this.relocateSearchResults = data;
+            this.relocateMultiSource = true;
+            this.relocateSelectedItems = [];
+            
+            // Show job info banner
+            const banner = document.getElementById('relocate-search-job-info');
+            if (data.job) {
+                banner.innerHTML = '<div class="job-title">Job ' + (data.job.jobNumber || '') + '</div>' +
+                    '<div class="job-detail">' + (data.job.customerName || '') + '</div>' +
+                    '<div class="job-detail">' + data.pos.length + ' PO(s) | ' + data.items.length + ' items in storage | ' + data.totalCatalogItems + ' total on order</div>';
+                banner.classList.remove('hidden');
+            } else {
+                banner.classList.add('hidden');
+            }
+            
+            if (data.items.length === 0) {
+                this.showStatus('relocate-search-status', 'No items found in storage. Items may not be receipted yet or may have been dispatched.', 'error');
+                document.getElementById('relocate-search-btn').disabled = false;
+                return;
+            }
+            
+            // Group items by storage location
+            const groups = {};
+            data.items.forEach((item, idx) => {
+                const key = item.storageId;
+                if (!groups[key]) {
+                    groups[key] = {
+                        storageId: item.storageId,
+                        storageName: item.storageName,
+                        items: []
+                    };
+                }
+                groups[key].items.push({ ...item, globalIndex: idx });
+            });
+            
+            // Render grouped items
+            const listEl = document.getElementById('relocate-search-items-list');
+            let html = '';
+            
+            Object.values(groups).forEach(group => {
+                html += '<div class="location-group" data-storage-id="' + group.storageId + '">';
+                html += '<div class="location-group-header">' +
+                    '<span class="location-icon">📍</span>' +
+                    '<span class="location-name">' + group.storageName + '</span>' +
+                    '<span class="location-count">' + group.items.length + ' item' + (group.items.length > 1 ? 's' : '') + '</span>' +
+                    '</div>';
+                
+                group.items.forEach(item => {
+                    html += '<div class="item-card" data-index="' + item.globalIndex + '">' +
+                        '<label class="item-checkbox">' +
+                        '<input type="checkbox" onchange="app.toggleSearchItem(' + item.globalIndex + ')">' +
+                        '<span class="checkmark"></span>' +
+                        '</label>' +
+                        '<div class="item-details">' +
+                        '<div class="item-name">' + (item.description || 'Unknown Item') + '</div>' +
+                        '<div class="item-meta">' +
+                        (item.partNo ? '<span class="item-part">' + item.partNo + '</span>' : '') +
+                        '<span class="item-qty">Qty: ' + item.quantity + '</span>' +
+                        (item.poOrderNo ? '<span class="item-job">PO: ' + item.poOrderNo + '</span>' : '') +
+                        '</div></div></div>';
+                });
+                
+                html += '</div>';
+            });
+            
+            listEl.innerHTML = html;
+            
+            // Hide status, show results
+            document.getElementById('relocate-search-status').classList.add('hidden');
+            document.getElementById('relocate-search-results').classList.remove('hidden');
+            this.updateSearchSelectionCount();
+            
+        } catch (error) {
+            console.error('Stock search error:', error);
+            this.showStatus('relocate-search-status', 'Search failed: ' + error.message, 'error');
+        }
+        
+        document.getElementById('relocate-search-btn').disabled = false;
+    },
+    
+    toggleSearchItem(globalIndex) {
+        const items = this.relocateSearchResults.items;
+        const item = items[globalIndex];
+        const idx = this.relocateSelectedItems.findIndex(i => i.globalIndex === globalIndex);
+        
+        if (idx >= 0) {
+            this.relocateSelectedItems.splice(idx, 1);
+        } else {
+            this.relocateSelectedItems.push({
+                globalIndex,
+                catalogId: item.catalogId,
+                partNo: item.partNo,
+                description: item.description,
+                quantity: item.quantity,
+                storageId: item.storageId,
+                storageName: item.storageName,
+                poOrderNo: item.poOrderNo
+            });
+        }
+        
+        this.updateSearchSelectionCount();
+    },
+    
+    updateSearchSelectionCount() {
+        const count = this.relocateSelectedItems.length;
+        const total = this.relocateSearchResults ? this.relocateSearchResults.items.length : 0;
+        document.getElementById('relocate-search-selection-count').textContent = 
+            count + ' of ' + total + ' items selected';
+        
+        // Show/enable a "Move Selected" button in the footer
+        let moveBtn = document.getElementById('search-move-btn');
+        if (!moveBtn) {
+            const footer = document.querySelector('#screen-relocate-source footer');
+            moveBtn = document.createElement('button');
+            moveBtn.id = 'search-move-btn';
+            moveBtn.className = 'btn btn-primary btn-large';
+            moveBtn.textContent = 'Move Selected \u2192';
+            moveBtn.onclick = () => this.showSearchDestScreen();
+            footer.appendChild(moveBtn);
+        }
+        moveBtn.style.display = count > 0 ? '' : 'none';
+        moveBtn.textContent = 'Move ' + count + ' Item' + (count !== 1 ? 's' : '') + ' \u2192';
+    },
+    
+    showSearchDestScreen() {
+        if (this.relocateSelectedItems.length === 0) return;
+        
+        // Count unique sources
+        const sources = {};
+        this.relocateSelectedItems.forEach(item => {
+            sources[item.storageId] = item.storageName;
+        });
+        const sourceCount = Object.keys(sources).length;
+        const sourceNames = Object.values(sources).join(', ');
+        
+        document.getElementById('relocate-dest-item-count').textContent = this.relocateSelectedItems.length;
+        const fromInfo = document.getElementById('relocate-from-info');
+        if (fromInfo) {
+            if (sourceCount === 1) {
+                fromInfo.innerHTML = 'from <strong id="relocate-from-name">' + sourceNames + '</strong>';
+            } else {
+                fromInfo.innerHTML = 'from <strong id="relocate-from-name">' + sourceCount + ' locations</strong>';
+            }
+        }
+        
+        document.getElementById('relocate-dest-dropdown').value = '';
+        document.getElementById('execute-relocate-btn').disabled = true;
+        document.getElementById('relocate-dest-warning').classList.add('hidden');
+        
+        this.showScreen('relocate-dest');
+    },
+
+    // ============================================
+    // Relocate Stock - By Location
     // ============================================
     selectRelocateSource(event) {
         const select = event.target;
@@ -2016,7 +2233,10 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             const destId = parseInt(select.value);
             
             // Check if same as source
-            if (destId === this.relocateSourceId) {
+            const sourceIds = this.relocateMultiSource 
+                ? [...new Set(this.relocateSelectedItems.map(i => i.storageId))]
+                : [this.relocateSourceId];
+            if (sourceIds.includes(destId) && sourceIds.length === 1) {
                 document.getElementById('relocate-dest-warning').classList.remove('hidden');
                 document.getElementById('execute-relocate-btn').disabled = true;
                 return;
@@ -2044,34 +2264,101 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         document.getElementById('processing-detail').textContent = `Moving to ${this.relocateDestName}`;
         
         try {
-            const response = await fetch('/api/relocate', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    sourceId: this.relocateSourceId,
-                    sourceName: this.relocateSourceName,
-                    destId: this.relocateDestId,
-                    destName: this.relocateDestName,
-                    items: this.relocateSelectedItems.map(item => ({
-                        stockId: item.stockId,
+            if (this.relocateMultiSource) {
+                // Group items by source storage
+                const groups = {};
+                this.relocateSelectedItems.forEach(item => {
+                    const key = item.storageId;
+                    if (!groups[key]) {
+                        groups[key] = {
+                            sourceId: item.storageId,
+                            sourceName: item.storageName,
+                            items: []
+                        };
+                    }
+                    groups[key].items.push({
                         catalogId: item.catalogId,
                         quantity: item.quantity,
                         partNo: item.partNo || '',
-                        description: item.description || item.name,
-                        jobId: item.jobId
-                    }))
-                })
-            });
-            
-            const data = await response.json();
-            
-            if (data.success) {
-                this.showRelocateSuccess(data);
+                        description: item.description || ''
+                    });
+                });
+                
+                let totalSuccess = 0;
+                let totalFailed = 0;
+                let lastData = null;
+                const groupList = Object.values(groups);
+                
+                for (let i = 0; i < groupList.length; i++) {
+                    const group = groupList[i];
+                    document.getElementById('processing-detail').textContent = 
+                        `Moving from ${group.sourceName} (${i + 1}/${groupList.length})`;
+                    
+                    const response = await fetch('/api/relocate', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            sourceId: group.sourceId,
+                            sourceName: group.sourceName,
+                            destId: this.relocateDestId,
+                            destName: this.relocateDestName,
+                            items: group.items
+                        })
+                    });
+                    
+                    const data = await response.json();
+                    lastData = data;
+                    
+                    if (data.success) {
+                        totalSuccess += data.successCount || group.items.length;
+                    } else {
+                        totalFailed += group.items.length;
+                    }
+                }
+                
+                if (totalSuccess > 0) {
+                    // Build multi-source success
+                    const sourceNames = groupList.map(g => g.sourceName).join(', ');
+                    this.relocateSourceName = sourceNames;
+                    this.showRelocateSuccess({
+                        success: true,
+                        successCount: totalSuccess,
+                        failedCount: totalFailed
+                    });
+                } else {
+                    alert('Relocation failed');
+                    this.showScreen('relocate-dest');
+                }
             } else {
-                alert('Relocation failed: ' + (data.error || 'Unknown error'));
-                this.showScreen('relocate-dest');
+                // Original single-source flow
+                const response = await fetch('/api/relocate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sourceId: this.relocateSourceId,
+                        sourceName: this.relocateSourceName,
+                        destId: this.relocateDestId,
+                        destName: this.relocateDestName,
+                        items: this.relocateSelectedItems.map(item => ({
+                            stockId: item.stockId,
+                            catalogId: item.catalogId,
+                            quantity: item.quantity,
+                            partNo: item.partNo || '',
+                            description: item.description || item.name,
+                            jobId: item.jobId
+                        }))
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    this.showRelocateSuccess(data);
+                } else {
+                    alert('Relocation failed: ' + (data.error || 'Unknown error'));
+                    this.showScreen('relocate-dest');
+                }
             }
-            
         } catch (error) {
             console.error('Relocate error:', error);
             alert('Relocation failed: ' + error.message);
@@ -2106,6 +2393,33 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
     },
     
     startNewRelocate() {
+        this.relocateMultiSource = false;
+        this.relocateSearchResults = null;
+        this.relocateMode = 'location';
+        
+        // Reset search UI
+        const searchInput = document.getElementById('relocate-search-input');
+        if (searchInput) searchInput.value = '';
+        const searchResults = document.getElementById('relocate-search-results');
+        if (searchResults) searchResults.classList.add('hidden');
+        const searchStatus = document.getElementById('relocate-search-status');
+        if (searchStatus) searchStatus.classList.add('hidden');
+        const moveBtn = document.getElementById('search-move-btn');
+        if (moveBtn) moveBtn.style.display = 'none';
+        
+        // Reset mode toggle
+        const locBtn = document.getElementById('relocate-mode-location');
+        const srchBtn = document.getElementById('relocate-mode-search');
+        if (locBtn) locBtn.classList.add('active');
+        if (srchBtn) srchBtn.classList.remove('active');
+        const locMode = document.getElementById('relocate-location-mode');
+        const srchMode = document.getElementById('relocate-search-mode');
+        if (locMode) locMode.classList.remove('hidden');
+        if (srchMode) srchMode.classList.add('hidden');
+        
+        const loadBtn = document.getElementById('load-source-items-btn');
+        if (loadBtn) loadBtn.style.display = '';
+        
         this.relocateSourceId = null;
         this.relocateSourceName = null;
         this.relocateItems = [];
