@@ -1943,6 +1943,8 @@ def stock_search():
                 cc_assigned = cc_data.get('assigned', 0)
                 cc_qty = cc_data.get('quantity', 0)
                 
+                print(f"  DEBUG {part_no} (cat={catalog_id}): cc_assigned={cc_assigned}, cc_qty={cc_qty}, po_qty_received={po_qty_received}, cc_data={json.dumps(cc_data, default=str)}")
+                
                 # Priority: CC stock assigned > 0 = definitely received and located
                 if cc_assigned > 0:
                     true_storage_id = cc_data['storageId']
