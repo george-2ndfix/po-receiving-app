@@ -2685,8 +2685,10 @@ footer {
 /* Login screen - no scrolling at all */
 #screen-login {
     overflow: hidden !important;
+    position: fixed !important;
+    inset: 0 !important;
 }
 #screen-login main {
-    overflow: hidden;
-    height: 100dvh;
+    overflow: hidden !important;
+    flex-shrink: 0;
 }
