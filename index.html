@@ -51,7 +51,16 @@
 </head>
 <body>
     <!-- Login Screen -->
-    <div id="screen-login" class="screen active">
+    <!-- Screen: Loading Splash (shown during auth check) -->
+    <div id="screen-splash" class="screen active">
+        <main style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100dvh; gap: 16px;">
+            <div style="font-size: 48px;">🔧</div>
+            <div style="font-size: 20px; font-weight: 700; color: #1e293b;">2nd Fix Doors & Hardware</div>
+            <div class="spinner" style="margin-top: 12px;"></div>
+        </main>
+    </div>
+
+    <div id="screen-login" class="screen">
         <header>
             <h1>🔐 2nd Fix</h1>
             <p class="subtitle">PO Receiving App</p>
@@ -331,6 +340,29 @@
     </div>
 
     <!-- Screen 3: Select Storage -->
+
+    <!-- Screen: Job Materials Overview (before storage selection) -->
+    <div id="screen-job-materials" class="screen">
+        <header>
+            <button class="back-btn" data-screen="verify">&larr; Back</button>
+            <h1>&#x1F4CB; Job Materials</h1>
+        </header>
+        
+        <main>
+            <div id="job-materials-loading" style="text-align: center; padding: 40px;">
+                <div class="spinner"></div>
+                <p style="margin-top: 12px; color: #6b7280;">Loading all job materials...</p>
+            </div>
+            <div id="job-materials-content" class="hidden"></div>
+        </main>
+        
+        <footer style="padding: 16px;">
+            <button class="btn btn-primary btn-large" id="continue-allocate-btn" style="width: 100%;">
+                Continue to Allocate &rarr;
+            </button>
+        </footer>
+    </div>
+
     <div id="screen-storage" class="screen">
         <header>
             <button class="back-btn" data-screen="verify">← Back</button>

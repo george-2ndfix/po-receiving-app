@@ -38,6 +38,8 @@ const app = {
     relocateSelectedItems: [],
     relocateDestId: null,
     relocateDestName: null,
+    suggestedStorageId: null,
+    suggestedStorageName: null,
     
     // ============================================
     // Initialization
@@ -111,7 +113,8 @@ const app = {
         
         // Item selection
         document.getElementById('select-all')?.addEventListener('change', (e) => this.toggleSelectAll(e));
-        document.getElementById('to-storage-btn')?.addEventListener('click', () => this.showScreen('storage'));
+        document.getElementById('to-storage-btn')?.addEventListener('click', () => this.showJobMaterials());
+        document.getElementById('continue-allocate-btn')?.addEventListener('click', () => this.continueToAllocate());
         
         // Storage selection
         document.getElementById('storage-dropdown')?.addEventListener('change', (e) => this.selectStorage(e));
@@ -862,6 +865,148 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
     
     // ============================================
     // Storage Selection
+
+    // ============================================
+    // Job Materials Overview (before storage selection)
+    // ============================================
+    async showJobMaterials() {
+        // Collect unique job IDs from selected items
+        const jobIds = new Set();
+        for (const sel of this.selectedItems) {
+            const item = this.currentPO.items[sel.index];
+            if (item.jobNumber && /^\d+$/.test(String(item.jobNumber))) {
+                jobIds.add(String(item.jobNumber));
+            }
+        }
+        
+        // If no valid jobs (stock order), skip straight to storage
+        if (jobIds.size === 0) {
+            this.suggestedStorageId = null;
+            this.suggestedStorageName = null;
+            document.getElementById('storage-item-count').textContent = this.selectedItems.length;
+            this.showScreen('storage');
+            return;
+        }
+        
+        this.showScreen('job-materials');
+        document.getElementById('job-materials-loading').classList.remove('hidden');
+        document.getElementById('job-materials-content').classList.add('hidden');
+        
+        try {
+            let html = '';
+            let bestStorageId = null;
+            let bestStorageName = null;
+            let bestStorageCount = 0;
+            
+            for (const jobId of jobIds) {
+                const resp = await fetch('/api/job-intel', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ job_id: parseInt(jobId) }),
+                    cache: 'no-store'
+                });
+                
+                if (!resp.ok) continue;
+                const data = await resp.json();
+                
+                // Job header
+                html += '<div class="job-materials-card">';
+                html += '<div class="job-materials-header">';
+                html += '<div class="job-materials-title">Job ' + jobId + '</div>';
+                html += '<div class="job-materials-customer">' + (data.job.customer || '') + '</div>';
+                if (data.job.site) html += '<div class="job-materials-site">\ud83d\udccd ' + data.job.site + '</div>';
+                html += '</div>';
+                
+                // Progress bar
+                const s = data.summary;
+                if (s && s.totalRequired > 0) {
+                    const pct = Math.round((s.totalAssigned / s.totalRequired) * 100);
+                    html += '<div class="jm-progress">';
+                    html += '<div class="jm-progress-bar"><div class="jm-progress-fill" style="width:' + pct + '%"></div></div>';
+                    html += '<span class="jm-progress-text">' + s.totalAssigned + ' of ' + s.totalRequired + ' items allocated</span>';
+                    html += '</div>';
+                }
+                
+                // Already allocated - grouped by storage location
+                if (data.storageLocations && data.storageLocations.length > 0) {
+                    html += '<div class="jm-section-title">\ud83d\udce6 Already Allocated</div>';
+                    for (const loc of data.storageLocations) {
+                        if (loc.items && loc.items.length > bestStorageCount) {
+                            bestStorageCount = loc.items.length;
+                            bestStorageId = loc.id;
+                            bestStorageName = loc.name;
+                        }
+                        
+                        html += '<div class="jm-storage-loc">';
+                        html += '<div class="jm-loc-name">\ud83d\udccd ' + loc.name + ' <span class="jm-loc-count">(' + loc.items.length + ' items)</span></div>';
+                        html += '<div class="jm-loc-items">';
+                        for (const item of loc.items.slice(0, 20)) {
+                            html += '<div class="jm-item">\u2022 ' + (item.partNo ? '<span class="jm-part">' + item.partNo + '</span> ' : '') + item.name + ' <span class="jm-qty">\u00d7' + item.qty + '</span></div>';
+                        }
+                        if (loc.items.length > 20) {
+                            html += '<div class="jm-item jm-more">+ ' + (loc.items.length - 20) + ' more items</div>';
+                        }
+                        html += '</div></div>';
+                    }
+                }
+                
+                // Pending items
+                const pending = (data.stock || []).filter(function(st) { return st.pending > 0; });
+                if (pending.length > 0) {
+                    html += '<div class="jm-section-title">\u23f3 Still Awaiting (' + pending.length + ' items)</div>';
+                    html += '<div class="jm-pending-items">';
+                    for (const item of pending.slice(0, 25)) {
+                        html += '<div class="jm-item">\u2022 ' + (item.partNo ? '<span class="jm-part">' + item.partNo + '</span> ' : '') + item.name + ' <span class="jm-qty">\u00d7' + item.pending + '</span></div>';
+                    }
+                    if (pending.length > 25) {
+                        html += '<div class="jm-item jm-more">+ ' + (pending.length - 25) + ' more items</div>';
+                    }
+                    html += '</div>';
+                }
+                
+                html += '</div>';
+            }
+            
+            // Store suggested storage for auto-select
+            this.suggestedStorageId = bestStorageId;
+            this.suggestedStorageName = bestStorageName;
+            
+            // Suggestion banner at top
+            if (bestStorageName) {
+                html = '<div class="jm-suggestion">\ud83d\udca1 Items for this job are already in <strong>' + bestStorageName + '</strong></div>' + html;
+            }
+            
+            if (!html) {
+                html = '<div class="jm-no-materials"><p>No materials found for this job yet.</p><p>This will be the first allocation.</p></div>';
+            }
+            
+            document.getElementById('job-materials-loading').classList.add('hidden');
+            document.getElementById('job-materials-content').innerHTML = html;
+            document.getElementById('job-materials-content').classList.remove('hidden');
+            
+        } catch (e) {
+            console.error('Job materials error:', e);
+            document.getElementById('job-materials-loading').classList.add('hidden');
+            document.getElementById('job-materials-content').innerHTML = '<div style="color: #ef4444; padding: 20px; text-align: center;">Could not load job materials. You can still continue to allocate.</div>';
+            document.getElementById('job-materials-content').classList.remove('hidden');
+        }
+    },
+    
+    continueToAllocate() {
+        document.getElementById('storage-item-count').textContent = this.selectedItems.length;
+        this.showScreen('storage');
+        
+        // Auto-select suggested storage if available
+        if (this.suggestedStorageId) {
+            const dropdown = document.getElementById('storage-dropdown');
+            if (dropdown) {
+                dropdown.value = String(this.suggestedStorageId);
+                // Trigger change event to update state
+                dropdown.dispatchEvent(new Event('change'));
+            }
+        }
+    },
+
     // ============================================
     selectStorage(event) {
         const select = event.target;
