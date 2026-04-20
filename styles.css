@@ -2935,3 +2935,150 @@ footer {
 .location-group-header .location-icon {
     margin-right: 6px;
 }
+
+
+/* ===== SOP / Help Screen ===== */
+.sop-content {
+    padding: 16px;
+    padding-bottom: 40px;
+    max-width: 700px;
+    margin: 0 auto;
+    font-size: 15px;
+    line-height: 1.6;
+    color: #333;
+}
+
+.sop-content h2 {
+    font-size: 20px;
+    color: #1a1a2e;
+    margin: 0 0 8px 0;
+}
+
+.sop-content .sop-subtitle {
+    color: #666;
+    font-size: 13px;
+    margin-bottom: 16px;
+}
+
+.sop-content h3 {
+    font-size: 17px;
+    color: #16213e;
+    margin: 20px 0 10px 0;
+    padding-bottom: 4px;
+    border-bottom: 2px solid #e8e8e8;
+}
+
+.sop-content h4 {
+    font-size: 15px;
+    color: #333;
+    margin: 14px 0 6px 0;
+}
+
+.sop-content p {
+    margin: 8px 0;
+}
+
+.sop-content ul, .sop-content ol {
+    margin: 8px 0;
+    padding-left: 24px;
+}
+
+.sop-content li {
+    margin: 4px 0;
+}
+
+.sop-content code {
+    background: #f0f0f0;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-family: monospace;
+    color: #d63384;
+}
+
+.sop-content table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 10px 0;
+    font-size: 14px;
+}
+
+.sop-content table th,
+.sop-content table td {
+    border: 1px solid #ddd;
+    padding: 8px 10px;
+    text-align: left;
+}
+
+.sop-content table th {
+    background: #f5f5f5;
+    font-weight: 600;
+    color: #333;
+}
+
+.sop-content table tr:nth-child(even) {
+    background: #fafafa;
+}
+
+.sop-content hr {
+    border: none;
+    border-top: 1px solid #e8e8e8;
+    margin: 20px 0;
+}
+
+.sop-content .sop-warning {
+    background: #fff3cd;
+    border-left: 4px solid #ffc107;
+    padding: 10px 12px;
+    border-radius: 4px;
+    margin: 10px 0;
+    font-size: 14px;
+}
+
+.sop-content .sop-toc {
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin: 12px 0;
+}
+
+.sop-content .sop-toc h3 {
+    margin: 0 0 8px 0;
+    border: none;
+    font-size: 15px;
+}
+
+.sop-content .sop-toc ol {
+    margin: 0;
+    padding-left: 20px;
+}
+
+.sop-content .sop-toc li {
+    margin: 2px 0;
+}
+
+.sop-content .sop-toc a {
+    color: #0d6efd;
+    text-decoration: none;
+}
+
+.sop-content .sop-workflow {
+    background: #e8f5e9;
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin: 10px 0;
+    font-size: 14px;
+    line-height: 1.8;
+}
+
+.sop-content .sop-footer {
+    color: #999;
+    font-size: 12px;
+    margin-top: 24px;
+    text-align: center;
+}
+
+#screen-sop main {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
