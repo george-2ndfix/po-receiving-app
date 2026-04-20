@@ -51,7 +51,7 @@ body {
 /* Screen Management */
 .screen {
     display: none;
-    min-height: 100dvh;
+    min-height: 100%;
     flex-direction: column;
 }
 
@@ -59,8 +59,7 @@ body {
     display: flex;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
-    height: 100dvh;
-    height: 100vh; /* fallback for older browsers */
+    height: 100%;
 }
 
 /* Header */
@@ -2696,6 +2695,10 @@ footer {
 }
 #screen-login.active {
     display: flex !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: hidden !important;
 }
 
 .login-container {
