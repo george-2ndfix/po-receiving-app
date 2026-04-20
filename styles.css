@@ -57,6 +57,10 @@ body {
 
 .screen.active {
     display: flex;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    height: 100dvh;
+    height: 100vh; /* fallback for older browsers */
 }
 
 /* Header */
