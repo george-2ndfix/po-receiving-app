@@ -1814,7 +1814,7 @@ def stock_search():
         po_id = po_number  # PO ID = PO number in Simpro
         
         # Get PO details
-        po_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/?columns=ID,OrderNo,Vendor,Status')
+        po_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/')
         if po_resp.status_code != 200:
             return jsonify({'error': f'PO {po_id} not found'}), 404
         
