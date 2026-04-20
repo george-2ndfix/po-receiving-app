@@ -1,4 +1,4 @@
-const CACHE_NAME = 'po-receiving-v45';
+const CACHE_NAME = 'po-receiving-v46';
 const urlsToCache = [
   '/styles.css',
   '/storage-locations.json',
