@@ -1171,14 +1171,14 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                         if (this.photoMode === 'group' && this.evidencePhoto) {
                             photos.push({
                                 base64: this.evidencePhoto,
-                                filename: `PO_${this.currentPO.poNumber}_delivery_${dateStr}.jpg`
+                                filename: `PO_${this.currentPO.poNumber}_${(this.selectedStorage?.name || 'unknown').replace(/[^a-zA-Z0-9]/g, '_')}_delivery_${dateStr}.jpg`
                             });
                         } else if (this.photoMode === 'individual') {
                             this.individualPhotos.forEach(p => {
                                 const safeName = (p.partNo || p.description || 'item').replace(/[^a-zA-Z0-9]/g, '_').substring(0, 30);
                                 photos.push({
                                     base64: p.base64,
-                                    filename: `PO_${this.currentPO.poNumber}_${safeName}_${dateStr}.jpg`
+                                    filename: `PO_${this.currentPO.poNumber}_${(this.selectedStorage?.name || 'unknown').replace(/[^a-zA-Z0-9]/g, '_')}_${safeName}_${dateStr}.jpg`
                                 });
                             });
                         }
