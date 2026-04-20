@@ -684,13 +684,21 @@
         </header>
         
         <main>
-            <div class="section-title">
-                <h3>Step 1: Select Source Location</h3>
-                <p class="hint">Where are the items currently stored?</p>
+            <!-- Mode Toggle -->
+            <div class="relocate-mode-toggle">
+                <button id="relocate-mode-location" class="mode-btn active" onclick="app.setRelocateMode('location')">📍 By Location</button>
+                <button id="relocate-mode-search" class="mode-btn" onclick="app.setRelocateMode('search')">🔍 By Job/PO</button>
             </div>
             
-            <div class="storage-selector">
-                <label for="relocate-source-dropdown">Source Storage Location</label>
+            <!-- Location Mode (existing) -->
+            <div id="relocate-location-mode">
+                <div class="section-title">
+                    <h3>Select Source Location</h3>
+                    <p class="hint">Where are the items currently stored?</p>
+                </div>
+                
+                <div class="storage-selector">
+                    <label for="relocate-source-dropdown">Source Storage Location</label>
                 <select id="relocate-source-dropdown" class="storage-dropdown">
                     <option value="">-- Select Source Location --</option>
                     
@@ -819,6 +827,44 @@
                 </select>
             </div>
             
+            </div><!-- end relocate-location-mode -->
+            
+            <!-- Search Mode (new) -->
+            <div id="relocate-search-mode" class="hidden">
+                <div class="section-title">
+                    <h3>Search by Job or PO</h3>
+                    <p class="hint">Find items and see where they are stored</p>
+                </div>
+                
+                <div class="search-type-toggle">
+                    <label class="radio-pill">
+                        <input type="radio" name="relocate-search-type" value="po" checked onchange="app.updateSearchPlaceholder()">
+                        <span>PO Number</span>
+                    </label>
+                    <label class="radio-pill">
+                        <input type="radio" name="relocate-search-type" value="job" onchange="app.updateSearchPlaceholder()">
+                        <span>Job Number</span>
+                    </label>
+                </div>
+                
+                <div class="search-input-row">
+                    <input type="text" id="relocate-search-input" class="form-input" 
+                           placeholder="Enter PO number..." inputmode="numeric"
+                           onkeypress="if(event.key==='Enter')app.searchStockByJobPO()">
+                    <button id="relocate-search-btn" class="btn btn-primary" onclick="app.searchStockByJobPO()">🔍</button>
+                </div>
+                
+                <div id="relocate-search-status" class="status-message hidden"></div>
+                
+                <div id="relocate-search-results" class="hidden">
+                    <div id="relocate-search-job-info" class="job-info-banner hidden"></div>
+                    <div id="relocate-search-items-list" class="items-list"></div>
+                    <div class="selection-summary">
+                        <span id="relocate-search-selection-count">0 items selected</span>
+                    </div>
+                </div>
+            </div>
+            
             <div id="relocate-source-status" class="status-message hidden"></div>
         </main>
         
@@ -875,7 +921,7 @@
         
         <main>
             <div class="storage-info">
-                <p>Moving <strong id="relocate-dest-item-count">0</strong> items from <strong id="relocate-from-name">---</strong></p>
+                <p>Moving <strong id="relocate-dest-item-count">0</strong> items <span id="relocate-from-info">from <strong id="relocate-from-name">---</strong></span></p>
             </div>
             
             <div class="section-title">
