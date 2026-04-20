@@ -178,6 +178,11 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                 this.currentStaff = data.staff;
                 errorEl.style.display = 'none';
                 document.getElementById('login-password').value = '';
+                // Cache auth for resilience
+                localStorage.setItem('po_auth_cache', JSON.stringify({
+                    staff: data.staff,
+                    timestamp: Date.now()
+                }));
                 this.showHomeScreen();
             } else {
                 errorEl.textContent = data.error || 'Invalid username or password';
@@ -198,6 +203,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         }
         
         this.currentStaff = null;
+        localStorage.removeItem('po_auth_cache');
         document.getElementById('login-username').value = '';
         document.getElementById('login-password').value = '';
         document.getElementById('report-issue-fab')?.classList.add('hidden');
