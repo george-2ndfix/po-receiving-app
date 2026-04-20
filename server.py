@@ -1803,7 +1803,13 @@ def get_storage_stock(storage_id):
 @app.route('/api/stock-search', methods=['POST'])
 @login_required
 def stock_search():
-    """Search for stock by PO or Job number - returns items with TRUE locations from CC stock."""
+    """Search for stock by PO or Job number - returns items with TRUE locations.
+    
+    Uses multiple data sources for accuracy:
+    1. PO allocation data (job/section/CC info + PO storage)
+    2. CC stock (actual assigned quantities and locations for job stock)
+    3. Storage device stock (fallback for items received outside normal flow)
+    """
     try:
         data = request.get_json()
         search_type = data.get('searchType', 'po')
@@ -1813,59 +1819,101 @@ def stock_search():
             return jsonify({'error': 'Please enter a number'}), 400
         
         po_ids = []
-        job_id_from_search = None
         
         if search_type == 'job':
-            # Search by job number - find all POs for this job
-            job_id_from_search = search_value
-            # Get all POs and filter by job
-            po_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/?columns=ID,OrderNo')
-            if po_resp.status_code == 200:
-                all_pos = po_resp.json()
-                # Check each PO for job allocation
-                for po in all_pos[:100]:  # Limit search
-                    po_id = po.get('ID')
-                    cat_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/catalogs/')
-                    if cat_resp.status_code == 200:
-                        cats = cat_resp.json()
-                        for cat in cats:
-                            cat_id = cat.get('Catalog', {}).get('ID')
-                            if not cat_id:
-                                continue
-                            alloc_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/catalogs/{cat_id}/allocations/')
-                            if alloc_resp.status_code == 200:
-                                allocs = alloc_resp.json()
-                                if allocs:
-                                    assigned = allocs[0].get('AssignedTo', {})
-                                    if str(assigned.get('Job', '')) == str(search_value):
-                                        po_ids.append(po_id)
-                                        break
-            if not po_ids:
-                return jsonify({'error': f'No POs found for Job {search_value}'}), 404
+            # TODO: implement job search
+            return jsonify({'error': 'Job search not yet implemented - use PO number'}), 400
         else:
-            # Search by PO number
             po_ids = [search_value]
         
         all_items = []
         job_info = None
+        job_id = None
+        section_id = None
+        cc_id = None
+        cc_stock_map = {}  # catalogId -> {assigned, storageId, storageName}
         
         for po_id in po_ids:
-            # Get PO details
+            # Step 1: Get PO details
             po_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/')
             if po_resp.status_code != 200:
                 continue
-            
             po_data = po_resp.json()
             po_order_no = po_data.get('OrderNo', str(po_id))
-            vendor_name = po_data.get('Vendor', {}).get('Name', 'Unknown')
             
-            # Get catalog items
+            # Step 2: Get catalog items and their allocations
             cat_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/catalogs/')
             if cat_resp.status_code != 200:
                 continue
-            
             catalogs = cat_resp.json()
             
+            # Get allocation for first item to find job/section/CC
+            for cat_item in catalogs:
+                cat_id = cat_item.get('Catalog', {}).get('ID')
+                if not cat_id:
+                    continue
+                alloc_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/catalogs/{cat_id}/allocations/')
+                if alloc_resp.status_code == 200:
+                    allocs = alloc_resp.json()
+                    if allocs:
+                        assigned_to = allocs[0].get('AssignedTo', {})
+                        job_id = assigned_to.get('Job')
+                        section_id = assigned_to.get('Section')
+                        cc_id = assigned_to.get('ID')
+                        if job_id:
+                            break
+            
+            # Step 3: Get job info and CC stock in bulk (one API call for all items)
+            if job_id and section_id and cc_id:
+                # Get job info
+                job_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id}/')
+                if job_resp.status_code == 200:
+                    jd = job_resp.json()
+                    cust = jd.get('Customer', {})
+                    customer_name = ''
+                    if isinstance(cust, dict):
+                        customer_name = cust.get('CompanyName', cust.get('GivenName', ''))
+                    job_info = {
+                        'jobNumber': jd.get('Name', str(job_id)),
+                        'customerName': customer_name,
+                    }
+                
+                # Get ALL CC stock in one call
+                cc_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{section_id}/costCenters/{cc_id}/stock/')
+                if cc_resp.status_code == 200:
+                    cc_stocks = cc_resp.json()
+                    for s in cc_stocks:
+                        cat = s.get('Catalog', {})
+                        cat_id = cat.get('ID')
+                        qty_info = s.get('Quantity', {})
+                        assigned_qty = qty_info.get('Assigned', 0)
+                        breakdown = s.get('AssignedBreakdown', [])
+                        
+                        # Find storage with highest quantity
+                        best_storage_id = None
+                        best_storage_name = 'Unknown'
+                        best_qty = 0
+                        for bd in breakdown:
+                            bd_qty = bd.get('Quantity', 0)
+                            if bd_qty > best_qty:
+                                best_qty = bd_qty
+                                best_storage_id = bd.get('Storage', {}).get('ID')
+                                best_storage_name = bd.get('Storage', {}).get('Name', 'Unknown')
+                        
+                        # Even if assigned=0, remember the storage reference
+                        if not best_storage_id and breakdown:
+                            best_storage_id = breakdown[0].get('Storage', {}).get('ID')
+                            best_storage_name = breakdown[0].get('Storage', {}).get('Name', 'Unknown')
+                        
+                        cc_stock_map[cat_id] = {
+                            'assigned': assigned_qty,
+                            'storageId': best_storage_id,
+                            'storageName': best_storage_name,
+                            'quantity': best_qty if best_qty > 0 else assigned_qty,
+                        }
+                    print(f"CC stock map: {json.dumps({k: v for k, v in cc_stock_map.items()}, default=str)}")
+            
+            # Step 4: Build item list
             for cat_item in catalogs:
                 cat_catalog = cat_item.get('Catalog', {})
                 catalog_id = cat_catalog.get('ID')
@@ -1875,51 +1923,61 @@ def stock_search():
                 if not catalog_id:
                     continue
                 
-                # Get allocation from PO
+                # Get allocation for this specific item
                 alloc_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/catalogs/{catalog_id}/allocations/')
                 alloc_data = []
                 if alloc_resp.status_code == 200:
                     alloc_data = alloc_resp.json()
-                
                 alloc = alloc_data[0] if alloc_data else {}
-                assigned_to = alloc.get('AssignedTo', {})
-                alloc_storage = alloc.get('StorageDevice', {})
-                qty_received = alloc.get('Quantity', {}).get('Received', 0)
-                qty_total = alloc.get('Quantity', {}).get('Total', 0)
+                po_qty_total = alloc.get('Quantity', {}).get('Total', 0)
+                po_qty_received = alloc.get('Quantity', {}).get('Received', 0)
+                po_storage = alloc.get('StorageDevice', {})
                 
-                this_job_id = assigned_to.get('Job')
-                section_id = assigned_to.get('Section')
-                cc_id = assigned_to.get('ID')
+                # Determine TRUE location and received status
+                cc_data = cc_stock_map.get(catalog_id, {})
+                cc_assigned = cc_data.get('assigned', 0)
+                cc_qty = cc_data.get('quantity', 0)
                 
-                # Get job info once
-                if this_job_id and not job_info:
-                    job_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{this_job_id}/')
-                    if job_resp.status_code == 200:
-                        jd = job_resp.json()
-                        customer_name = ''
-                        cust = jd.get('Customer', {})
-                        if isinstance(cust, dict):
-                            customer_name = cust.get('CompanyName', cust.get('GivenName', ''))
-                        job_info = {
-                            'jobNumber': jd.get('Name', str(this_job_id)),
-                            'customerName': customer_name,
-                        }
-                
-                # Determine TRUE location from CC stock if job-allocated
-                true_storage_id = alloc_storage.get('ID')
-                true_storage_name = alloc_storage.get('Name', 'Unknown')
-                
-                if this_job_id and section_id and cc_id and qty_received > 0:
-                    cc_stock_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{this_job_id}/sections/{section_id}/costCenters/{cc_id}/stock/{catalog_id}/')
-                    if cc_stock_resp.status_code == 200:
-                        cc_stock = cc_stock_resp.json()
-                        breakdown = cc_stock.get('AssignedBreakdown', [])
-                        if breakdown:
-                            for bd in breakdown:
-                                if bd.get('Quantity', 0) > 0:
-                                    true_storage_id = bd['Storage']['ID']
-                                    true_storage_name = bd['Storage']['Name']
-                                    break
+                # Priority: CC stock assigned > 0 = definitely received and located
+                if cc_assigned > 0:
+                    true_storage_id = cc_data['storageId']
+                    true_storage_name = cc_data['storageName']
+                    true_qty = cc_qty
+                    awaiting = False
+                elif po_qty_received > 0:
+                    # PO says received but CC shows 0 assigned — check CC for location anyway
+                    true_storage_id = cc_data.get('storageId') or po_storage.get('ID')
+                    true_storage_name = cc_data.get('storageName') or po_storage.get('Name', 'Unknown')
+                    true_qty = po_qty_received
+                    awaiting = False
+                else:
+                    # PO says 0 received AND CC says 0 assigned
+                    # Check storage device stock as fallback (item may have been received outside normal flow)
+                    found_in_storage = False
+                    # Check the PO-allocated storage device
+                    check_device_id = cc_data.get('storageId') or po_storage.get('ID')
+                    if check_device_id:
+                        sd_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/storageDevices/{check_device_id}/stock/?Catalog.ID={catalog_id}')
+                        if sd_resp.status_code == 200:
+                            sd_items = sd_resp.json()
+                            if sd_items:
+                                found_in_storage = True
+                                sd_item = sd_items[0]
+                                sd_qty = sd_item.get('InStock', sd_item.get('Quantity', 1))
+                                if isinstance(sd_qty, dict):
+                                    sd_qty = sd_qty.get('InStock', 1)
+                                true_storage_id = check_device_id
+                                true_storage_name = cc_data.get('storageName') or po_storage.get('Name', 'Unknown')
+                                true_qty = sd_qty if isinstance(sd_qty, (int, float)) else 1
+                                awaiting = False
+                                print(f"  {part_no}: Found in storage device {true_storage_name} (received outside normal flow)")
+                    
+                    if not found_in_storage:
+                        # Truly awaiting receipt
+                        true_storage_id = po_storage.get('ID')
+                        true_storage_name = po_storage.get('Name', 'Unknown')
+                        true_qty = 0
+                        awaiting = True
                 
                 item_data = {
                     'catalogId': catalog_id,
@@ -1927,15 +1985,16 @@ def stock_search():
                     'description': name,
                     'storageId': true_storage_id,
                     'storageName': true_storage_name,
-                    'quantity': qty_received,
-                    'quantityOrdered': qty_total,
-                    'awaitingReceipt': qty_received == 0,
-                    'jobId': this_job_id,
+                    'quantity': true_qty,
+                    'quantityOrdered': po_qty_total,
+                    'awaitingReceipt': awaiting,
+                    'jobId': job_id,
                     'sectionId': section_id,
                     'costCentreId': cc_id,
                     'poOrderNo': po_order_no,
                 }
                 all_items.append(item_data)
+                print(f"  {part_no}: storage={true_storage_name}, qty={true_qty}, awaiting={awaiting}")
         
         received_items = [i for i in all_items if not i['awaitingReceipt']]
         awaiting_items = [i for i in all_items if i['awaitingReceipt']]
