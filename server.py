@@ -2002,6 +2002,13 @@ def stock_search():
                     'sectionId': section_id,
                     'costCentreId': cc_id,
                     'poOrderNo': po_order_no,
+                    '_debug': {
+                        'cc_assigned': cc_assigned,
+                        'cc_qty': cc_qty,
+                        'po_qty_received': po_qty_received,
+                        'po_storage_id': po_storage.get('ID'),
+                        'cc_data': cc_data,
+                    },
                 }
                 all_items.append(item_data)
                 print(f"  {part_no}: storage={true_storage_name}, qty={true_qty}, awaiting={awaiting}")
