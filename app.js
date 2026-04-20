@@ -1755,6 +1755,16 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         }
         
         try {
+            // Pre-open window BEFORE async fetch - iOS Safari requires window.open
+            // in the synchronous user gesture call stack (before any await)
+            let pdfWindow = null;
+            try {
+                pdfWindow = window.open('about:blank', '_blank');
+                if (pdfWindow) {
+                    pdfWindow.document.write('<html><body style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;color:#666;"><p>Generating labels...</p></body></html>');
+                }
+            } catch(e) { /* popup blocked - will use fallback */ }
+            
             const response = await fetch('/api/label-pdf', {
                 method: 'POST',
                 headers: {
@@ -1772,25 +1782,24 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             const blob = await response.blob();
             const url = URL.createObjectURL(blob);
             
-            // Open PDF in new tab - user taps Share > Print > QL-810W
-            const link = document.createElement('a');
-            link.href = url;
-            link.target = '_blank';
-            link.rel = 'noopener';
-            // On iOS Safari, window.open works better for PDFs
-            const win = window.open(url, '_blank');
-            if (!win) {
-                // Fallback: download the file
-                link.download = 'labels.pdf';
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
+            // Redirect the pre-opened window to the PDF
+            if (pdfWindow && !pdfWindow.closed) {
+                pdfWindow.location.href = url;
+            } else {
+                // Fallback: try window.open (may work on desktop)
+                const win = window.open(url, '_blank');
+                if (!win) {
+                    // Last resort: navigate current page briefly
+                    window.location.href = url;
+                }
             }
             
             // Clean up after a delay
-            setTimeout(() => URL.revokeObjectURL(url), 30000);
+            setTimeout(() => URL.revokeObjectURL(url), 60000);
             
         } catch (err) {
+            // Close pre-opened window on error
+            if (pdfWindow && !pdfWindow.closed) pdfWindow.close();
             alert('Label error: ' + err.message);
             console.error('Label PDF error:', err);
         }
