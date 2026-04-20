@@ -2285,7 +2285,10 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                         catalogId: item.catalogId,
                         quantity: item.quantity,
                         partNo: item.partNo || '',
-                        description: item.description || ''
+                        description: item.description || '',
+                        jobId: item.jobId || null,
+                        sectionId: item.sectionId || null,
+                        costCentreId: item.costCentreId || null
                     });
                 });
                 
@@ -2299,10 +2302,11 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                     document.getElementById('processing-detail').textContent = 
                         `Moving from ${group.sourceName} (${i + 1}/${groupList.length})`;
                     
-                    const response = await fetch('/api/relocate', {
+                    const response = await fetch('/api/stock-move', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
+                            poId: this.relocateSearchPoId,
                             sourceId: group.sourceId,
                             sourceName: group.sourceName,
                             destId: this.relocateDestId,
@@ -2314,8 +2318,11 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                     const data = await response.json();
                     lastData = data;
                     
-                    if (data.success) {
-                        totalSuccess += data.successCount || group.items.length;
+                    if (data.successCount > 0) {
+                        totalSuccess += data.successCount;
+                        totalFailed += (data.totalItems - data.successCount);
+                    } else if (data.error) {
+                        totalFailed += group.items.length;
                     } else {
                         totalFailed += group.items.length;
                     }
@@ -2400,6 +2407,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
     startNewRelocate() {
         this.relocateMultiSource = false;
         this.relocateSearchResults = null;
+        this.relocateSearchPoId = null;
         this.relocateMode = 'location';
         
         // Reset search UI
