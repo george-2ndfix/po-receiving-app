@@ -1826,8 +1826,132 @@ def stock_search():
         po_ids = []
         
         if search_type == 'job':
-            # TODO: implement job search
-            return jsonify({'error': 'Job search not yet implemented - use PO number'}), 400
+            # Job search: look up job, iterate sections/cost centres, get stock
+            job_id_val = search_value.strip()
+            
+            # Step 1: Look up job by ID
+            job_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id_val}/?columns=ID,Name,Customer,Site')
+            if job_resp.status_code != 200:
+                return jsonify({'error': f'Job {job_id_val} not found'}), 400
+            jd = job_resp.json()
+            cust = jd.get('Customer', {})
+            customer_name = ''
+            if isinstance(cust, dict):
+                customer_name = cust.get('CompanyName', cust.get('GivenName', ''))
+            job_name = jd.get('Name', str(job_id_val))
+            job_info = {
+                'jobNumber': job_name,
+                'customerName': customer_name,
+            }
+            
+            # Step 2: Get sections for the job
+            sec_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id_val}/sections/')
+            sections = []
+            if sec_resp.status_code == 200:
+                sections = sec_resp.json()
+            
+            all_items = []
+            collected_po_ids = set()
+            
+            for section in sections:
+                sid = section.get('ID')
+                if not sid:
+                    continue
+                
+                # Step 3: Get cost centres for this section
+                cc_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id_val}/sections/{sid}/costCenters/')
+                cost_centres = []
+                if cc_resp.status_code == 200:
+                    cost_centres = cc_resp.json()
+                
+                for cc in cost_centres:
+                    ccid = cc.get('ID')
+                    if not ccid:
+                        continue
+                    
+                    # Step 4: Get stock for this cost centre
+                    stock_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id_val}/sections/{sid}/costCenters/{ccid}/stock/')
+                    if stock_resp.status_code != 200:
+                        continue
+                    cc_stocks = stock_resp.json()
+                    
+                    # Step 5: Try to get vendor orders (POs) for this cost centre
+                    po_order_no = ''
+                    try:
+                        vo_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id_val}/sections/{sid}/costCenters/{ccid}/vendorOrders/')
+                        if vo_resp.status_code == 200:
+                            vos = vo_resp.json()
+                            for vo in vos:
+                                vo_id = vo.get('ID')
+                                vo_order_no = vo.get('OrderNo', '')
+                                if vo_id:
+                                    collected_po_ids.add(str(vo_id))
+                                if vo_order_no and not po_order_no:
+                                    po_order_no = vo_order_no
+                    except Exception:
+                        pass
+                    
+                    # Step 6: Build items from CC stock
+                    for s in cc_stocks:
+                        cat = s.get('Catalog', {})
+                        cat_id = cat.get('ID')
+                        if not cat_id:
+                            continue
+                        part_no = cat.get('PartNo', '?')
+                        name = cat.get('Name', '')
+                        qty_info = s.get('Quantity', {})
+                        assigned_qty = qty_info.get('Assigned', 0)
+                        breakdown = s.get('AssignedBreakdown', [])
+                        
+                        # Find storage with highest quantity
+                        best_storage_id = None
+                        best_storage_name = 'Unknown'
+                        best_qty = 0
+                        for bd in breakdown:
+                            bd_qty = bd.get('Quantity', 0)
+                            if bd_qty > best_qty:
+                                best_qty = bd_qty
+                                best_storage_id = bd.get('Storage', {}).get('ID')
+                                best_storage_name = bd.get('Storage', {}).get('Name', 'Unknown')
+                        
+                        if not best_storage_id and breakdown:
+                            best_storage_id = breakdown[0].get('Storage', {}).get('ID')
+                            best_storage_name = breakdown[0].get('Storage', {}).get('Name', 'Unknown')
+                        
+                        true_qty = best_qty if best_qty > 0 else assigned_qty
+                        awaiting = not (assigned_qty > 0 and best_storage_id)
+                        
+                        item_data = {
+                            'catalogId': cat_id,
+                            'partNo': part_no,
+                            'description': name,
+                            'storageId': best_storage_id,
+                            'storageName': best_storage_name,
+                            'quantity': true_qty,
+                            'quantityOrdered': 0,
+                            'awaitingReceipt': awaiting,
+                            'jobId': int(job_id_val),
+                            'sectionId': sid,
+                            'costCentreId': ccid,
+                            'poOrderNo': po_order_no,
+                        }
+                        all_items.append(item_data)
+                        print(f"  Job stock: {part_no}: storage={best_storage_name}, qty={true_qty}, awaiting={awaiting}")
+            
+            received_items = [i for i in all_items if not i['awaitingReceipt']]
+            awaiting_items = [i for i in all_items if i['awaitingReceipt']]
+            
+            po_list = [{'poId': pid} for pid in collected_po_ids]
+            
+            result = {
+                'job': job_info,
+                'pos': po_list,
+                'receivedCount': len(received_items),
+                'awaitingCount': len(awaiting_items),
+                'items': all_items
+            }
+            
+            return jsonify(result)
         else:
             po_ids = [search_value]
         
