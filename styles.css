@@ -2551,3 +2551,120 @@ footer {
     background: #fca5a5 !important;
     cursor: not-allowed;
 }
+
+/* =============================================
+   Job Materials Screen (before allocation)
+   ============================================= */
+.jm-suggestion {
+    background: #fef3c7;
+    border: 2px solid #f59e0b;
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin: 0 0 16px 0;
+    font-size: 15px;
+    text-align: center;
+    color: #92400e;
+}
+.jm-suggestion strong {
+    color: #b45309;
+}
+.job-materials-card {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    margin-bottom: 16px;
+    overflow: hidden;
+}
+.job-materials-header {
+    background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+    color: white;
+    padding: 14px 16px;
+}
+.job-materials-title {
+    font-size: 18px;
+    font-weight: 700;
+}
+.job-materials-customer {
+    font-size: 14px;
+    opacity: 0.9;
+    margin-top: 2px;
+}
+.job-materials-site {
+    font-size: 13px;
+    opacity: 0.8;
+    margin-top: 4px;
+}
+.jm-progress {
+    padding: 12px 16px;
+    border-bottom: 1px solid #e5e7eb;
+}
+.jm-progress-bar {
+    height: 8px;
+    background: #e5e7eb;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 6px;
+}
+.jm-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #22c55e, #16a34a);
+    border-radius: 4px;
+    transition: width 0.3s;
+}
+.jm-progress-text {
+    font-size: 13px;
+    color: #6b7280;
+}
+.jm-section-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #374151;
+    padding: 12px 16px 8px;
+    border-top: 1px solid #e5e7eb;
+}
+.jm-storage-loc {
+    padding: 0 16px 12px;
+}
+.jm-loc-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1e40af;
+    margin-bottom: 4px;
+}
+.jm-loc-count {
+    font-weight: 400;
+    color: #6b7280;
+    font-size: 13px;
+}
+.jm-loc-items, .jm-pending-items {
+    padding: 0 16px 12px;
+}
+.jm-item {
+    font-size: 13px;
+    color: #4b5563;
+    padding: 3px 0;
+    line-height: 1.4;
+}
+.jm-part {
+    font-weight: 600;
+    color: #374151;
+}
+.jm-qty {
+    color: #6b7280;
+    font-size: 12px;
+}
+.jm-more {
+    color: #9ca3af;
+    font-style: italic;
+}
+.jm-no-materials {
+    text-align: center;
+    padding: 30px 20px;
+    color: #6b7280;
+}
+
+/* Splash screen spinner */
+#screen-splash .spinner {
+    width: 32px;
+    height: 32px;
+}
