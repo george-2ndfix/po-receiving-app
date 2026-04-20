@@ -1943,8 +1943,6 @@ def stock_search():
                 cc_assigned = cc_data.get('assigned', 0)
                 cc_qty = cc_data.get('quantity', 0)
                 
-                print(f"  DEBUG {part_no} (cat={catalog_id}): cc_assigned={cc_assigned}, cc_qty={cc_qty}, po_qty_received={po_qty_received}, cc_data={json.dumps(cc_data, default=str)}")
-                
                 # Priority: CC stock assigned > 0 = definitely received and located
                 if cc_assigned > 0:
                     true_storage_id = cc_data['storageId']
@@ -1962,32 +1960,12 @@ def stock_search():
                     print(f"  {part_no}: PO received but CC assigned=0, marking as awaiting")
                 else:
                     # PO says 0 received AND CC says 0 assigned
-                    # Check storage device stock as fallback (item may have been received outside normal flow)
-                    found_in_storage = False
-                    # Check the PO-allocated storage device
-                    check_device_id = cc_data.get('storageId') or po_storage.get('ID')
-                    if check_device_id:
-                        sd_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/storageDevices/{check_device_id}/stock/?Catalog.ID={catalog_id}')
-                        if sd_resp.status_code == 200:
-                            sd_items = sd_resp.json()
-                            if sd_items:
-                                found_in_storage = True
-                                sd_item = sd_items[0]
-                                sd_qty = sd_item.get('InStock', sd_item.get('Quantity', 1))
-                                if isinstance(sd_qty, dict):
-                                    sd_qty = sd_qty.get('InStock', 1)
-                                true_storage_id = check_device_id
-                                true_storage_name = cc_data.get('storageName') or po_storage.get('Name', 'Unknown')
-                                true_qty = sd_qty if isinstance(sd_qty, (int, float)) else 1
-                                awaiting = False
-                                print(f"  {part_no}: Found in storage device {true_storage_name} (received outside normal flow)")
-                    
-                    if not found_in_storage:
-                        # Truly awaiting receipt
-                        true_storage_id = po_storage.get('ID')
-                        true_storage_name = po_storage.get('Name', 'Unknown')
-                        true_qty = 0
-                        awaiting = True
+                    # CC assigned qty is authoritative - if 0, item is truly awaiting receipt
+                    # Do NOT check storage device as it may contain residual/unrelated stock data
+                    true_storage_id = po_storage.get('ID')
+                    true_storage_name = po_storage.get('Name', 'Unknown')
+                    true_qty = 0
+                    awaiting = True
                 
                 item_data = {
                     'catalogId': catalog_id,
@@ -2002,13 +1980,7 @@ def stock_search():
                     'sectionId': section_id,
                     'costCentreId': cc_id,
                     'poOrderNo': po_order_no,
-                    '_debug': {
-                        'cc_assigned': cc_assigned,
-                        'cc_qty': cc_qty,
-                        'po_qty_received': po_qty_received,
-                        'po_storage_id': po_storage.get('ID'),
-                        'cc_data': cc_data,
-                    },
+
                 }
                 all_items.append(item_data)
                 print(f"  {part_no}: storage={true_storage_name}, qty={true_qty}, awaiting={awaiting}")
