@@ -61,27 +61,19 @@
     </div>
 
     <div id="screen-login" class="screen">
-        <header>
-            <h1>🔐 2nd Fix</h1>
-            <p class="subtitle">PO Receiving App</p>
-        </header>
-        
-        <main style="display: flex; flex-direction: column; padding-top: 8vh; max-height: calc(100dvh - 100px);">
-            <div style="text-align: center; margin-bottom: 32px;">
-                <div style="font-size: 64px; margin-bottom: 16px;">📦</div>
-                <p style="color: #6b7280;">Staff login required</p>
+        <div class="login-container">
+            <div class="login-logo">🔐</div>
+            <h1 class="login-title">2nd Fix</h1>
+            <p class="login-subtitle">PO Receiving App</p>
+            <div class="login-form">
+                <input type="text" id="login-username" class="login-input" placeholder="Username" autocapitalize="none" autocomplete="username">
+                <input type="password" id="login-password" class="login-input" placeholder="Password" autocomplete="current-password">
+                <button class="btn btn-primary login-btn-full" id="login-btn">Login →</button>
             </div>
-            
-            <div class="input-group" style="flex-direction: column; gap: 16px;">
-                <input type="text" id="login-username" placeholder="Username" style="text-align: center; font-size: 18px;" autocapitalize="none" autocomplete="username">
-                <input type="password" id="login-password" placeholder="Password" style="text-align: center; font-size: 18px;" autocomplete="current-password">
-                <button class="btn btn-primary" id="login-btn" style="width: 100%;">Login →</button>
-            </div>
-            
-            <div id="login-error" style="color: #dc2626; text-align: center; margin-top: 16px; display: none;">
+            <div id="login-error" class="login-error">
                 Invalid username or password
             </div>
-        </main>
+        </div>
     </div>
 
     <!-- Screen 1: Scan/Enter PO -->
