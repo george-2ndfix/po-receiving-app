@@ -1944,6 +1944,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             }
             
             this.relocateSearchResults = data;
+            this.relocateSearchPoId = searchValue;
             this.relocateMultiSource = true;
             this.relocateSelectedItems = [];
             
