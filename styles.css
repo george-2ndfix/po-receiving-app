@@ -2914,3 +2914,21 @@ footer {
 .location-group .item-card:last-child {
     border-radius: 0 0 8px 8px;
 }
+
+
+/* Awaiting receipt items */
+.item-card.awaiting-item {
+    opacity: 0.6;
+    background: #f9f9f9;
+}
+.awaiting-badge {
+    width: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+    flex-shrink: 0;
+}
+.location-group-header .location-icon {
+    margin-right: 6px;
+}
