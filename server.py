@@ -1818,46 +1818,68 @@ def stock_search():
         job_info = None
         po_list = []
         
+        def lookup_job_customer(jid):
+            """Inline job+customer lookup"""
+            try:
+                job_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/?ID={jid}&columns=ID,Name,Customer')
+                if job_resp.status_code == 200:
+                    jobs = job_resp.json()
+                    if jobs:
+                        job_data = jobs[0]
+                        customer = job_data.get('Customer', {})
+                        cust_name = customer.get('CompanyName') or ''
+                        if not cust_name:
+                            given = customer.get('GivenName', '') or ''
+                            family = customer.get('FamilyName', '') or ''
+                            cust_name = f"{given} {family}".strip()
+                        if not cust_name:
+                            cust_name = customer.get('Name', '')
+                        return {'jobNumber': str(jid), 'customerName': cust_name}
+            except Exception as e:
+                print(f"Error looking up job {jid}: {e}")
+            return {'jobNumber': str(jid), 'customerName': ''}
+        
         if search_type == 'po':
-            resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/?OrderNo={search_value}')
+            # Search by PO ID (users enter PO IDs, not OrderNo)
+            resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/?ID={search_value}')
             if resp.status_code != 200:
                 return jsonify({'error': 'Failed to search Simpro'}), 500
             pos = resp.json()
-            if not pos:
-                resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/?ID={search_value}')
-                pos = resp.json() if resp.status_code == 200 else []
             if not pos:
                 return jsonify({'error': f'PO {search_value} not found'}), 404
             
             for po in pos:
                 po_id = po['ID']
-                po_no = po.get('OrderNo', str(po_id))
+                po_no = str(po_id)
                 po_list.append({'id': po_id, 'orderNo': po_no})
                 
                 if not job_info:
-                    assigned = po.get('AssignedTo', {})
-                    job_no = assigned.get('Job')
-                    if job_no:
-                        try:
-                            ji = get_job_customer(job_no)
-                            job_info = {'jobNumber': str(job_no), 'customerName': ji.get('customerName', '')}
-                        except:
-                            job_info = {'jobNumber': str(job_no), 'customerName': ''}
+                    full_po = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}')
+                    if full_po.status_code == 200:
+                        po_data = full_po.json()
+                        assigned = po_data.get('AssignedTo', {})
+                        job_no = assigned.get('Job')
+                        if job_no:
+                            job_info = lookup_job_customer(job_no)
                 
-                items_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/items/')
-                if items_resp.status_code == 200:
-                    for item in items_resp.json():
-                        cat = item.get('Catalog', {})
+                # Use /catalogs/ endpoint (not /items/)
+                cats_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/catalogs/')
+                if cats_resp.status_code == 200:
+                    for cat_item in cats_resp.json():
+                        cat = cat_item.get('Catalog', {})
                         cat_id = cat.get('ID')
                         if cat_id and cat_id not in catalog_items:
                             catalog_items[cat_id] = {
                                 'catalogId': cat_id,
                                 'partNo': cat.get('PartNo', ''),
-                                'description': item.get('Name', cat.get('Name', '')),
+                                'description': cat.get('Name', cat_item.get('Description', 'Unknown Item')),
                                 'poOrderNo': po_no
                             }
+                else:
+                    print(f"Failed to get catalogs for PO {po_id}: {cats_resp.status_code}")
         
         elif search_type == 'job':
+            # Search for job
             resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/?search={search_value}')
             if resp.status_code != 200:
                 return jsonify({'error': 'Failed to search Simpro'}), 500
@@ -1867,32 +1889,44 @@ def stock_search():
             
             job = jobs[0]
             job_id = job['ID']
-            try:
-                ji = get_job_customer(job_id)
-                job_info = {'jobNumber': str(job_id), 'customerName': ji.get('customerName', '')}
-            except:
-                job_info = {'jobNumber': str(job_id), 'customerName': job.get('Site', {}).get('Name', '')}
+            job_info = lookup_job_customer(job_id)
             
+            # Find POs for this job
             po_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/?AssignedTo.Job={job_id}')
             if po_resp.status_code != 200:
-                po_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/?search={search_value}')
+                # Fallback - get recent POs and filter
+                po_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/?Page=1&Pagesize=200')
             
             if po_resp.status_code == 200:
                 for po in po_resp.json():
+                    # Check if this PO belongs to our job
+                    assigned = po.get('AssignedTo', {})
+                    if assigned.get('Job') == job_id or search_type != 'job':
+                        pass  # Include this PO
+                    
                     po_id = po['ID']
-                    po_no = po.get('OrderNo', str(po_id))
+                    
+                    # Verify this PO is for the right job
+                    full_po = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}')
+                    if full_po.status_code == 200:
+                        po_data = full_po.json()
+                        po_job = po_data.get('AssignedTo', {}).get('Job')
+                        if po_job != job_id:
+                            continue
+                    
+                    po_no = str(po_id)
                     po_list.append({'id': po_id, 'orderNo': po_no})
                     
-                    items_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/items/')
-                    if items_resp.status_code == 200:
-                        for item in items_resp.json():
-                            cat = item.get('Catalog', {})
+                    cats_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/catalogs/')
+                    if cats_resp.status_code == 200:
+                        for cat_item in cats_resp.json():
+                            cat = cat_item.get('Catalog', {})
                             cat_id = cat.get('ID')
                             if cat_id and cat_id not in catalog_items:
                                 catalog_items[cat_id] = {
                                     'catalogId': cat_id,
                                     'partNo': cat.get('PartNo', ''),
-                                    'description': item.get('Name', cat.get('Name', '')),
+                                    'description': cat.get('Name', cat_item.get('Description', 'Unknown Item')),
                                     'poOrderNo': po_no
                                 }
         
@@ -1901,29 +1935,26 @@ def stock_search():
         
         print(f"Found {len(catalog_items)} catalog items across {len(po_list)} POs")
         
-        # Get storage device IDs from receipt allocations
+        # Get storage device IDs from catalog allocations
         device_ids = set()
         device_names = {}
         
         for po in po_list:
-            try:
-                receipts_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po["id"]}/receipts/')
-                if receipts_resp.status_code == 200:
-                    for receipt in receipts_resp.json():
-                        receipt_id = receipt['ID']
-                        alloc_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po["id"]}/receipts/{receipt_id}/allocations/')
-                        if alloc_resp.status_code == 200:
-                            for alloc in alloc_resp.json():
-                                sd = alloc.get('StorageDevice', {})
-                                if isinstance(sd, dict) and sd.get('ID'):
-                                    sd_id = sd['ID']
-                                    device_ids.add(sd_id)
-                                    if sd.get('Name'):
-                                        device_names[sd_id] = sd['Name']
-            except Exception as e:
-                print(f"Error getting receipts for PO {po['id']}: {e}")
+            for cat_id in catalog_items:
+                try:
+                    alloc_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po["id"]}/catalogs/{cat_id}/allocations/')
+                    if alloc_resp.status_code == 200:
+                        for alloc in alloc_resp.json():
+                            sd = alloc.get('StorageDevice', {})
+                            if isinstance(sd, dict) and sd.get('ID'):
+                                sd_id = sd['ID']
+                                device_ids.add(sd_id)
+                                if sd.get('Name'):
+                                    device_names[sd_id] = sd['Name']
+                except Exception as e:
+                    print(f"Error getting allocations for catalog {cat_id}: {e}")
         
-        # Always check Stock Holding as fallback
+        # Always check Stock Holding (ID: 3) as fallback
         device_ids.add(3)
         device_names.setdefault(3, 'Stock Holding')
         
