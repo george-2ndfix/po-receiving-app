@@ -2693,31 +2693,46 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         const modal = document.getElementById('report-issue-modal');
         modal.classList.remove('hidden');
         
-        // Pre-fill name from session
+        // Auto-populate name from logged-in user
         const nameInput = document.getElementById('report-name');
-        if (!nameInput.value) {
+        if (this.currentStaff?.displayName) {
+            nameInput.value = this.currentStaff.displayName;
+            nameInput.readOnly = true;
+        } else {
             const staffName = document.getElementById('staff-name')?.textContent;
-            if (staffName && staffName !== 'Staff') nameInput.value = staffName;
+            if (staffName && staffName !== 'Staff') {
+                nameInput.value = staffName;
+                nameInput.readOnly = true;
+            }
+        }
+        
+        // Auto-populate email from logged-in user
+        const emailField = document.getElementById('report-email');
+        if (emailField) {
+            if (this.currentStaff?.email) {
+                emailField.value = this.currentStaff.email;
+                emailField.readOnly = true;
+            } else {
+                emailField.value = '';
+                emailField.readOnly = false;
+                emailField.placeholder = 'No email on file - enter your email';
+            }
         }
         
         // Auto-capture context
         this._captureContext();
         
-        // Set up photo handler
-        const photoInput = document.getElementById('report-photos');
-        photoInput.onchange = (e) => this._handleReportPhotos(e);
+        // Set up photo handlers for camera and library inputs
+        const cameraInput = document.getElementById('report-photos-camera');
+        if (cameraInput) cameraInput.onchange = (e) => this._handleReportPhotos(e);
+        const libraryInput = document.getElementById('report-photos-library');
+        if (libraryInput) libraryInput.onchange = (e) => this._handleReportPhotos(e);
         
         // Reset
         this._reportPhotos = [];
         document.getElementById('report-photo-preview').innerHTML = '';
         document.getElementById('report-status').classList.add('hidden');
         document.getElementById('report-submit-btn').disabled = false;
-        
-        // Auto-populate email from logged-in user
-        const emailField = document.getElementById('report-email');
-        if (emailField && this.currentStaff?.email) {
-            emailField.value = this.currentStaff.email;
-        }
     },
     
     hideReportIssue() {
