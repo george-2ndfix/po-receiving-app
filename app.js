@@ -279,7 +279,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         listEl.innerHTML = '<div class="loading">Loading staff...</div>';
         
         try {
-            const response = await fetch('/api/staff');
+            const response = await this.authFetch('/api/staff');
             const data = await response.json();
             
             if (data.staff) {
@@ -421,7 +421,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                 });
             } else {
                 // Add new staff
-                response = await fetch('/api/staff', {
+                response = await this.authFetch('/api/staff', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ username, displayName, password, role })
@@ -481,7 +481,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         listEl.innerHTML = '<div class="loading">Loading logs...</div>';
         
         try {
-            const response = await fetch('/api/logs?limit=50');
+            const response = await this.authFetch('/api/logs?limit=50');
             const data = await response.json();
             
             if (data.logs) {
@@ -941,7 +941,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             let bestStorageCount = 0;
             
             for (const jobId of jobIds) {
-                const resp = await fetch('/api/job-intel', {
+                const resp = await this.authFetch('/api/job-intel', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ job_id: parseInt(jobId) }),
@@ -1049,6 +1049,27 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         }
     },
 
+    // Wrapper for fetch that handles 401 gracefully
+    async authFetch(url, options = {}) {
+        try {
+            const response = await fetch(url, options);
+            if (response.status === 401) {
+                // Session expired — redirect to login smoothly
+                this.currentStaff = null;
+                localStorage.removeItem('po_auth_cache');
+                this.showScreen('login');
+                throw new Error('Session expired. Please log in again.');
+            }
+            return response;
+        } catch (error) {
+            if (error.message === 'Session expired. Please log in again.') {
+                throw error;
+            }
+            throw error;
+        }
+    },
+
+
     // ============================================
     selectStorage(event) {
         const select = event.target;
@@ -1080,7 +1101,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         document.getElementById('processing-status').textContent = 'Allocating items in Simpro...';
         
         try {
-            const response = await fetch('/api/allocate', {
+            const response = await this.authFetch('/api/allocate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 cache: 'no-store',
@@ -1109,7 +1130,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                 // Save backorder items if any
                 if (this.backorderItems.length > 0) {
                     try {
-                        await fetch('/api/backorder', {
+                        await this.authFetch('/api/backorder', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
@@ -1127,7 +1148,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                 // Save docket OCR data if available
                 if (this.docketOCRData) {
                     try {
-                        await fetch('/api/docket-data', {
+                        await this.authFetch('/api/docket-data', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
@@ -1179,7 +1200,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                             }
                             
                             if (jobIds.length > 0) {
-                                const uploadResp = await fetch('/api/upload-photos', {
+                                const uploadResp = await this.authFetch('/api/upload-photos', {
                                     method: 'POST',
                                     headers: { 'Content-Type': 'application/json' },
                                     body: JSON.stringify({
@@ -1326,7 +1347,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         try {
             let html = '';
             for (const jobId of jobIds) {
-                const resp = await fetch('/api/job-intel', {
+                const resp = await this.authFetch('/api/job-intel', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ job_id: parseInt(jobId) }),
@@ -1446,7 +1467,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                 storageLocation: this.selectedStorage?.name || 'Unknown'
             }));
             
-            const response = await fetch('/api/picking-slip/generate', {
+            const response = await this.authFetch('/api/picking-slip/generate', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
@@ -1482,7 +1503,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
     // ============================================
     async loadPicklistCount() {
         try {
-            const response = await fetch('/api/stock-pick-list');
+            const response = await this.authFetch('/api/stock-pick-list');
             const data = await response.json();
             const count = data.count || 0;
             
@@ -1498,7 +1519,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         this.showScreen('picklist');
         
         try {
-            const response = await fetch('/api/stock-pick-list');
+            const response = await this.authFetch('/api/stock-pick-list');
             const data = await response.json();
             
             this.picklistItems = data.items || [];
@@ -1823,7 +1844,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                 }
             } catch(e) { /* popup blocked - will use fallback */ }
             
-            const response = await fetch('/api/label-pdf', {
+            const response = await this.authFetch('/api/label-pdf', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -1911,7 +1932,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         document.getElementById('relocate-search-btn').disabled = true;
         
         try {
-            const response = await fetch('/api/stock-search', {
+            const response = await this.authFetch('/api/stock-search', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ searchType, searchValue })
@@ -2294,7 +2315,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                     document.getElementById('processing-detail').textContent = 
                         `Moving from ${group.sourceName} (${i + 1}/${filteredGroups.length})`;
                     
-                    const response = await fetch('/api/stock-move', {
+                    const response = await this.authFetch('/api/stock-move', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -2336,7 +2357,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                 }
             } else {
                 // Original single-source flow
-                const response = await fetch('/api/relocate', {
+                const response = await this.authFetch('/api/relocate', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -2446,7 +2467,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
     // ============================================
     async loadReceiptingStatus() {
         try {
-            const response = await fetch('/api/needs-receipting');
+            const response = await this.authFetch('/api/needs-receipting');
             const data = await response.json();
             const alertEl = document.getElementById('receipting-alert');
             const iconEl = document.getElementById('receipting-icon');
@@ -2642,7 +2663,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         };
         
         try {
-            const resp = await fetch('/api/report-damage', {
+            const resp = await this.authFetch('/api/report-damage', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
@@ -2843,7 +2864,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         };
         
         try {
-            const resp = await fetch('/api/report-fault', {
+            const resp = await this.authFetch('/api/report-fault', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
