@@ -73,6 +73,39 @@ const app = {
                 window.scrollTo(0, 0);
             });
         }
+
+        // Prevent overscroll bounce on all screens at scroll boundaries
+        document.addEventListener('touchstart', function(e) {
+            if (e.touches.length === 1) {
+                window._touchStartY = e.touches[0].clientY;
+            }
+        }, { passive: true });
+        
+        document.addEventListener('touchmove', function(e) {
+            // Skip if login prevention already handles it
+            const loginScreen = document.getElementById('screen-login');
+            if (loginScreen && loginScreen.classList.contains('active')) return;
+            
+            const activeScreen = document.querySelector('.screen.active');
+            if (!activeScreen) return;
+            
+            const scrollable = e.target.closest('.screen.active main, .screen.active .modal-body, .screen.active .sop-content');
+            if (!scrollable) {
+                // Not in a scrollable area — prevent bounce
+                e.preventDefault();
+                return;
+            }
+            
+            const touchY = e.touches[0].clientY;
+            const deltaY = window._touchStartY - touchY;
+            const atTop = scrollable.scrollTop <= 0;
+            const atBottom = scrollable.scrollTop + scrollable.clientHeight >= scrollable.scrollHeight - 1;
+            
+            // Prevent bounce at scroll boundaries
+            if ((atTop && deltaY < 0) || (atBottom && deltaY > 0)) {
+                e.preventDefault();
+            }
+        }, { passive: false });
     },
     
     bindEvents() {
