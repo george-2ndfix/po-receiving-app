@@ -61,9 +61,15 @@ body {
 
 .screen.active {
     display: flex;
+    flex-direction: column;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
     overflow: hidden;
     overscroll-behavior-y: contain;
-    height: 100%;
+    -webkit-overflow-scrolling: auto;
 }
 
 /* Header */
