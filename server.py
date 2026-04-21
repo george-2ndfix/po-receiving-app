@@ -3202,7 +3202,7 @@ def job_intel():
         
         token = get_simpro_token()
         headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-        base = SIMPRO_BASE
+        base = SIMPRO_BASE_URL
         
         # 1. Get job details
         job_resp = requests.get(f"{base}/companies/{COMPANY_ID}/jobs/{job_id}/", headers=headers)
