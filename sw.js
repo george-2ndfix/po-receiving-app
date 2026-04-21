@@ -1,4 +1,4 @@
-const CACHE_NAME = 'po-receiving-v64';
+const CACHE_NAME = 'po-receiving-v65';
 const urlsToCache = [
   '/styles.css',
   '/storage-locations.json',
@@ -8,15 +8,16 @@ const urlsToCache = [
 ];
 // NOTE: index.html and app.js NOT cached - always fetch fresh to get latest code
 
-// Install - cache static assets only
+// Install - cache static assets and activate immediately
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => cache.addAll(urlsToCache))
+      .then(() => self.skipWaiting()) // Don't wait — activate immediately
   );
 });
 
-// Activate - clean old caches immediately
+// Activate - clean old caches and take control of all clients
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys().then(cacheNames => {
@@ -27,8 +28,15 @@ self.addEventListener('activate', event => {
           }
         })
       );
-    })
+    }).then(() => self.clients.claim()) // Take control of all open tabs
   );
+});
+
+// Listen for skip waiting messages from the app
+self.addEventListener('message', event => {
+  if (event.data === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
 
 // Fetch - network first for HTML, JS, and API; cache fallback for static assets
