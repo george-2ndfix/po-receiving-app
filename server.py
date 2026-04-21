@@ -28,6 +28,11 @@ from PIL import Image, ImageDraw, ImageFont
 
 app = Flask(__name__, static_folder='.')
 app.secret_key = os.environ.get('SECRET_KEY', '2ndfix-po-app-secret-key-2026-persistent')
+app.config['SESSION_PERMANENT'] = True
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SECURE'] = True
 
 @app.after_request
 def add_cache_headers(response):
@@ -554,6 +559,7 @@ def staff_login():
         return jsonify({'error': 'Invalid username or password'}), 401
     
     # Set session
+    session.permanent = True
     session['staff_id'] = staff['id']
     session['username'] = staff['username']
     session['display_name'] = staff['display_name']
