@@ -32,6 +32,9 @@ html {
     overflow: hidden;
     height: 100%;
     overscroll-behavior: none;
+    position: fixed;
+    inset: 0;
+    width: 100%;
 }
 
 body {
@@ -42,6 +45,7 @@ body {
     height: 100%;
     overflow: hidden;
     position: fixed;
+    inset: 0;
     width: 100%;
     color: var(--gray-800);
     font-size: 16px;
@@ -58,7 +62,7 @@ body {
 .screen.active {
     display: flex;
     overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
     height: 100%;
 }
 
@@ -2691,7 +2695,7 @@ footer {
     justify-content: center;
     background: var(--gray-50, #f9fafb);
     touch-action: none !important;
-    -webkit-overflow-scrolling: auto !important;
+    overscroll-behavior-y: none !important;
 }
 #screen-login.active {
     display: flex !important;
@@ -3080,5 +3084,5 @@ footer {
 
 #screen-sop main {
     overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
 }
