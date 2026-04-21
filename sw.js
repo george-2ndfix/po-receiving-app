@@ -1,4 +1,4 @@
-const CACHE_NAME = 'po-receiving-v61';
+const CACHE_NAME = 'po-receiving-v62';
 const urlsToCache = [
   '/styles.css',
   '/storage-locations.json',
@@ -14,7 +14,6 @@ self.addEventListener('install', event => {
     caches.open(CACHE_NAME)
       .then(cache => cache.addAll(urlsToCache))
   );
-  self.skipWaiting();
 });
 
 // Activate - clean old caches immediately
@@ -30,7 +29,6 @@ self.addEventListener('activate', event => {
       );
     })
   );
-  self.clients.claim();
 });
 
 // Fetch - network first for HTML, JS, and API; cache fallback for static assets
