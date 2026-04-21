@@ -23,23 +23,43 @@
     <!-- Tesseract.js OCR -->
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     
-    <!-- Register Service Worker with Force Update -->
+    <!-- Register Service Worker with Auto-Update -->
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
+                let refreshing = false;
+                
+                // Listen for new SW taking control — reload to get fresh assets
+                navigator.serviceWorker.addEventListener('controllerchange', () => {
+                    if (!refreshing) {
+                        refreshing = true;
+                        console.log('New version active — reloading');
+                        window.location.reload();
+                    }
+                });
+                
                 navigator.serviceWorker.register('sw.js')
                     .then(reg => {
                         console.log('SW registered');
-                        // Check for updates immediately and every 5 minutes
+                        // Check for updates on every page load
                         reg.update();
+                        // Also check every 5 minutes for long-lived sessions
                         setInterval(() => reg.update(), 5 * 60 * 1000);
-                        // When new SW is waiting, activate it immediately
+                        
+                        // If a SW is already waiting (user ignored previous update), activate it
+                        if (reg.waiting) {
+                            reg.waiting.postMessage('SKIP_WAITING');
+                        }
+                        
+                        // When new SW is found installing, watch for it to become ready
                         reg.addEventListener('updatefound', () => {
                             const newWorker = reg.installing;
+                            if (!newWorker) return;
                             newWorker.addEventListener('statechange', () => {
-                                if (newWorker.state === 'activated') {
-                                    console.log('New version available - refreshing');
-                                    window.location.reload();
+                                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                    // New SW is ready and waiting — tell it to take over
+                                    console.log('New version installed — activating');
+                                    newWorker.postMessage('SKIP_WAITING');
                                 }
                             });
                         });
