@@ -2048,7 +2048,10 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                 quantity: item.quantity,
                 storageId: item.storageId,
                 storageName: item.storageName,
-                poOrderNo: item.poOrderNo
+                poOrderNo: item.poOrderNo,
+                jobId: item.jobId || null,
+                sectionId: item.sectionId || null,
+                costCentreId: item.costCentreId || null
             });
         }
         
