@@ -2185,6 +2185,30 @@ def stock_move():
             
             print(f"\n--- Moving {part_no} (Catalog:{catalog_id}) x{quantity} ---")
             
+            # Auto-lookup section/CC if we have jobId but missing section/CC
+            if job_id and (not section_id or not cc_id):
+                print(f"  Auto-looking up section/CC for job {job_id}, catalog {catalog_id}")
+                sec_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/')
+                if sec_resp.status_code == 200:
+                    for sec in sec_resp.json():
+                        sid = sec.get('ID')
+                        if not sid:
+                            continue
+                        cc_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{sid}/costCenters/')
+                        if cc_resp.status_code == 200:
+                            for cc in cc_resp.json():
+                                ccid = cc.get('ID')
+                                if not ccid:
+                                    continue
+                                stock_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{sid}/costCenters/{ccid}/stock/{catalog_id}/')
+                                if stock_resp.status_code == 200:
+                                    section_id = sid
+                                    cc_id = ccid
+                                    print(f"  Found: section={section_id}, cc={cc_id}")
+                                    break
+                            if section_id and cc_id:
+                                break
+
             if job_id and section_id and cc_id:
                 # Job-allocated stock: 3-step process
                 print(f"Job-allocated: Job {job_id}, Section {section_id}, CC {cc_id}")
