@@ -607,6 +607,12 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         this.selectedItems = [];
         this.backorderItems = [];
         
+        // Build items with CC grouping headers
+        let lastCCId = null;
+        let hasMultipleCCs = false;
+        const uniqueCCs = new Set(this.currentPO.items.map(i => i.costCentreId).filter(Boolean));
+        if (uniqueCCs.size > 1) hasMultipleCCs = true;
+        
         itemsList.innerHTML = this.currentPO.items.map((item, index) => {
             const statusClass = item.receiptStatus === 'fully_receipted' ? 'receipted' 
                 : item.receiptStatus === 'partially_receipted' ? 'partial' : 'pending';
@@ -614,7 +620,14 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                 : item.receiptStatus === 'partially_receipted' ? 'Partially receipted' : 'Not yet receipted';
             const remaining = item.quantityOrdered - item.quantityReceived;
             
-            return `
+            // Add CC header if CC changed and there are multiple CCs
+            let ccHeader = '';
+            if (hasMultipleCCs && item.costCentreId && item.costCentreId !== lastCCId) {
+                lastCCId = item.costCentreId;
+                ccHeader = `<div class="cc-group-header">📋 ${item.costCentreName || 'Unknown Cost Centre'}</div>`;
+            }
+            
+            return ccHeader + `
                 <div class="item-card ${statusClass}" data-index="${index}" data-catalog-id="${item.catalogId}">
                     <label class="item-checkbox">
                         <input type="checkbox" onchange="app.toggleItem(${index})">
@@ -625,6 +638,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                         <div class="item-meta">
                             ${item.partNo ? `<span class="item-part">${item.partNo}</span>` : ''}
                             ${item.jobNumber ? `<span class="item-job">Job ${item.jobNumber}${item.customerName ? ' - ' + item.customerName : ''}</span>` : ''}
+                            ${item.costCentreName ? `<span class="item-cc">📋 ${item.costCentreName}</span>` : ''}
                             <span class="item-qty">Ordered: ${item.quantityOrdered}</span>
                             <span class="item-received">Received: ${item.quantityReceived}</span>
                             ${item.storageLocation ? `<span class="item-storage">📍 ${item.storageLocation}</span>` : ''}
