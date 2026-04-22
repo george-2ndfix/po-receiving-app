@@ -3096,3 +3096,19 @@ footer {
     overflow-y: auto;
     overscroll-behavior-y: contain;
 }
+
+/* Cost Centre Group Header */
+.cc-group-header {
+    background: #1a73e8;
+    color: white;
+    padding: 8px 16px;
+    border-radius: 8px;
+    margin: 12px 0 4px 0;
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.item-cc {
+    color: #1a73e8;
+    font-weight: 500;
+}
