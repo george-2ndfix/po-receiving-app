@@ -1085,6 +1085,19 @@ def get_po_details(po_number):
             # Leave customer_name empty - never use vendor/supplier name as customer
             customer_name = ''
         
+        # Pre-fetch all cost centres for this job to get custom CC names
+        cc_name_map = {}
+        if job_number and isinstance(job_number, int):
+            po_section_id = assigned_to.get('Section')
+            if po_section_id:
+                try:
+                    cc_list_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_number}/sections/{po_section_id}/costCenters/')
+                    if cc_list_resp.status_code == 200:
+                        for cc_item in cc_list_resp.json():
+                            cc_name_map[cc_item["ID"]] = cc_item.get("Name", cc_item.get("CostCenter", {}).get("Name", "Unknown"))
+                except Exception as cc_err:
+                    print(f"Error fetching CC names for job {job_number}: {cc_err}")
+        
         # Get PO line items (catalogs)
         items_response = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/catalogs/')
         
@@ -1135,6 +1148,8 @@ def get_po_details(po_number):
             item_job_number = None
             item_customer_name = None
             item_storage_location = None
+            item_cc_id = None
+            item_cc_name = None
             
             if catalog_id:
                 try:
@@ -1153,6 +1168,14 @@ def get_po_details(po_number):
                                 job_info = get_job_customer(alloc_job)
                                 item_job_number = job_info['jobNumber']
                                 item_customer_name = job_info['customerName']
+                            
+                            # Extract per-item cost centre
+                            if not item_cc_id:
+                                alloc_cc_id = alloc_assigned.get('ID')  # Job CC ID (e.g., 31190)
+                                if alloc_cc_id:
+                                    item_cc_id = alloc_cc_id
+                                    # Use custom name from our pre-fetched map, fall back to generic type name
+                                    item_cc_name = cc_name_map.get(alloc_cc_id, alloc_assigned.get('CostCenter', {}).get('Name', ''))
                             
                             # Extract current storage device
                             storage_dev = alloc.get('StorageDevice', {})
@@ -1190,7 +1213,9 @@ def get_po_details(po_number):
                 'receiptStatus': receipt_status,
                 'jobNumber': item_job_number,
                 'customerName': item_customer_name,
-                'storageLocation': item_storage_location
+                'storageLocation': item_storage_location,
+                'costCentreId': item_cc_id,
+                'costCentreName': item_cc_name
             })
         
         return jsonify({
