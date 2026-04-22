@@ -462,9 +462,9 @@ def init_db():
     staff_seed = [
         ('george', 'George', 'admin', '2ndFix5082', 'george@2ndfix.com.au'),
         ('jim', 'Jim', 'manager', '2ndFix5082', 'jim@2ndfix.com.au'),
-        ('cherie', 'Cherie', 'manager', '2ndFix5082', None),
+        ('cherie', 'Cherie', 'manager', '2ndFix5082', 'accounts@2ndfix.com.au'),
         ('tom', 'Tom', 'manager', '2ndFix5082', 'tom@2ndfix.com.au'),
-        ('tyrese', 'Tyrese', 'staff', 'Tyrese123', None),
+        ('tyrese', 'Tyrese', 'staff', 'Tyrese123', 'info@2ndfix.com.au'),
         ('mik', 'Mik', 'staff', '2ndFix5082$', None),
         ('ryan', 'Ryan', 'staff', '2ndFix5082$', None),
     ]
@@ -483,6 +483,11 @@ def init_db():
                           (email, username, email))
             if cursor.rowcount > 0:
                 print(f"Updated email for {username}: {email}")
+    
+    # Update staff emails that were missing
+    cursor.execute("UPDATE staff SET email = 'accounts@2ndfix.com.au' WHERE username = 'cherie' AND (email IS NULL OR email = '')")
+    cursor.execute("UPDATE staff SET email = 'info@2ndfix.com.au' WHERE username = 'tyrese' AND (email IS NULL OR email = '')")
+    conn.commit()
     
     conn.commit()
     conn.close()
@@ -1023,17 +1028,23 @@ def get_storage_locations():
 def get_po_details(po_number):
     """Get PO details from Simpro"""
     try:
-        # Search for PO by ID
-        response = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/?ID={po_number}')
-        
-        if response.status_code != 200:
+        # Direct lookup by ID first
+        response = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_number}')
+        if response.status_code == 200:
+            po_id = po_number
+        elif response.status_code == 404:
+            # Maybe user entered OrderNo instead of ID - try OrderNo search
+            search_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/?OrderNo={po_number}')
+            if search_resp.status_code == 200:
+                orders = search_resp.json()
+                if orders:
+                    po_id = orders[0].get('ID')
+                else:
+                    return jsonify({'error': f'PO #{po_number} not found'}), 404
+            else:
+                return jsonify({'error': f'PO #{po_number} not found'}), 404
+        else:
             return jsonify({'error': f'Simpro API error: {response.status_code}'}), 500
-        
-        orders = response.json()
-        if not orders:
-            return jsonify({'error': f'PO #{po_number} not found'}), 404
-        
-        po_id = orders[0].get('ID')
         
         # Get full PO record (search returns minimal data)
         full_po_response = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}')
