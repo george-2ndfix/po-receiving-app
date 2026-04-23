@@ -1269,7 +1269,8 @@ def allocate_items():
         # ============================================
         # Server-side receipt check (don't trust front-end status alone)
         # ============================================
-        receipt_allocations = {}  # catalog_id -> {storage_device_id, storage_name, quantity}
+        receipt_allocations = {}  # catalog_id -> {storage_device_id, storage_name, quantity, cc_id, job_id, section_id}
+        receipt_alloc_all = {}  # catalog_id -> [list of all allocations with CC info] (v69)
         catalog_items_received = {}  # catalog_id -> True/False (per-catalog ItemsReceived)
         catalog_receipt_id = {}  # catalog_id -> receipt_id (for PATCH ItemsReceived)
         receipted_catalog_ids = set()  # Track which catalogs actually appear in a receipt
@@ -1309,11 +1310,30 @@ def allocate_items():
                                     sd = alloc.get('StorageDevice', {})
                                     sd_id = sd.get('ID') if isinstance(sd, dict) else sd
                                     sd_name = sd.get('Name', 'Unknown') if isinstance(sd, dict) else 'Unknown'
-                                    receipt_allocations[cat_id] = {
+                                    # Extract CC assignment info for 3-step stock move (v69)
+                                    assigned_to = alloc.get('AssignedTo', {})
+                                    cc_id_val = None
+                                    job_id_val = None
+                                    section_id_val = None
+                                    if isinstance(assigned_to, dict):
+                                        cc_id_val = assigned_to.get('ID')
+                                        job_ref = assigned_to.get('Job', {})
+                                        section_ref = assigned_to.get('Section', {})
+                                        job_id_val = job_ref.get('ID') if isinstance(job_ref, dict) else job_ref
+                                        section_id_val = section_ref.get('ID') if isinstance(section_ref, dict) else section_ref
+                                    alloc_entry = {
                                         'storage_id': sd_id,
                                         'storage_name': sd_name,
-                                        'quantity': alloc.get('Quantity', 0)
+                                        'quantity': alloc.get('Quantity', 0),
+                                        'cc_id': cc_id_val,
+                                        'job_id': job_id_val,
+                                        'section_id': section_id_val
                                     }
+                                    if cat_id not in receipt_allocations:
+                                        receipt_allocations[cat_id] = alloc_entry
+                                    if cat_id not in receipt_alloc_all:
+                                        receipt_alloc_all[cat_id] = []
+                                    receipt_alloc_all[cat_id].append(alloc_entry)
                 else:
                     print(f"No receipts found for PO {po_id} - truly not receipted")
             print(f"Server-side receipt check: po_is_receipted={po_is_receipted}, ItemsReceived={items_received_flag}, receipted_catalogs={receipted_catalog_ids}, allocations={receipt_allocations}")
@@ -1570,121 +1590,240 @@ def allocate_items():
             
             post_receipt_items = physical_items
             
-            # Process each item INDIVIDUALLY (not batched) to avoid Simpro bug
+            # ============================================
+            # v69: 3-step CC stock move for post-receipt items
+            # CC-allocated stock does NOT appear in storage device InventoryCount.
+            # Instead of checking InventoryCount (which returns 0), we use receipt
+            # allocation data + 3-step CC stock move:
+            #   1. Un-assign from CC at source storage
+            #   2. Stock transfer from source to destination
+            #   3. Re-assign to CC at destination storage
+            # ============================================
+            
+            print(f"[v69] Receipt alloc_all keys: {list(receipt_alloc_all.keys())}")
+            print(f"[v69] Receipt allocations: {receipt_allocations}")
+            
             for item in post_receipt_items:
                 catalog_id = item.get('catalogId')
                 part_no = item.get('partNo', '')
                 desc = item.get('description', '')
                 quantity = item.get('quantity', 1)
-                source_id = item.get('source_storage_id', STOCK_HOLDING_ID)
-                source_name = item.get('source_storage_name', 'Stock Holding')
+                dest_storage_id = int(storage_device_id)
                 
                 if quantity <= 0:
                     quantity = 1
                 
-                # Pre-check: Query stock levels to skip items with zero stock
-                try:
-                    stock_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/storageDevices/{source_id}/stock/?Catalog.ID={catalog_id}')
-                    if stock_resp.status_code == 200:
-                        stock_data = stock_resp.json()
-                        source_stock = 0
-                        if stock_data and len(stock_data) > 0:
-                            source_stock = stock_data[0].get('InventoryCount', 0)
-                        
-                        if source_stock <= 0:
-                            # Retry: Simpro may still be processing ItemsReceived
-                            for retry in range(3):
-                                print(f"Retry {retry+1}/3: {part_no} has 0 stock in {source_name}, waiting 3s...")
-                                time.sleep(3)
-                                retry_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/storageDevices/{source_id}/stock/?Catalog.ID={catalog_id}')
-                                if retry_resp.status_code == 200:
-                                    retry_data = retry_resp.json()
-                                    if retry_data and len(retry_data) > 0:
-                                        source_stock = retry_data[0].get('InventoryCount', 0)
-                                        if source_stock > 0:
-                                            print(f"Stock appeared after retry {retry+1}: {part_no} = {source_stock}")
-                                            break
-                            
-                            if source_stock <= 0:
-                                print(f"Skipping {part_no} ({desc}): 0 stock in {source_name} after 3 retries")
-                                results.append({
-                                    'catalogId': catalog_id,
-                                    'success': False,
-                                    'quantity': quantity,
-                                    'method': 'skipped_zero_stock',
-                                    'error': f'No stock available in {source_name} - item may not have arrived yet. ItemsReceived was ticked but stock did not appear after retries.'
-                                })
-                                continue
-                        
-                        print(f"Stock check: {part_no} = {source_stock} in {source_name}")
-                        
-                        # Cap quantity to available stock
-                        if quantity > source_stock:
-                            print(f"Reducing {part_no} qty from {quantity} to {source_stock} (available stock)")
-                            quantity = int(source_stock)
-                    else:
-                        print(f"Could not check stock for catalog {catalog_id}: {stock_resp.status_code} - skipping")
-                        results.append({
-                            'catalogId': catalog_id,
-                            'success': False,
-                            'quantity': quantity,
-                            'method': 'skipped_stock_check_failed',
-                            'error': f'Could not verify stock level in {source_name} (API returned {stock_resp.status_code})'
-                        })
-                        continue
-                except Exception as e:
-                    print(f"Stock check error for catalog {catalog_id}: {e} - skipping")
+                # Get receipt allocation(s) for this catalog
+                allocs = receipt_alloc_all.get(catalog_id) or receipt_alloc_all.get(int(catalog_id)) if catalog_id else None
+                if not allocs:
+                    allocs = receipt_alloc_all.get(str(catalog_id))
+                
+                # Also try single allocation from receipt_allocations
+                if not allocs:
+                    single_alloc = receipt_allocations.get(catalog_id) or receipt_allocations.get(int(catalog_id)) if catalog_id else None
+                    if not single_alloc:
+                        single_alloc = receipt_allocations.get(str(catalog_id))
+                    if single_alloc:
+                        allocs = [single_alloc]
+                
+                if not allocs:
+                    # No allocation data found - fetch receipt detail fresh
+                    print(f"[v69] No allocation data for catalog {catalog_id}, fetching receipt detail...")
+                    r_id = catalog_receipt_id.get(catalog_id) or catalog_receipt_id.get(int(catalog_id) if catalog_id else None)
+                    if not r_id:
+                        r_id = first_receipt_id if 'first_receipt_id' in dir() else None
+                    if r_id:
+                        try:
+                            rd_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/receipts/{r_id}/')
+                            if rd_resp.status_code == 200:
+                                rd = rd_resp.json()
+                                for cat_item in rd.get('Catalogs', []):
+                                    cid = cat_item.get('Catalog', {}).get('ID')
+                                    if cid and int(cid) == int(catalog_id):
+                                        allocs = []
+                                        for al in cat_item.get('Allocations', []):
+                                            sd = al.get('StorageDevice', {})
+                                            sd_id = sd.get('ID') if isinstance(sd, dict) else sd
+                                            sd_nm = sd.get('Name', 'Unknown') if isinstance(sd, dict) else 'Unknown'
+                                            at = al.get('AssignedTo', {})
+                                            cc_v = None
+                                            job_v = None
+                                            sec_v = None
+                                            if isinstance(at, dict):
+                                                cc_v = at.get('ID')
+                                                jr = at.get('Job', {})
+                                                sr = at.get('Section', {})
+                                                job_v = jr.get('ID') if isinstance(jr, dict) else jr
+                                                sec_v = sr.get('ID') if isinstance(sr, dict) else sr
+                                            allocs.append({
+                                                'storage_id': sd_id,
+                                                'storage_name': sd_nm,
+                                                'quantity': al.get('Quantity', 0),
+                                                'cc_id': cc_v,
+                                                'job_id': job_v,
+                                                'section_id': sec_v
+                                            })
+                                        break
+                        except Exception as fetch_err:
+                            print(f"[v69] Error fetching receipt detail: {fetch_err}")
+                
+                if not allocs:
+                    print(f"[v69] WARN: No receipt allocation data for catalog {catalog_id} ({part_no}) - cannot process")
                     results.append({
                         'catalogId': catalog_id,
                         'success': False,
                         'quantity': quantity,
-                        'method': 'skipped_stock_check_error',
-                        'error': f'Stock check failed: {str(e)}'
+                        'method': 'cc_stock_move_no_alloc',
+                        'error': 'No receipt allocation data found for this item. Cannot determine CC assignment.'
                     })
                     continue
                 
-                # Execute stock transfer — one item per POST request
-                transfer_payload = {
-                    'SourceStorageDeviceID': int(source_id),
-                    'Items': [{
-                        'CatalogID': int(catalog_id),
-                        'DestinationStorageDeviceID': int(storage_device_id),
-                        'Quantity': int(quantity)
-                    }]
-                }
+                print(f"[v69] Processing {part_no} (catalog {catalog_id}) x{quantity}, dest={dest_storage_id}, allocs={allocs}")
                 
-                print(f"[STOCK TRANSFER] {part_no} x{quantity}: {source_name} (ID:{source_id}) -> {storage_name} (ID:{storage_device_id})")
-                print(f"Transfer payload: {json.dumps(transfer_payload)}")
+                item_success = True
+                item_messages = []
+                remaining_qty = int(quantity)
                 
-                # POST to stockTransfer/ (singular — verified working endpoint)
-                transfer_response = simpro_request('POST', f'/companies/{COMPANY_ID}/stockTransfer/', json=transfer_payload)
+                for alloc_info in allocs:
+                    if remaining_qty <= 0:
+                        break
+                    
+                    source_storage_id = alloc_info.get('storage_id')
+                    source_storage_name = alloc_info.get('storage_name', 'Unknown')
+                    alloc_qty = int(alloc_info.get('quantity', 0))
+                    cc_id = alloc_info.get('cc_id')
+                    job_id = alloc_info.get('job_id')
+                    section_id = alloc_info.get('section_id')
+                    
+                    move_qty = min(remaining_qty, alloc_qty) if alloc_qty > 0 else remaining_qty
+                    if move_qty <= 0:
+                        move_qty = remaining_qty
+                    
+                    # SPECIAL CASE: destination == source storage - no move needed!
+                    if source_storage_id and int(source_storage_id) == dest_storage_id:
+                        print(f"[v69] {part_no}: dest == source ({dest_storage_id}), no move needed")
+                        item_messages.append(f'Stock already at {source_storage_name} (no move needed)')
+                        remaining_qty -= move_qty
+                        continue
+                    
+                    if not source_storage_id:
+                        source_storage_id = STOCK_HOLDING_ID
+                        source_storage_name = 'Stock Holding'
+                    
+                    print(f"[v69] 3-step CC move for {part_no} x{move_qty}: {source_storage_name}({source_storage_id}) -> {storage_name}({dest_storage_id})")
+                    print(f"[v69] CC info: job={job_id}, section={section_id}, cc={cc_id}")
+                    
+                    step_failed = False
+                    
+                    # STEP 1: Un-assign from CC at source (frees stock into InventoryCount)
+                    if cc_id and job_id and section_id:
+                        try:
+                            print(f"[v69] Step 1: Un-assign catalog {catalog_id} from CC {cc_id} at storage {source_storage_id}")
+                            unassign_resp = simpro_request(
+                                'PATCH',
+                                f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{section_id}/costCenters/{cc_id}/stock/{catalog_id}/',
+                                json={'AssignedBreakdown': [{'Storage': int(source_storage_id), 'Quantity': 0}]}
+                            )
+                            print(f"[v69] Step 1 response: {unassign_resp.status_code} - {unassign_resp.text[:200] if unassign_resp.text else ''}")
+                            if unassign_resp.status_code not in (200, 204):
+                                print(f"[v69] Step 1 FAILED: {unassign_resp.status_code}")
+                                step_failed = True
+                                item_messages.append(f'Step 1 failed (un-assign): HTTP {unassign_resp.status_code}')
+                        except Exception as step1_err:
+                            print(f"[v69] Step 1 ERROR: {step1_err}")
+                            step_failed = True
+                            item_messages.append(f'Step 1 error: {str(step1_err)}')
+                    else:
+                        print(f"[v69] No CC info - skipping step 1, will attempt direct transfer")
+                    
+                    # STEP 2: Stock transfer from source to destination
+                    if not step_failed:
+                        try:
+                            transfer_payload = {
+                                'Catalog': int(catalog_id),
+                                'FromStorage': int(source_storage_id),
+                                'ToStorage': int(dest_storage_id),
+                                'Quantity': int(move_qty)
+                            }
+                            print(f"[v69] Step 2: Stock transfer {json.dumps(transfer_payload)}")
+                            transfer_resp = simpro_request('POST', f'/companies/{COMPANY_ID}/stockTransfer/', json=transfer_payload)
+                            print(f"[v69] Step 2 response: {transfer_resp.status_code} - {transfer_resp.text[:200] if transfer_resp.text else ''}")
+                            if transfer_resp.status_code not in (200, 201, 204):
+                                print(f"[v69] Step 2 FAILED: {transfer_resp.status_code}")
+                                step_failed = True
+                                err_detail = ''
+                                try:
+                                    ed = transfer_resp.json()
+                                    if isinstance(ed, dict) and 'Message' in ed:
+                                        err_detail = ed['Message']
+                                except:
+                                    err_detail = transfer_resp.text[:200] if transfer_resp.text else ''
+                                item_messages.append(f'Step 2 failed (transfer): HTTP {transfer_resp.status_code} {err_detail}')
+                                
+                                # Rollback step 1 if we un-assigned
+                                if cc_id and job_id and section_id:
+                                    try:
+                                        print(f"[v69] Rolling back step 1: re-assigning to CC at source")
+                                        rb_resp = simpro_request(
+                                            'POST',
+                                            f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{section_id}/costCenters/{cc_id}/stock/',
+                                            json={'Catalog': int(catalog_id), 'AssignedBreakdown': [{'Storage': int(source_storage_id), 'Quantity': int(move_qty)}]}
+                                        )
+                                        print(f"[v69] Rollback response: {rb_resp.status_code}")
+                                    except Exception as rb_err:
+                                        print(f"[v69] Rollback failed: {rb_err}")
+                        except Exception as step2_err:
+                            print(f"[v69] Step 2 ERROR: {step2_err}")
+                            step_failed = True
+                            item_messages.append(f'Step 2 error: {str(step2_err)}')
+                    
+                    # STEP 3: Re-assign to CC at destination
+                    if not step_failed and cc_id and job_id and section_id:
+                        try:
+                            print(f"[v69] Step 3: Re-assign catalog {catalog_id} to CC {cc_id} at storage {dest_storage_id}")
+                            reassign_resp = simpro_request(
+                                'POST',
+                                f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{section_id}/costCenters/{cc_id}/stock/',
+                                json={'Catalog': int(catalog_id), 'AssignedBreakdown': [{'Storage': int(dest_storage_id), 'Quantity': int(move_qty)}]}
+                            )
+                            print(f"[v69] Step 3 response: {reassign_resp.status_code} - {reassign_resp.text[:200] if reassign_resp.text else ''}")
+                            if reassign_resp.status_code not in (200, 201, 204):
+                                print(f"[v69] Step 3 FAILED: {reassign_resp.status_code}")
+                                step_failed = True
+                                item_messages.append(f'Step 3 failed (re-assign): HTTP {reassign_resp.status_code}')
+                        except Exception as step3_err:
+                            print(f"[v69] Step 3 ERROR: {step3_err}")
+                            step_failed = True
+                            item_messages.append(f'Step 3 error: {str(step3_err)}')
+                    elif not step_failed and not (cc_id and job_id and section_id):
+                        print(f"[v69] No CC info - skipping step 3 (re-assign)")
+                        item_messages.append('Transferred (no CC re-assignment - CC info not available)')
+                    
+                    if step_failed:
+                        item_success = False
+                    else:
+                        if cc_id and job_id and section_id:
+                            item_messages.append(f'3-step CC move OK: {source_storage_name} -> {storage_name}')
+                        else:
+                            item_messages.append(f'Direct transfer OK: {source_storage_name} -> {storage_name}')
+                        remaining_qty -= move_qty
                 
-                print(f"Stock Transfer Response: {transfer_response.status_code} - {transfer_response.text}")
-                
-                if transfer_response.status_code in (200, 201, 204):
+                # Record result
+                if item_success:
                     results.append({
                         'catalogId': catalog_id,
                         'success': True,
                         'quantity': quantity,
                         'verified': True,
-                        'method': 'stock_transfer',
-                        'message': f'Transferred from {source_name} to {storage_name}'
+                        'method': 'cc_stock_move',
+                        'message': '; '.join(item_messages) if item_messages else f'Moved to {storage_name}'
                     })
                     success_count += 1
-                    print(f"Stock transfer SUCCESS: {part_no} x{quantity} -> {storage_name}")
+                    print(f"[v69] SUCCESS: {part_no} x{quantity} -> {storage_name}")
                 else:
-                    error_msg = f'Stock Transfer API returned {transfer_response.status_code}'
-                    error_detail_text = transfer_response.text[:500] if transfer_response.text else ''
-                    try:
-                        error_detail = transfer_response.json()
-                        if isinstance(error_detail, dict) and 'Message' in error_detail:
-                            error_msg = error_detail['Message']
-                    except:
-                        pass
+                    error_summary = '; '.join(item_messages) if item_messages else 'Unknown error in CC stock move'
+                    print(f"[v69] FAILED: {part_no} - {error_summary}")
                     
-                    print(f"Stock transfer FAILED for {part_no}: {error_msg}")
-                    
-                    # Log error to DB for debugging
                     try:
                         import json as json_mod
                         err_conn = get_db()
@@ -1692,10 +1831,10 @@ def allocate_items():
                         err_cursor.execute(
                             """INSERT INTO error_logs (error_type, po_number, catalog_id, staff_user, error_code, error_message, request_payload, response_body, endpoint)
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                            ('stock_transfer', str(po_number), str(catalog_id), session.get('display_name', 'Unknown'),
-                             transfer_response.status_code, error_msg,
-                             json_mod.dumps(transfer_payload), error_detail_text,
-                             f'/companies/{COMPANY_ID}/stockTransfers/'))
+                            ('cc_stock_move', str(po_number), str(catalog_id), session.get('display_name', 'Unknown'),
+                             0, error_summary,
+                             json.dumps({'allocs': str(allocs), 'dest': dest_storage_id}), '',
+                             'v69_3step_cc_move'))
                         err_conn.commit()
                         err_conn.close()
                     except Exception as log_err:
@@ -1704,8 +1843,9 @@ def allocate_items():
                     results.append({
                         'catalogId': catalog_id,
                         'success': False,
-                        'error': error_msg,
-                        'method': 'stock_transfer'
+                        'quantity': quantity,
+                        'error': error_summary,
+                        'method': 'cc_stock_move'
                     })
 
         # Log the allocation
