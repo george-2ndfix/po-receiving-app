@@ -1695,36 +1695,54 @@ def allocate_items():
                     job_id = alloc_info.get('job_id')
                     section_id = alloc_info.get('section_id')
                     
-                    # v70: Cross-reference with ACTUAL CC stock to get TRUE current storage location
+                    # v71: Cross-reference with ACTUAL CC stock to get TRUE current storage location
                     # Receipt allocations are STALE - they never update after stock moves (Simpro conflict #2)
+                    # Retry loop: Simpro can take >3s to populate AssignedBreakdown after ItemsReceived
                     if cc_id and job_id and section_id:
-                        try:
-                            cc_stock_url = f"/companies/{COMPANY_ID}/jobs/{job_id}/sections/{section_id}/costCenters/{cc_id}/stock/{catalog_id}/"
-                            print(f"[v70] Checking TRUE location via CC stock: {cc_stock_url}")
-                            cc_stock_resp = simpro_request('GET', cc_stock_url)
-                            if cc_stock_resp.status_code == 200:
-                                cc_stock_data = cc_stock_resp.json()
-                                true_breakdown = cc_stock_data.get('AssignedBreakdown', [])
-                                if true_breakdown:
-                                    # Find the storage with stock - use the first one with qty > 0
-                                    for tb in true_breakdown:
-                                        ts = tb.get('Storage', {})
-                                        ts_id = ts.get('ID') if isinstance(ts, dict) else ts
-                                        ts_name = ts.get('Name', 'Unknown') if isinstance(ts, dict) else 'Unknown'
-                                        ts_qty = float(tb.get('Quantity', 0))
-                                        if ts_qty > 0:
-                                            if ts_id != source_storage_id:
-                                                print(f"[v70] CORRECTED source: {source_storage_name}({source_storage_id}) -> {ts_name}({ts_id})")
-                                            source_storage_id = ts_id
-                                            source_storage_name = ts_name
-                                            alloc_qty = ts_qty
-                                            break
+                        cc_stock_url = f"/companies/{COMPANY_ID}/jobs/{job_id}/sections/{section_id}/costCenters/{cc_id}/stock/{catalog_id}/"
+                        cc_stock_found = False
+                        max_cc_retries = 5
+                        for cc_retry in range(max_cc_retries):
+                            try:
+                                print(f"[v71] Checking TRUE location via CC stock (attempt {cc_retry+1}/{max_cc_retries}): {cc_stock_url}")
+                                cc_stock_resp = simpro_request('GET', cc_stock_url)
+                                if cc_stock_resp.status_code == 200:
+                                    cc_stock_data = cc_stock_resp.json()
+                                    true_breakdown = cc_stock_data.get('AssignedBreakdown', [])
+                                    # Check if any entry has Quantity > 0
+                                    has_stock = False
+                                    if true_breakdown:
+                                        for tb in true_breakdown:
+                                            ts = tb.get('Storage', {})
+                                            ts_id = ts.get('ID') if isinstance(ts, dict) else ts
+                                            ts_name = ts.get('Name', 'Unknown') if isinstance(ts, dict) else 'Unknown'
+                                            ts_qty = float(tb.get('Quantity', 0))
+                                            if ts_qty > 0:
+                                                if ts_id != source_storage_id:
+                                                    print(f"[v71] CORRECTED source: {source_storage_name}({source_storage_id}) -> {ts_name}({ts_id})")
+                                                source_storage_id = ts_id
+                                                source_storage_name = ts_name
+                                                alloc_qty = ts_qty
+                                                has_stock = True
+                                                break
+                                    if has_stock:
+                                        if cc_retry > 0:
+                                            print(f"[v71] CC stock appeared after {cc_retry} retries for catalog {catalog_id}")
+                                        cc_stock_found = True
+                                        break
+                                    else:
+                                        # AssignedBreakdown empty or all quantities 0
+                                        if cc_retry < max_cc_retries - 1:
+                                            print(f"[v71] CC stock retry {cc_retry+1}/{max_cc_retries} for catalog {catalog_id} — AssignedBreakdown empty, waiting 3s...")
+                                            time.sleep(3)
+                                        else:
+                                            print(f"[v71] CC stock still empty after {max_cc_retries} retries for catalog {catalog_id} — using receipt allocs")
                                 else:
-                                    print(f"[v70] No AssignedBreakdown in CC stock response - keeping receipt allocs")
-                            else:
-                                print(f"[v70] CC stock lookup returned {cc_stock_resp.status_code} - keeping receipt allocs")
-                        except Exception as cc_err:
-                            print(f"[v70] CC stock lookup error: {cc_err} - using receipt allocation")
+                                    print(f"[v71] CC stock lookup returned {cc_stock_resp.status_code} - keeping receipt allocs")
+                                    break  # Non-200 status, no point retrying
+                            except Exception as cc_err:
+                                print(f"[v71] CC stock lookup error: {cc_err} - using receipt allocation")
+                                break  # Exception, no point retrying
                     
                     move_qty = min(remaining_qty, alloc_qty) if alloc_qty > 0 else remaining_qty
                     if move_qty <= 0:
