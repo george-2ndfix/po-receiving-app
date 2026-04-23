@@ -1497,7 +1497,7 @@ def allocate_items():
             # Simpro preserves existing AssignedTo/CostCenter when only StorageDevice is changed
             alloc_entry = {
                 'StorageDevice': int(storage_device_id),
-                'Quantity': int(quantity)
+                'Quantity': float(quantity)
             }
             
             payload = [alloc_entry]
@@ -1682,7 +1682,7 @@ def allocate_items():
                 
                 item_success = True
                 item_messages = []
-                remaining_qty = int(quantity)
+                remaining_qty = float(quantity)
                 
                 for alloc_info in allocs:
                     if remaining_qty <= 0:
@@ -1690,10 +1690,41 @@ def allocate_items():
                     
                     source_storage_id = alloc_info.get('storage_id')
                     source_storage_name = alloc_info.get('storage_name', 'Unknown')
-                    alloc_qty = int(alloc_info.get('quantity', 0))
+                    alloc_qty = float(alloc_info.get('quantity', 0))
                     cc_id = alloc_info.get('cc_id')
                     job_id = alloc_info.get('job_id')
                     section_id = alloc_info.get('section_id')
+                    
+                    # v70: Cross-reference with ACTUAL CC stock to get TRUE current storage location
+                    # Receipt allocations are STALE - they never update after stock moves (Simpro conflict #2)
+                    if cc_id and job_id and section_id:
+                        try:
+                            cc_stock_url = f"/companies/{COMPANY_ID}/jobs/{job_id}/sections/{section_id}/costCenters/{cc_id}/stock/{catalog_id}/"
+                            print(f"[v70] Checking TRUE location via CC stock: {cc_stock_url}")
+                            cc_stock_resp = simpro_request('GET', cc_stock_url)
+                            if cc_stock_resp.status_code == 200:
+                                cc_stock_data = cc_stock_resp.json()
+                                true_breakdown = cc_stock_data.get('AssignedBreakdown', [])
+                                if true_breakdown:
+                                    # Find the storage with stock - use the first one with qty > 0
+                                    for tb in true_breakdown:
+                                        ts = tb.get('Storage', {})
+                                        ts_id = ts.get('ID') if isinstance(ts, dict) else ts
+                                        ts_name = ts.get('Name', 'Unknown') if isinstance(ts, dict) else 'Unknown'
+                                        ts_qty = float(tb.get('Quantity', 0))
+                                        if ts_qty > 0:
+                                            if ts_id != source_storage_id:
+                                                print(f"[v70] CORRECTED source: {source_storage_name}({source_storage_id}) -> {ts_name}({ts_id})")
+                                            source_storage_id = ts_id
+                                            source_storage_name = ts_name
+                                            alloc_qty = ts_qty
+                                            break
+                                else:
+                                    print(f"[v70] No AssignedBreakdown in CC stock response - keeping receipt allocs")
+                            else:
+                                print(f"[v70] CC stock lookup returned {cc_stock_resp.status_code} - keeping receipt allocs")
+                        except Exception as cc_err:
+                            print(f"[v70] CC stock lookup error: {cc_err} - using receipt allocation")
                     
                     move_qty = min(remaining_qty, alloc_qty) if alloc_qty > 0 else remaining_qty
                     if move_qty <= 0:
@@ -1743,7 +1774,7 @@ def allocate_items():
                                 'Catalog': int(catalog_id),
                                 'FromStorage': int(source_storage_id),
                                 'ToStorage': int(dest_storage_id),
-                                'Quantity': int(move_qty)
+                                'Quantity': move_qty
                             }
                             print(f"[v69] Step 2: Stock transfer {json.dumps(transfer_payload)}")
                             transfer_resp = simpro_request('POST', f'/companies/{COMPANY_ID}/stockTransfer/', json=transfer_payload)
@@ -1767,7 +1798,7 @@ def allocate_items():
                                         rb_resp = simpro_request(
                                             'POST',
                                             f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{section_id}/costCenters/{cc_id}/stock/',
-                                            json={'Catalog': int(catalog_id), 'AssignedBreakdown': [{'Storage': int(source_storage_id), 'Quantity': int(move_qty)}]}
+                                            json={'Catalog': int(catalog_id), 'AssignedBreakdown': [{'Storage': int(source_storage_id), 'Quantity': move_qty}]}
                                         )
                                         print(f"[v69] Rollback response: {rb_resp.status_code}")
                                     except Exception as rb_err:
@@ -1784,7 +1815,7 @@ def allocate_items():
                             reassign_resp = simpro_request(
                                 'POST',
                                 f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{section_id}/costCenters/{cc_id}/stock/',
-                                json={'Catalog': int(catalog_id), 'AssignedBreakdown': [{'Storage': int(dest_storage_id), 'Quantity': int(move_qty)}]}
+                                json={'Catalog': int(catalog_id), 'AssignedBreakdown': [{'Storage': int(dest_storage_id), 'Quantity': move_qty}]}
                             )
                             print(f"[v69] Step 3 response: {reassign_resp.status_code} - {reassign_resp.text[:200] if reassign_resp.text else ''}")
                             if reassign_resp.status_code not in (200, 201, 204):
