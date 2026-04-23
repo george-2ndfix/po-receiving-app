@@ -1771,10 +1771,12 @@ def allocate_items():
                     if not step_failed:
                         try:
                             transfer_payload = {
-                                'Catalog': int(catalog_id),
-                                'FromStorage': int(source_storage_id),
-                                'ToStorage': int(dest_storage_id),
-                                'Quantity': move_qty
+                                'SourceStorageDeviceID': int(source_storage_id),
+                                'Items': [{
+                                    'CatalogID': int(catalog_id),
+                                    'DestinationStorageDeviceID': int(dest_storage_id),
+                                    'Quantity': move_qty
+                                }]
                             }
                             print(f"[v69] Step 2: Stock transfer {json.dumps(transfer_payload)}")
                             transfer_resp = simpro_request('POST', f'/companies/{COMPANY_ID}/stockTransfer/', json=transfer_payload)
