@@ -1458,6 +1458,9 @@ def allocate_items():
         print(f"Post-receipt items (stock transfer): {len(post_receipt_items)}")
         print(f"Already allocated items: {len(already_allocated_items)}")
         
+        # Track partial vs full receipt for status determination
+        partial_receipt_detected = False
+        
         # ============================================
         # Path 1: Pre-receipt allocation (set storage before Ezybills receipts)
         # CRITICAL: Must preserve AssignedTo/CostCenter from existing allocations!
@@ -1492,15 +1495,56 @@ def allocate_items():
             except Exception as ae:
                 print(f"[PRE-RECEIPT] Error fetching existing allocations: {ae}")
             
-            # Build payload - Simpro API requires an ARRAY of allocations
-            # NOTE: Do NOT include AssignedTo - it's read-only and causes 422 errors
-            # Simpro preserves existing AssignedTo/CostCenter when only StorageDevice is changed
-            alloc_entry = {
-                'StorageDevice': int(storage_device_id),
-                'Quantity': float(quantity)
-            }
+            # Build payload - PRESERVE existing allocations for unreceived items
+            # For partial receipts, keep remaining items on the PO (they must NOT disappear!)
+            # AssignedTo works with just the numeric allocation ID (tested & confirmed v72)
+            total_existing = sum(
+                a.get('Quantity', {}).get('Total', 0) if isinstance(a.get('Quantity'), dict)
+                else a.get('Quantity', 0)
+                for a in existing_allocs
+            ) if existing_allocs else 0
             
-            payload = [alloc_entry]
+            if not existing_allocs or quantity >= total_existing:
+                # Receiving ALL items (or no existing data) - simple replacement
+                payload = [{'StorageDevice': int(storage_device_id), 'Quantity': float(quantity if quantity > 0 else total_existing)}]
+                print(f"[PRE-RECEIPT] Full receipt: {quantity} of {total_existing} items")
+            else:
+                # PARTIAL RECEIPT - preserve remaining items on the PO!
+                # Strategy: deduct from stock allocations (no AssignedTo) first, preserve job allocations
+                partial_receipt_detected = True
+                payload = [{'StorageDevice': int(storage_device_id), 'Quantity': float(quantity)}]
+                
+                # Sort: stock allocations first (deduct from these), job allocations last (preserve)
+                stock_allocs_list = [a for a in existing_allocs if not a.get('AssignedTo') or not a.get('AssignedTo', {}).get('ID')]
+                job_allocs_list = [a for a in existing_allocs if a.get('AssignedTo') and a.get('AssignedTo', {}).get('ID')]
+                
+                qty_to_deduct = float(quantity)
+                for ea in stock_allocs_list + job_allocs_list:
+                    ea_qty_obj = ea.get('Quantity', {})
+                    ea_qty = ea_qty_obj.get('Total', 0) if isinstance(ea_qty_obj, dict) else ea_qty_obj
+                    ea_storage = ea.get('StorageDevice', {}).get('ID', 3) if isinstance(ea.get('StorageDevice'), dict) else ea.get('StorageDevice', 3)
+                    ea_assigned_id = ea.get('AssignedTo', {}).get('ID') if isinstance(ea.get('AssignedTo'), dict) else None
+                    
+                    deduct = min(qty_to_deduct, float(ea_qty))
+                    leftover = float(ea_qty) - deduct
+                    qty_to_deduct -= deduct
+                    
+                    if leftover > 0:
+                        entry = {'StorageDevice': int(ea_storage), 'Quantity': leftover}
+                        if ea_assigned_id:
+                            entry['AssignedTo'] = ea_assigned_id
+                        payload.append(entry)
+                    elif deduct == 0 and float(ea_qty) > 0:
+                        # Untouched allocation - keep as-is
+                        entry = {'StorageDevice': int(ea_storage), 'Quantity': float(ea_qty)}
+                        if ea_assigned_id:
+                            entry['AssignedTo'] = ea_assigned_id
+                        payload.append(entry)
+                
+                total_in_payload = sum(a['Quantity'] for a in payload)
+                print(f"[PRE-RECEIPT] Partial receipt: {quantity} of {total_existing}. Payload preserves {total_in_payload} total")
+                if abs(total_in_payload - total_existing) > 0.01:
+                    print(f"WARNING: Payload total {total_in_payload} != existing total {total_existing}!")
             
             print(f"[PRE-RECEIPT] PUT {allocation_url} with payload: {payload}")
             response = simpro_request('PUT', allocation_url, json=payload)
@@ -1914,18 +1958,49 @@ def allocate_items():
         # Only set if at least one item was successfully allocated AND there are pre-receipt items
         # ============================================
         goods_received_set = False
+        status_set = None
         if success_count > 0 and pre_receipt_items:
             try:
-                print(f"=== SETTING GOODS RECEIVED STATUS for PO {po_id} ===")
-                gr_response = simpro_request('PATCH', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}', json={'Status': 239})
-                print(f"Goods Received API Response: {gr_response.status_code}")
-                if gr_response.status_code == 204:
-                    goods_received_set = True
-                    print(f"✅ Goods Received status set successfully for PO {po_id}")
+                # Check if there are catalog items on the PO we didn't receive at all
+                if not partial_receipt_detected:
+                    try:
+                        all_cats_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/catalogs/')
+                        if all_cats_resp.status_code == 200:
+                            all_po_cats = all_cats_resp.json()
+                            received_cat_ids = set(int(item.get('catalogId', 0)) for item in items if item.get('catalogId'))
+                            for po_cat in all_po_cats:
+                                cat_info = po_cat.get('Catalog', {})
+                                cid = cat_info.get('ID') if isinstance(cat_info, dict) else po_cat.get('ID')
+                                if cid and int(cid) not in received_cat_ids:
+                                    partial_receipt_detected = True
+                                    print(f"Partial delivery: catalog {cid} not in received items")
+                                    break
+                    except Exception as cat_check_err:
+                        print(f"Catalog check error: {cat_check_err}")
+                
+                if partial_receipt_detected:
+                    # Status 109: PO - Not Completely Supplied
+                    print(f"=== SETTING NOT COMPLETELY SUPPLIED STATUS for PO {po_id} ===")
+                    gr_response = simpro_request('PATCH', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}', json={'Status': 109})
+                    print(f"Status 109 API Response: {gr_response.status_code}")
+                    if gr_response.status_code == 204:
+                        status_set = 109
+                        print(f"✅ Not Completely Supplied status set for PO {po_id}")
+                    else:
+                        print(f"⚠️ Status 109 update returned: {gr_response.status_code} - {gr_response.text}")
                 else:
-                    print(f"⚠️ Goods Received status update returned: {gr_response.status_code} - {gr_response.text}")
+                    # Status 239: GOODS RECEIVED (full delivery)
+                    print(f"=== SETTING GOODS RECEIVED STATUS for PO {po_id} ===")
+                    gr_response = simpro_request('PATCH', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}', json={'Status': 239})
+                    print(f"Goods Received API Response: {gr_response.status_code}")
+                    if gr_response.status_code == 204:
+                        goods_received_set = True
+                        status_set = 239
+                        print(f"✅ Goods Received status set successfully for PO {po_id}")
+                    else:
+                        print(f"⚠️ Goods Received status update returned: {gr_response.status_code} - {gr_response.text}")
             except Exception as gr_err:
-                print(f"⚠️ Failed to set Goods Received status: {gr_err}")
+                print(f"⚠️ Failed to set PO status: {gr_err}")
         
         # Determine allocation type for logging
         if post_receipt_items and pre_receipt_items:
