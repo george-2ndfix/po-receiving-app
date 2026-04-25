@@ -637,7 +637,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                         <div class="item-name">${item.description}</div>
                         <div class="item-meta">
                             ${item.partNo ? `<span class="item-part">${item.partNo}</span>` : ''}
-                            ${item.jobNumber ? `<span class="item-job">Job ${item.jobNumber}${item.customerName ? ' - ' + item.customerName : ''}</span>` : ''}
+                            ${item.jobNumber ? `<span class="item-job">Job ${item.jobNumber}${item.customerName ? ' - ' + item.customerName : ''}</span>` : item.allocationType === 'stock' ? '<span class="item-stock">📦 Stock</span>' : ''}
                             ${item.costCentreName ? `<span class="item-cc">📋 ${item.costCentreName}</span>` : ''}
                             <span class="item-qty">Ordered: ${item.quantityOrdered}</span>
                             <span class="item-received">Received: ${item.quantityReceived}</span>
@@ -821,7 +821,12 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                 quantityOrdered: item.quantityOrdered,
                 quantityReceived: item.quantityReceived,
                 jobNumber: item.jobNumber,
-                customerName: item.customerName
+                customerName: item.customerName,
+                allocationType: item.allocationType || null,
+                allocationAssignedToId: item.allocationAssignedToId || null,
+                jobId: item.jobId || null,
+                sectionId: item.sectionId || null,
+                costCentreId: item.costCentreId || null
             });
             if (qtyInput) { qtyInput.disabled = false; }
         }
@@ -897,7 +902,12 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                     quantityOrdered: item.quantityOrdered,
                     quantityReceived: item.quantityReceived,
                     jobNumber: item.jobNumber,
-                    customerName: item.customerName
+                    customerName: item.customerName,
+                    allocationType: item.allocationType || null,
+                    allocationAssignedToId: item.allocationAssignedToId || null,
+                    jobId: item.jobId || null,
+                    sectionId: item.sectionId || null,
+                    costCentreId: item.costCentreId || null
                 });
                 if (qtyInput) { qtyInput.disabled = false; }
             } else {
@@ -1131,7 +1141,9 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                         quantity: item.quantity || item.quantityOrdered || 1,
                         receiptStatus: item.receiptStatus || 'not_receipted',
                         quantityOrdered: item.quantityOrdered || 0,
-                        quantityReceived: item.quantityReceived || 0
+                        quantityReceived: item.quantityReceived || 0,
+                        allocationType: item.allocationType || null,
+                        allocationAssignedToId: item.allocationAssignedToId || null
                     })),
                     storageDeviceId: this.selectedStorage.id,
                     storageName: this.selectedStorage.name
