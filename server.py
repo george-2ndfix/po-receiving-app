@@ -1142,81 +1142,113 @@ def get_po_details(po_number):
             part_no = catalog.get('Catalog', {}).get('PartNo', '')
             description = catalog.get('Catalog', {}).get('Name', catalog.get('Description', 'Unknown Item'))
             
-            # Get quantity from allocations endpoint (quantity is not in catalog response)
-            quantity_ordered = 0
-            quantity_received = 0
-            item_job_number = None
-            item_customer_name = None
-            item_storage_location = None
-            item_cc_id = None
-            item_cc_name = None
-            
+            # v73: Create one item per ALLOCATION (not per catalog)
+            # This splits merged POs into separate lines (e.g. "9 stock + 1 job" → 2 lines)
             if catalog_id:
                 try:
                     alloc_response = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/catalogs/{catalog_id}/allocations/')
                     if alloc_response.status_code == 200:
                         allocations = alloc_response.json()
-                        for alloc in allocations:
-                            qty_obj = alloc.get('Quantity', {})
-                            quantity_ordered += qty_obj.get('Total', 0)
-                            quantity_received += qty_obj.get('Received', 0)
-                            
-                            # Extract per-item job from allocation's AssignedTo
-                            alloc_assigned = alloc.get('AssignedTo', {})
-                            alloc_job = alloc_assigned.get('Job')
-                            if alloc_job and not item_job_number:
-                                job_info = get_job_customer(alloc_job)
-                                item_job_number = job_info['jobNumber']
-                                item_customer_name = job_info['customerName']
-                            
-                            # Extract per-item cost centre
-                            if not item_cc_id:
-                                alloc_cc_id = alloc_assigned.get('ID')  # Job CC ID (e.g., 31190)
-                                if alloc_cc_id:
-                                    item_cc_id = alloc_cc_id
-                                    # Use custom name from our pre-fetched map, fall back to generic type name
-                                    item_cc_name = cc_name_map.get(alloc_cc_id, alloc_assigned.get('CostCenter', {}).get('Name', ''))
-                            
-                            # Extract current storage device
-                            storage_dev = alloc.get('StorageDevice', {})
-                            if isinstance(storage_dev, dict) and storage_dev.get('Name'):
-                                item_storage_location = storage_dev.get('Name')
-                            elif isinstance(storage_dev, dict) and storage_dev.get('ID'):
-                                # Look up name from our devices list
-                                sd_id = storage_dev['ID']
-                                for dev in get_storage_devices():
-                                    if dev['ID'] == sd_id:
-                                        item_storage_location = dev['Name']
-                                        break
+                        if allocations:
+                            for alloc in allocations:
+                                qty_obj = alloc.get('Quantity', {})
+                                alloc_total = qty_obj.get('Total', 0)
+                                alloc_received = qty_obj.get('Received', 0)
+                                
+                                if alloc_total <= 0:
+                                    continue  # Skip zero-qty allocations
+                                
+                                alloc_assigned = alloc.get('AssignedTo', {})
+                                alloc_job = alloc_assigned.get('Job') if isinstance(alloc_assigned, dict) else None
+                                alloc_assigned_id = alloc_assigned.get('ID') if isinstance(alloc_assigned, dict) else None
+                                
+                                # Determine receipt status for THIS allocation
+                                if alloc_total > 0 and alloc_received >= alloc_total:
+                                    alloc_receipt_status = 'fully_receipted'
+                                elif alloc_received > 0:
+                                    alloc_receipt_status = 'partially_receipted'
+                                else:
+                                    alloc_receipt_status = 'not_receipted'
+                                
+                                item_entry = {
+                                    'catalogId': catalog_id,
+                                    'partNo': part_no,
+                                    'description': description,
+                                    'quantityOrdered': alloc_total,
+                                    'quantityReceived': alloc_received,
+                                    'receiptStatus': alloc_receipt_status,
+                                    'allocationType': 'job' if alloc_job else 'stock',
+                                    'allocationAssignedToId': alloc_assigned_id,
+                                    'storageLocation': None,
+                                    'costCentreId': None,
+                                    'costCentreName': None,
+                                    'jobNumber': None,
+                                    'customerName': None,
+                                    'jobId': None,
+                                    'sectionId': None,
+                                }
+                                
+                                # Extract storage device
+                                storage_dev = alloc.get('StorageDevice', {})
+                                if isinstance(storage_dev, dict) and storage_dev.get('Name'):
+                                    item_entry['storageLocation'] = storage_dev.get('Name')
+                                elif isinstance(storage_dev, dict) and storage_dev.get('ID'):
+                                    sd_id = storage_dev['ID']
+                                    for dev in get_storage_devices():
+                                        if dev['ID'] == sd_id:
+                                            item_entry['storageLocation'] = dev['Name']
+                                            break
+                                
+                                if alloc_job:
+                                    # Job allocation - get job/customer details
+                                    job_info = get_job_customer(alloc_job)
+                                    item_entry['jobNumber'] = job_info['jobNumber']
+                                    item_entry['customerName'] = job_info['customerName']
+                                    item_entry['jobId'] = alloc_job
+                                    item_entry['sectionId'] = alloc_assigned.get('Section')
+                                    cc_obj = alloc_assigned.get('CostCenter', {})
+                                    item_entry['costCentreId'] = alloc_assigned_id
+                                    item_entry['costCentreName'] = cc_name_map.get(alloc_assigned_id, cc_obj.get('Name', ''))
+                                
+                                items.append(item_entry)
+                        else:
+                            # No allocations - add as unknown
+                            items.append({
+                                'catalogId': catalog_id,
+                                'partNo': part_no,
+                                'description': description,
+                                'quantityOrdered': 0,
+                                'quantityReceived': 0,
+                                'receiptStatus': 'not_receipted',
+                                'allocationType': 'unknown',
+                                'allocationAssignedToId': None,
+                                'jobNumber': str(job_number) if job_number else None,
+                                'customerName': customer_name,
+                                'storageLocation': None,
+                                'costCentreId': None,
+                                'costCentreName': None,
+                                'jobId': None,
+                                'sectionId': None,
+                            })
                 except Exception as e:
                     print(f"Error getting allocations for catalog {catalog_id}: {e}")
-            
-            # Fall back to PO-level job/customer if no per-item assignment
-            if not item_job_number:
-                item_job_number = str(job_number) if job_number else None
-                item_customer_name = customer_name
-            
-            # Determine receipt status
-            if quantity_ordered > 0 and quantity_received >= quantity_ordered:
-                receipt_status = 'fully_receipted'
-            elif quantity_received > 0:
-                receipt_status = 'partially_receipted'
-            else:
-                receipt_status = 'not_receipted'
-            
-            items.append({
-                'catalogId': catalog_id,
-                'partNo': part_no,
-                'description': description,
-                'quantityOrdered': quantity_ordered,
-                'quantityReceived': quantity_received,
-                'receiptStatus': receipt_status,
-                'jobNumber': item_job_number,
-                'customerName': item_customer_name,
-                'storageLocation': item_storage_location,
-                'costCentreId': item_cc_id,
-                'costCentreName': item_cc_name
-            })
+                    items.append({
+                        'catalogId': catalog_id,
+                        'partNo': part_no,
+                        'description': description,
+                        'quantityOrdered': 0,
+                        'quantityReceived': 0,
+                        'receiptStatus': 'not_receipted',
+                        'allocationType': 'unknown',
+                        'allocationAssignedToId': None,
+                        'jobNumber': str(job_number) if job_number else None,
+                        'customerName': customer_name,
+                        'storageLocation': None,
+                        'costCentreId': None,
+                        'costCentreName': None,
+                        'jobId': None,
+                        'sectionId': None,
+                    })
         
         return jsonify({
             'poNumber': po_number,
@@ -1463,58 +1495,114 @@ def allocate_items():
         
         # ============================================
         # Path 1: Pre-receipt allocation (set storage before Ezybills receipts)
-        # CRITICAL: Must preserve AssignedTo/CostCenter from existing allocations!
-        # The PUT replaces ALL allocations, so we must include AssignedTo.
+        # CRITICAL v73: Per-allocation matching — knows exactly which allocation to receive
+        # The PUT replaces ALL allocations, so must include untouched ones too.
         # ============================================
+        
+        # v73: Group pre-receipt items by catalogId (same catalog may appear multiple times for merged POs)
+        from collections import defaultdict
+        catalog_groups = defaultdict(list)
         for item in pre_receipt_items:
-            catalog_id = item.get('catalogId')
-            quantity = item.get('quantity', 1)
-            
-            # Use the quantity from the request, but also validate against ordered qty
-            qty_ordered = item.get('quantityOrdered', 0)
-            if qty_ordered > 0 and quantity <= 0:
-                quantity = qty_ordered
+            catalog_groups[item.get('catalogId')].append(item)
+        
+        for catalog_id, group_items in catalog_groups.items():
+            # Use first item for metadata
+            first_item = group_items[0]
+            quantity = sum(gi.get('quantity', 0) for gi in group_items)
             
             allocation_url = f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/catalogs/{catalog_id}/allocations/'
             
-            # Fetch existing allocations to get quantity if needed
+            # Fetch existing allocations
+            existing_allocs = []
             try:
                 existing_resp = simpro_request('GET', allocation_url)
                 if existing_resp.status_code == 200:
                     existing_allocs = existing_resp.json()
-                    print(f"[PRE-RECEIPT] Existing allocations for catalog {catalog_id}: {existing_allocs}")
-                    if existing_allocs and len(existing_allocs) > 0:
-                        # Use the existing quantity if ours seems wrong
-                        if quantity <= 0:
-                            for existing_alloc in existing_allocs:
-                                eq = existing_alloc.get('Quantity', 0)
-                                if eq > 0:
-                                    quantity = eq
-                                    print(f"[PRE-RECEIPT] Using existing quantity: {quantity}")
-                                    break
+                    print(f"[PRE-RECEIPT v73] Existing allocations for catalog {catalog_id}: {existing_allocs}")
             except Exception as ae:
-                print(f"[PRE-RECEIPT] Error fetching existing allocations: {ae}")
+                print(f"[PRE-RECEIPT v73] Error fetching existing allocations: {ae}")
             
-            # Build payload - PRESERVE existing allocations for unreceived items
-            # For partial receipts, keep remaining items on the PO (they must NOT disappear!)
-            # AssignedTo works with just the numeric allocation ID (tested & confirmed v72)
             total_existing = sum(
                 a.get('Quantity', {}).get('Total', 0) if isinstance(a.get('Quantity'), dict)
                 else a.get('Quantity', 0)
                 for a in existing_allocs
             ) if existing_allocs else 0
             
-            if not existing_allocs or quantity >= total_existing:
-                # Receiving ALL items (or no existing data) - simple replacement
+            # Check if frontend sent per-allocation info (v73+)
+            has_allocation_info = any(gi.get('allocationType') for gi in group_items)
+            
+            if has_allocation_info and existing_allocs:
+                # v73 per-allocation logic
+                # Separate received items into job allocations and stock pool
+                job_received = {}  # allocationAssignedToId -> qty
+                stock_received_total = 0
+                
+                for gi in group_items:
+                    aid = gi.get('allocationAssignedToId')
+                    qty = gi.get('quantity', 0)
+                    atype = gi.get('allocationType', 'stock')
+                    if aid and atype == 'job':
+                        job_received[aid] = job_received.get(aid, 0) + qty
+                    else:
+                        stock_received_total += qty
+                
+                payload = []
+                remaining_stock_to_deduct = stock_received_total
+                
+                for ea in existing_allocs:
+                    ea_qty_obj = ea.get('Quantity', {})
+                    ea_qty = float(ea_qty_obj.get('Total', 0) if isinstance(ea_qty_obj, dict) else ea_qty_obj)
+                    ea_storage = ea.get('StorageDevice', {}).get('ID', 3) if isinstance(ea.get('StorageDevice'), dict) else ea.get('StorageDevice', 3)
+                    ea_assigned = ea.get('AssignedTo', {})
+                    ea_assigned_id = ea_assigned.get('ID') if isinstance(ea_assigned, dict) else None
+                    
+                    if ea_assigned_id and ea_assigned_id in job_received:
+                        # Job allocation being received
+                        recv_qty = job_received.pop(ea_assigned_id)
+                        remaining = ea_qty - recv_qty
+                        
+                        if recv_qty > 0:
+                            entry = {'StorageDevice': int(storage_device_id), 'Quantity': float(recv_qty), 'AssignedTo': ea_assigned_id}
+                            payload.append(entry)
+                        if remaining > 0:
+                            entry = {'StorageDevice': int(ea_storage), 'Quantity': float(remaining), 'AssignedTo': ea_assigned_id}
+                            payload.append(entry)
+                            partial_receipt_detected = True
+                    elif not ea_assigned_id and remaining_stock_to_deduct > 0:
+                        # Stock allocation — deduct from stock pool
+                        deduct = min(remaining_stock_to_deduct, ea_qty)
+                        remaining_stock_to_deduct -= deduct
+                        remaining = ea_qty - deduct
+                        
+                        if deduct > 0:
+                            payload.append({'StorageDevice': int(storage_device_id), 'Quantity': float(deduct)})
+                        if remaining > 0:
+                            payload.append({'StorageDevice': int(ea_storage), 'Quantity': float(remaining)})
+                            partial_receipt_detected = True
+                    else:
+                        # Not being received — keep as-is
+                        entry = {'StorageDevice': int(ea_storage), 'Quantity': float(ea_qty)}
+                        if ea_assigned_id:
+                            entry['AssignedTo'] = ea_assigned_id
+                        payload.append(entry)
+                        if ea_qty > 0:
+                            partial_receipt_detected = True
+                
+                total_payload = sum(e['Quantity'] for e in payload)
+                print(f"[PRE-RECEIPT v73] Per-allocation: job_received={job_received}, stock_deducted={stock_received_total - remaining_stock_to_deduct}")
+                print(f"[PRE-RECEIPT v73] Payload total={total_payload}, existing total={total_existing}")
+                if abs(total_payload - total_existing) > 0.01:
+                    print(f"WARNING: Total mismatch! Existing={total_existing}, Payload={total_payload}")
+            
+            elif not existing_allocs or quantity >= total_existing:
+                # Simple case: receiving ALL items or no existing data
                 payload = [{'StorageDevice': int(storage_device_id), 'Quantity': float(quantity if quantity > 0 else total_existing)}]
                 print(f"[PRE-RECEIPT] Full receipt: {quantity} of {total_existing} items")
             else:
-                # PARTIAL RECEIPT - preserve remaining items on the PO!
-                # Strategy: deduct from stock allocations (no AssignedTo) first, preserve job allocations
+                # v72 fallback: deduct from stock first, preserve job allocations
                 partial_receipt_detected = True
                 payload = [{'StorageDevice': int(storage_device_id), 'Quantity': float(quantity)}]
                 
-                # Sort: stock allocations first (deduct from these), job allocations last (preserve)
                 stock_allocs_list = [a for a in existing_allocs if not a.get('AssignedTo') or not a.get('AssignedTo', {}).get('ID')]
                 job_allocs_list = [a for a in existing_allocs if a.get('AssignedTo') and a.get('AssignedTo', {}).get('ID')]
                 
@@ -1535,16 +1623,13 @@ def allocate_items():
                             entry['AssignedTo'] = ea_assigned_id
                         payload.append(entry)
                     elif deduct == 0 and float(ea_qty) > 0:
-                        # Untouched allocation - keep as-is
                         entry = {'StorageDevice': int(ea_storage), 'Quantity': float(ea_qty)}
                         if ea_assigned_id:
                             entry['AssignedTo'] = ea_assigned_id
                         payload.append(entry)
                 
                 total_in_payload = sum(a['Quantity'] for a in payload)
-                print(f"[PRE-RECEIPT] Partial receipt: {quantity} of {total_existing}. Payload preserves {total_in_payload} total")
-                if abs(total_in_payload - total_existing) > 0.01:
-                    print(f"WARNING: Payload total {total_in_payload} != existing total {total_existing}!")
+                print(f"[PRE-RECEIPT v72 fallback] Partial: {quantity} of {total_existing}. Payload total={total_in_payload}")
             
             print(f"[PRE-RECEIPT] PUT {allocation_url} with payload: {payload}")
             response = simpro_request('PUT', allocation_url, json=payload)
@@ -1573,38 +1658,41 @@ def allocate_items():
                     'success': True,
                     'quantity': quantity,
                     'verified': verified,
-                    'method': 'pre_receipt_allocation'
+                    'method': 'pre_receipt_allocation',
+                    'message': f'Allocated to storage ({"verified" if verified else "pending verification"})'
                 })
                 success_count += 1
-                if not verified:
-                    print(f"WARNING: Allocation for catalog {catalog_id} could not be verified!")
             else:
-                error_detail = response.text[:500] if response.text else 'No response body'
-                print(f"❌ PRE-RECEIPT PUT FAILED: PO {po_number}, Catalog {catalog_id}, Status {response.status_code}, Response: {error_detail}")
-                
-                # Log error to DB for debugging
+                error_msg = f'Simpro API error: {response.status_code}'
                 try:
-                    import json as json_mod
-                    err_conn = get_db()
-                    err_cursor = err_conn.cursor()
-                    err_cursor.execute('''INSERT INTO error_logs (error_type, po_number, catalog_id, staff_user, error_code, error_message, request_payload, response_body, endpoint)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                        ('pre_receipt_allocation', str(po_number), str(catalog_id), staff_name, 
-                         response.status_code, f'API returned {response.status_code}',
-                         json_mod.dumps(payload), error_detail, allocation_url))
-                    err_conn.commit()
-                    err_conn.close()
-                except Exception as log_err:
-                    print(f"Error logging failed: {log_err}")
+                    error_data = response.json()
+                    error_msg = str(error_data)
+                except:
+                    error_msg = response.text[:200]
                 
                 results.append({
                     'catalogId': catalog_id,
                     'success': False,
-                    'error': f'API returned {response.status_code}',
-                    'detail': error_detail,
+                    'error': error_msg,
                     'method': 'pre_receipt_allocation'
                 })
-        
+                
+                # Log error
+                try:
+                    err_conn = get_db()
+                    err_cursor = err_conn.cursor()
+                    err_cursor.execute(
+                        '''INSERT INTO error_logs (error_type, po_number, catalog_id, staff_user, error_code, error_message, request_payload, response_body, endpoint)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                        ('allocation', str(po_number), str(catalog_id), session.get('display_name', 'Unknown'),
+                         response.status_code, error_msg,
+                         json.dumps(payload), response.text[:500],
+                         allocation_url))
+                    err_conn.commit()
+                    err_conn.close()
+                except Exception as log_err:
+                    print(f"Error logging failed: {log_err}")
+
         # ============================================
         # Path 2: Post-receipt stock transfer (move from current location to destination)
         # Uses POST /stockTransfers/ endpoint — ONE item per request to avoid Simpro batch bug
