@@ -3861,15 +3861,15 @@ def generate_label_pdf():
             label_type = label.get('type', 'item')
             
             if label_type == 'filing':
-                # Compact filing label - 45mm long, all bold, for sticking on paperwork
-                filing_h = 45*mm
+                # Compact filing label - 28mm long, all bold, for sticking on paperwork
+                filing_h = 28*mm
                 c.setPageSize((page_w, filing_h))
-                filing_avail_w = filing_h - 2*margin
-                filing_avail_h = page_w - 2*margin
+                filing_avail_w = filing_h - 2*margin  # 22mm text width
+                filing_avail_h = page_w - 2*margin     # 32mm text height
                 
-                size1 = auto_fit_font(l1, "Helvetica-Bold", 16, filing_avail_w)
-                size2 = auto_fit_font(l2, "Helvetica-Bold", 14, filing_avail_w)
-                size3 = auto_fit_font(l3, "Helvetica-Bold", 12, filing_avail_w)
+                size1 = auto_fit_font(l1, "Helvetica-Bold", 12, filing_avail_w)
+                size2 = auto_fit_font(l2, "Helvetica-Bold", 10, filing_avail_w)
+                size3 = auto_fit_font(l3, "Helvetica-Bold", 9, filing_avail_w)
                 
                 c.saveState()
                 c.rotate(90)
@@ -3883,11 +3883,11 @@ def generate_label_pdf():
                 c.rect(margin, y_base, filing_avail_w, filing_avail_h)
                 
                 c.setFont("Helvetica-Bold", size1)
-                c.drawString(margin + 1.5*mm, y_base + 2*line_spacing + 1*mm, l1)
+                c.drawString(margin + 1*mm, y_base + 2*line_spacing + 0.5*mm, l1)
                 c.setFont("Helvetica-Bold", size2)
-                c.drawString(margin + 1.5*mm, y_base + line_spacing + 0.5*mm, l2)
+                c.drawString(margin + 1*mm, y_base + line_spacing + 0.5*mm, l2)
                 c.setFont("Helvetica-Bold", size3)
-                c.drawString(margin + 1.5*mm, y_base + 0.5*mm, l3)
+                c.drawString(margin + 1*mm, y_base + 0.5*mm, l3)
                 
                 c.restoreState()
                 # Reset page size for any subsequent labels
