@@ -1848,7 +1848,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             const filingLocation = items[0].storageLocation || items[0].storageName || '';
             labels.push({
                 type: 'filing',
-                line1: 'FILE: Job ' + filingJobNum,
+                line1: 'FILE: Job ' + filingJobNum + (poNumber && poNumber !== 'N/A' ? ' \u00b7 PO ' + poNumber : ''),
                 line2: filingCustomer,
                 line3: filingLocation ? ('>> ' + filingLocation) : ''
             });
