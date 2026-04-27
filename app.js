@@ -72,6 +72,10 @@ const app = {
         // Home options
         document.getElementById('option-po')?.addEventListener('click', () => this.showScreen('scan'));
         document.getElementById('option-stock')?.addEventListener('click', () => this.showScreen('stock'));
+        document.getElementById('job-lookup-btn')?.addEventListener('click', () => this.stockJobLookup());
+        document.getElementById('job-number')?.addEventListener('keypress', (e) => { if (e.key === 'Enter') this.stockJobLookup(); });
+        document.getElementById('part-search-btn')?.addEventListener('click', () => this.stockPartSearch());
+        document.getElementById('part-search')?.addEventListener('keypress', (e) => { if (e.key === 'Enter') this.stockPartSearch(); });
         document.getElementById('option-picklist')?.addEventListener('click', () => this.showPicklist());
         document.getElementById('option-relocate')?.addEventListener('click', () => this.showScreen('relocate-source'));
         document.getElementById('option-mystery')?.addEventListener('click', () => this.showScreen('mystery'));
@@ -2058,6 +2062,149 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         document.getElementById('relocate-search-btn').disabled = false;
     },
     
+
+    async stockJobLookup() {
+        const jobInput = document.getElementById('job-number');
+        const jobNumber = jobInput ? jobInput.value.trim() : '';
+        const resultsEl = document.getElementById('stock-results');
+        
+        if (!jobNumber) {
+            resultsEl.innerHTML = '<p class="hint" style="color:#ef4444;">Please enter a job number</p>';
+            return;
+        }
+        
+        resultsEl.innerHTML = '<p class="hint">🔍 Looking up job ' + jobNumber + '...</p>';
+        
+        try {
+            const response = await this.authFetch('/api/stock-search', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ searchType: 'job', searchValue: jobNumber })
+            });
+            
+            const data = await response.json();
+            
+            if (data.error) {
+                resultsEl.innerHTML = '<p class="hint" style="color:#ef4444;">\u274c ' + data.error + '</p>';
+                return;
+            }
+            
+            let html = '';
+            
+            // Job info banner
+            if (data.job) {
+                html += '<div class="job-info-banner">';
+                html += '<div class="job-title">Job ' + (data.job.jobNumber || jobNumber) + '</div>';
+                html += '<div class="job-detail">' + (data.job.customerName || '') + '</div>';
+                html += '<div class="job-detail">' + (data.receivedCount || 0) + ' received | ' + (data.awaitingCount || 0) + ' awaiting</div>';
+                html += '</div>';
+            }
+            
+            if (!data.items || data.items.length === 0) {
+                html += '<p class="hint">No items found for this job</p>';
+                resultsEl.innerHTML = html;
+                return;
+            }
+            
+            // Group by storage location
+            const groups = {};
+            data.items.forEach(item => {
+                const key = item.storageId || 'awaiting';
+                if (!groups[key]) {
+                    groups[key] = {
+                        storageName: item.awaitingReceipt ? '\u23f3 Awaiting Receipt' : (item.storageName || 'Unknown'),
+                        items: [],
+                        isAwaiting: item.awaitingReceipt
+                    };
+                }
+                groups[key].items.push(item);
+            });
+            
+            // Sort: received first, then awaiting
+            const sortedGroups = Object.values(groups).sort((a, b) => (a.isAwaiting ? 1 : 0) - (b.isAwaiting ? 1 : 0));
+            
+            sortedGroups.forEach(group => {
+                html += '<div class="location-group">';
+                html += '<div class="location-group-header">';
+                html += '<span class="location-icon">' + (group.isAwaiting ? '\u23f3' : '\ud83d\udccd') + '</span>';
+                html += '<span class="location-name">' + group.storageName + '</span>';
+                html += '<span class="location-count">' + group.items.length + ' item' + (group.items.length > 1 ? 's' : '') + '</span>';
+                html += '</div>';
+                
+                group.items.forEach(item => {
+                    html += '<div class="item-card' + (group.isAwaiting ? ' awaiting-item' : '') + '">';
+                    html += '<div class="item-details" style="width:100%">';
+                    html += '<div class="item-name">' + (item.description || 'Unknown') + '</div>';
+                    html += '<div class="item-meta">';
+                    if (item.partNo) html += '<span class="item-part">' + item.partNo + '</span>';
+                    html += '<span class="item-qty">' + (group.isAwaiting ? 'Ordered' : 'Qty: ' + item.quantity) + '</span>';
+                    if (item.poOrderNo) html += '<span class="item-job">PO: ' + item.poOrderNo + '</span>';
+                    html += '</div></div></div>';
+                });
+                
+                html += '</div>';
+            });
+            
+            resultsEl.innerHTML = html;
+            
+        } catch (error) {
+            console.error('Stock job lookup error:', error);
+            resultsEl.innerHTML = '<p class="hint" style="color:#ef4444;">\u274c Search failed: ' + error.message + '</p>';
+        }
+    },
+    
+    async stockPartSearch() {
+        const partInput = document.getElementById('part-search');
+        const partNumber = partInput ? partInput.value.trim() : '';
+        const resultsEl = document.getElementById('stock-results');
+        
+        if (!partNumber) {
+            resultsEl.innerHTML = '<p class="hint" style="color:#ef4444;">Please enter a part number</p>';
+            return;
+        }
+        
+        resultsEl.innerHTML = '<p class="hint">\ud83d\udd0d Searching for ' + partNumber + '...</p>';
+        
+        try {
+            const response = await this.authFetch('/api/stock-part-search', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ partNumber: partNumber })
+            });
+            
+            const data = await response.json();
+            
+            if (data.error) {
+                resultsEl.innerHTML = '<p class="hint" style="color:#ef4444;">\u274c ' + data.error + '</p>';
+                return;
+            }
+            
+            if (!data.items || data.items.length === 0) {
+                resultsEl.innerHTML = '<p class="hint">No stock found for part number "' + partNumber + '"</p>';
+                return;
+            }
+            
+            let html = '<div class="job-info-banner"><div class="job-title">\ud83d\udd0d Part Search: ' + partNumber + '</div>';
+            html += '<div class="job-detail">' + data.items.length + ' location(s) found</div></div>';
+            
+            data.items.forEach(item => {
+                html += '<div class="item-card">';
+                html += '<div class="item-details" style="width:100%">';
+                html += '<div class="item-name">' + (item.description || item.partNo || 'Unknown') + '</div>';
+                html += '<div class="item-meta">';
+                html += '<span class="item-part">' + (item.partNo || '') + '</span>';
+                html += '<span class="item-qty">Qty: ' + (item.quantity || 0) + '</span>';
+                html += '<span class="location-name">\ud83d\udccd ' + (item.storageName || 'Unknown') + '</span>';
+                html += '</div></div></div>';
+            });
+            
+            resultsEl.innerHTML = html;
+            
+        } catch (error) {
+            console.error('Part search error:', error);
+            resultsEl.innerHTML = '<p class="hint" style="color:#ef4444;">\u274c Search failed: ' + error.message + '</p>';
+        }
+    },
     toggleSearchItem(globalIndex) {
         const items = this.relocateSearchResults.items;
         const item = items[globalIndex];
