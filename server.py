@@ -1063,7 +1063,7 @@ def get_po_details(po_number):
         po_reference = po.get('Reference', '')
         
         if job_number:
-            job_response = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_number}/?columns=ID,Name,Customer')
+            job_response = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_number}?columns=ID,Name,Customer')
             if job_response.status_code == 200:
                 job_data = job_response.json()
                 customer = job_data.get('Customer', {})
@@ -1766,7 +1766,7 @@ def allocate_items():
                         r_id = first_receipt_id if 'first_receipt_id' in dir() else None
                     if r_id:
                         try:
-                            rd_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/receipts/{r_id}/')
+                            rd_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/receipts/{r_id}')
                             if rd_resp.status_code == 200:
                                 rd = rd_resp.json()
                                 for cat_item in rd.get('Catalogs', []):
@@ -2226,7 +2226,7 @@ def stock_search():
             job_id_val = search_value.strip()
             
             # Step 1: Look up job by ID
-            job_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id_val}/?columns=ID,Name,Customer,Site')
+            job_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id_val}?columns=ID,Name,Customer,Site')
             if job_resp.status_code != 200:
                 return jsonify({'error': f'Job {job_id_val} not found'}), 400
             jd = job_resp.json()
@@ -2360,7 +2360,7 @@ def stock_search():
         
         for po_id in po_ids:
             # Step 1: Get PO details
-            po_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/')
+            po_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}')
             if po_resp.status_code != 200:
                 continue
             po_data = po_resp.json()
@@ -2391,7 +2391,7 @@ def stock_search():
             # Step 3: Get job info and CC stock in bulk (one API call for all items)
             if job_id and section_id and cc_id:
                 # Get job info
-                job_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id}/')
+                job_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id}')
                 if job_resp.status_code == 200:
                     jd = job_resp.json()
                     cust = jd.get('Customer', {})
@@ -2538,14 +2538,14 @@ def stock_part_search():
             return jsonify({'error': 'Please enter a part number'}), 400
         
         # Search catalog by part number
-        cat_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/catalog/?columns=ID,PartNo,Name&PartNo={part_number}')
+        cat_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/catalogs/?columns=ID,PartNo,Name&PartNo={part_number}')
         if cat_resp.status_code != 200:
             return jsonify({'error': 'Catalog search failed'}), 500
         
         catalogs = cat_resp.json()
         if not catalogs:
             # Try partial match
-            cat_resp2 = simpro_request('GET', f'/companies/{COMPANY_ID}/catalog/?columns=ID,PartNo,Name')
+            cat_resp2 = simpro_request('GET', f'/companies/{COMPANY_ID}/catalogs/?columns=ID,PartNo,Name&pageSize=100')
             if cat_resp2.status_code == 200:
                 all_cats = cat_resp2.json()
                 catalogs = [c for c in all_cats if part_number.lower() in (c.get('PartNo', '') or '').lower()][:20]
@@ -3685,7 +3685,7 @@ def job_intel():
         base = SIMPRO_BASE_URL
         
         # 1. Get job details
-        job_resp = requests.get(f"{base}/companies/{COMPANY_ID}/jobs/{job_id}/", headers=headers)
+        job_resp = requests.get(f"{base}/companies/{COMPANY_ID}/jobs/{job_id}", headers=headers)
         if job_resp.status_code != 200:
             return jsonify({"error": f"Job {job_id} not found"}), 404
         job = job_resp.json()
