@@ -2590,7 +2590,7 @@ def stock_move():
                                 ccid = cc.get('ID')
                                 if not ccid:
                                     continue
-                                stock_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{sid}/costCenters/{ccid}/stock/{catalog_id}/')
+                                stock_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{sid}/costCenters/{ccid}/stock/{catalog_id}')
                                 if stock_resp.status_code == 200:
                                     section_id = sid
                                     cc_id = ccid
@@ -2610,7 +2610,7 @@ def stock_move():
                 }
                 unassign_resp = simpro_request(
                     'PATCH',
-                    f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{section_id}/costCenters/{cc_id}/stock/{catalog_id}/',
+                    f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{section_id}/costCenters/{cc_id}/stock/{catalog_id}',
                     json=unassign_payload
                 )
                 print(f"Un-assign: {unassign_resp.status_code}")
