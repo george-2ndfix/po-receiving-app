@@ -1,4 +1,4 @@
-const CACHE_NAME = 'po-receiving-v74';
+const CACHE_NAME = 'po-receiving-v74'; // v74 deploy
 const urlsToCache = [
   '/styles.css',
   '/storage-locations.json',
