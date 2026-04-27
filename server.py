@@ -2525,6 +2525,72 @@ def stock_search():
         return jsonify({'error': str(e)}), 500
 
 
+
+@app.route('/api/stock-part-search', methods=['POST'])
+@login_required
+def stock_part_search():
+    """Search for a part number across all storage devices."""
+    try:
+        data = request.get_json()
+        part_number = data.get('partNumber', '').strip()
+        
+        if not part_number:
+            return jsonify({'error': 'Please enter a part number'}), 400
+        
+        # Search catalog by part number
+        cat_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/catalog/?columns=ID,PartNo,Name&PartNo={part_number}')
+        if cat_resp.status_code != 200:
+            return jsonify({'error': 'Catalog search failed'}), 500
+        
+        catalogs = cat_resp.json()
+        if not catalogs:
+            # Try partial match
+            cat_resp2 = simpro_request('GET', f'/companies/{COMPANY_ID}/catalog/?columns=ID,PartNo,Name')
+            if cat_resp2.status_code == 200:
+                all_cats = cat_resp2.json()
+                catalogs = [c for c in all_cats if part_number.lower() in (c.get('PartNo', '') or '').lower()][:20]
+        
+        if not catalogs:
+            return jsonify({'items': []})
+        
+        items = []
+        for cat in catalogs[:10]:  # Limit to avoid API overload
+            cat_id = cat.get('ID')
+            part_no = cat.get('PartNo', '?')
+            name = cat.get('Name', '')
+            
+            # Check storage devices for this catalog item
+            # Use a few key storage locations
+            storage_ids = [3, 4, 21, 38, 52, 67]  # Stock Holding, Customer Cupboard, Builders, etc.
+            storage_names = {3: 'Stock Holding', 4: 'Customer Cupboard', 21: 'Builders Cupboard', 38: 'ON TOP - Builders Cupboard', 52: 'Stock - Seal Room', 67: 'Stock Shelves'}
+            
+            for sid in storage_ids:
+                try:
+                    stock_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/storageDevices/{sid}/stock/?columns=Catalog,InventoryCount')
+                    if stock_resp.status_code == 200:
+                        stocks = stock_resp.json()
+                        for s in stocks:
+                            s_cat = s.get('Catalog', {})
+                            if s_cat.get('ID') == cat_id:
+                                inv = s.get('InventoryCount', 0)
+                                if inv > 0:
+                                    items.append({
+                                        'catalogId': cat_id,
+                                        'partNo': part_no,
+                                        'description': name,
+                                        'storageId': sid,
+                                        'storageName': storage_names.get(sid, f'Storage {sid}'),
+                                        'quantity': inv
+                                    })
+                except Exception:
+                    pass
+        
+        return jsonify({'items': items})
+    except Exception as e:
+        print(f"Part search error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/stock-move', methods=['POST'])
 @login_required
 def stock_move():
