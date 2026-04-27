@@ -2529,7 +2529,8 @@ def stock_search():
 @app.route('/api/stock-part-search', methods=['POST'])
 @login_required
 def stock_part_search():
-    """Search for a part number across all storage devices."""
+    """Search for a part number across all storage devices using parallel search."""
+    import concurrent.futures
     try:
         data = request.get_json()
         part_number = data.get('partNumber', '').strip()
@@ -2537,53 +2538,105 @@ def stock_part_search():
         if not part_number:
             return jsonify({'error': 'Please enter a part number'}), 400
         
-        # Search catalog by part number
-        cat_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/catalogs/?columns=ID,PartNo,Name&PartNo={part_number}')
-        if cat_resp.status_code != 200:
-            return jsonify({'error': 'Catalog search failed'}), 500
-        
-        catalogs = cat_resp.json()
-        if not catalogs:
-            # Try partial match
-            cat_resp2 = simpro_request('GET', f'/companies/{COMPANY_ID}/catalogs/?columns=ID,PartNo,Name&pageSize=100')
-            if cat_resp2.status_code == 200:
-                all_cats = cat_resp2.json()
-                catalogs = [c for c in all_cats if part_number.lower() in (c.get('PartNo', '') or '').lower()][:20]
-        
-        if not catalogs:
-            return jsonify({'items': []})
+        # Key storage devices to search (main stock areas + tubs)
+        STORAGE_DEVICES = {
+            3: 'Stock Holding',
+            4: 'Customer Cupboard',
+            21: 'Builders Cupboard',
+            38: 'ON TOP - Builders Cupboard',
+            52: 'Stock - Seal Room',
+            53: 'Stock Shelves - Tub 13',
+            54: 'Stock Shelves - Tub 2',
+            55: 'Stock Shelves - Tub 3',
+            56: 'Stock Shelves - Tub 4',
+            57: 'Stock Shelves - Tub 5',
+            58: 'Stock Shelves - Tub 6',
+            59: 'Stock Shelves - Tub 7',
+            60: 'Stock Shelves - Tub 8',
+            61: 'Stock Shelves - Tub 9',
+            62: 'Stock Shelves - Tub 10',
+            63: 'Stock Shelves - Tub 11',
+            64: 'Stock Shelves - Tub 12',
+            65: 'Stock Shelves - Tub 1',
+            66: 'Stock Shelves - Tub 14',
+            68: 'Timber Racks',
+            69: 'Shed',
+        }
         
         items = []
-        for cat in catalogs[:10]:  # Limit to avoid API overload
-            cat_id = cat.get('ID')
-            part_no = cat.get('PartNo', '?')
-            name = cat.get('Name', '')
+        
+        def search_device_exact(sid_name):
+            sid, sname = sid_name
+            try:
+                resp = simpro_request('GET', f'/companies/{COMPANY_ID}/storageDevices/{sid}/stock/?columns=Catalog,InventoryCount&Catalog.PartNo={part_number}')
+                if resp.status_code == 200:
+                    for s in resp.json():
+                        inv = s.get('InventoryCount', 0)
+                        if inv > 0:
+                            cat = s.get('Catalog', {})
+                            return {
+                                'catalogId': cat.get('ID'),
+                                'partNo': cat.get('PartNo', '?'),
+                                'description': cat.get('Name', ''),
+                                'storageId': sid,
+                                'storageName': sname,
+                                'quantity': inv
+                            }
+            except Exception:
+                pass
+            return None
+        
+        # Parallel exact search across all key storage devices
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            results = list(executor.map(search_device_exact, STORAGE_DEVICES.items()))
+        
+        items = [r for r in results if r is not None]
+        
+        # If no exact match, try partial match on main storage locations
+        if not items:
+            main_storages = {3: 'Stock Holding', 4: 'Customer Cupboard', 21: 'Builders Cupboard', 52: 'Stock - Seal Room'}
+            search_lower = part_number.lower()
             
-            # Check storage devices for this catalog item
-            # Use a few key storage locations
-            storage_ids = [3, 4, 21, 38, 52, 67]  # Stock Holding, Customer Cupboard, Builders, etc.
-            storage_names = {3: 'Stock Holding', 4: 'Customer Cupboard', 21: 'Builders Cupboard', 38: 'ON TOP - Builders Cupboard', 52: 'Stock - Seal Room', 67: 'Stock Shelves'}
-            
-            for sid in storage_ids:
+            def search_device_partial(sid_name):
+                sid, sname = sid_name
+                found = []
                 try:
-                    stock_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/storageDevices/{sid}/stock/?columns=Catalog,InventoryCount')
-                    if stock_resp.status_code == 200:
-                        stocks = stock_resp.json()
-                        for s in stocks:
-                            s_cat = s.get('Catalog', {})
-                            if s_cat.get('ID') == cat_id:
-                                inv = s.get('InventoryCount', 0)
-                                if inv > 0:
-                                    items.append({
-                                        'catalogId': cat_id,
-                                        'partNo': part_no,
-                                        'description': name,
-                                        'storageId': sid,
-                                        'storageName': storage_names.get(sid, f'Storage {sid}'),
-                                        'quantity': inv
-                                    })
+                    page = 1
+                    while True:
+                        resp = simpro_request('GET', f'/companies/{COMPANY_ID}/storageDevices/{sid}/stock/?columns=Catalog,InventoryCount&pageSize=250&page={page}')
+                        if resp.status_code != 200:
+                            break
+                        batch = resp.json()
+                        if not batch:
+                            break
+                        for s in batch:
+                            cat = s.get('Catalog', {})
+                            pno = cat.get('PartNo', '') or ''
+                            inv = s.get('InventoryCount', 0)
+                            if search_lower in pno.lower() and inv > 0:
+                                found.append({
+                                    'catalogId': cat.get('ID'),
+                                    'partNo': pno,
+                                    'description': cat.get('Name', ''),
+                                    'storageId': sid,
+                                    'storageName': sname,
+                                    'quantity': inv
+                                })
+                        if len(batch) < 250:
+                            break
+                        page += 1
                 except Exception:
                     pass
+                return found
+            
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+                partial_results = list(executor.map(search_device_partial, main_storages.items()))
+            
+            for batch in partial_results:
+                items.extend(batch)
+        
+        # Sort: highest quantity first
+        items.sort(key=lambda x: x.get('quantity', 0), reverse=True)
         
         return jsonify({'items': items})
     except Exception as e:
