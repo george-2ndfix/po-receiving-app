@@ -1831,7 +1831,7 @@ def allocate_items():
                     # Receipt allocations are STALE - they never update after stock moves (Simpro conflict #2)
                     # Retry loop: Simpro can take >3s to populate AssignedBreakdown after ItemsReceived
                     if cc_id and job_id and section_id:
-                        cc_stock_url = f"/companies/{COMPANY_ID}/jobs/{job_id}/sections/{section_id}/costCenters/{cc_id}/stock/{catalog_id}/"
+                        cc_stock_url = f"/companies/{COMPANY_ID}/jobs/{job_id}/sections/{section_id}/costCenters/{cc_id}/stock/{catalog_id}"
                         cc_stock_found = False
                         max_cc_retries = 5
                         for cc_retry in range(max_cc_retries):
@@ -1902,7 +1902,7 @@ def allocate_items():
                             print(f"[v69] Step 1: Un-assign catalog {catalog_id} from CC {cc_id} at storage {source_storage_id}")
                             unassign_resp = simpro_request(
                                 'PATCH',
-                                f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{section_id}/costCenters/{cc_id}/stock/{catalog_id}/',
+                                f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{section_id}/costCenters/{cc_id}/stock/{catalog_id}',
                                 json={'AssignedBreakdown': [{'Storage': int(source_storage_id), 'Quantity': 0}]}
                             )
                             print(f"[v69] Step 1 response: {unassign_resp.status_code} - {unassign_resp.text[:200] if unassign_resp.text else ''}")
