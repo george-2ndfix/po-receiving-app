@@ -2082,6 +2082,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         resultsEl.innerHTML = '<p class="hint">🔍 Looking up job ' + jobNumber + '...</p>';
         
         try {
+            this._stockSearchMode = 'job';
             const response = await this.authFetch('/api/stock-search', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -2219,21 +2220,30 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                 return;
             }
             
+            // Set part search mode
+            this._stockSearchMode = 'part';
+            this._partSearchItems = data.items;
+            this.stockSelectedItems = [];
+            this.stockSearchData = null;
+            
             let html = '<div class="job-info-banner"><div class="job-title">\ud83d\udd0d Part Search: ' + partNumber + '</div>';
             html += '<div class="job-detail">' + data.items.length + ' location(s) found</div></div>';
             
-            data.items.forEach(item => {
-                html += '<div class="item-card">';
-                html += '<div class="item-details" style="width:100%">';
+            data.items.forEach((item, idx) => {
+                html += '<div class="item-card" onclick="app.toggleStockItem(' + idx + ')" style="cursor:pointer;">';
+                html += '<div style="display:flex;align-items:center;gap:10px;width:100%">';
+                html += '<input type="checkbox" id="stock-cb-' + idx + '" style="width:20px;height:20px;flex-shrink:0;" onclick="event.stopPropagation();" onchange="app.toggleStockItem(' + idx + ')">';
+                html += '<div class="item-details" style="flex:1">';
                 html += '<div class="item-name">' + (item.description || item.partNo || 'Unknown') + '</div>';
                 html += '<div class="item-meta">';
                 html += '<span class="item-part">' + (item.partNo || '') + '</span>';
                 html += '<span class="item-qty">Qty: ' + (item.quantity || 0) + '</span>';
                 html += '<span class="location-name">\ud83d\udccd ' + (item.storageName || 'Unknown') + '</span>';
-                html += '</div></div></div>';
+                html += '</div></div></div></div>';
             });
             
             resultsEl.innerHTML = html;
+            document.getElementById('stock-action-panel').style.display = 'none';
             
         } catch (error) {
             console.error('Part search error:', error);
@@ -2254,9 +2264,14 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         // Show/hide action panel
         const panel = document.getElementById('stock-action-panel');
         const countEl = document.getElementById('stock-item-count');
+        const jobGroup = document.getElementById('stock-target-job-group');
         if (this.stockSelectedItems.length > 0) {
             panel.style.display = 'block';
             countEl.textContent = this.stockSelectedItems.length;
+            // Show job input for part search mode, hide for job mode
+            if (jobGroup) {
+                jobGroup.style.display = (this._stockSearchMode === 'part') ? 'block' : 'none';
+            }
         } else {
             panel.style.display = 'none';
         }
@@ -2277,9 +2292,29 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             return;
         }
         
+        const isPartSearch = (this._stockSearchMode === 'part');
+        let targetJobId = '';
+        let jobNumber = '';
+        let customerName = '';
+        
+        if (isPartSearch) {
+            // Get target job from input
+            const jobInput = document.getElementById('stock-target-job');
+            targetJobId = jobInput ? jobInput.value.trim() : '';
+            if (!targetJobId) {
+                alert('Please enter a Job number to allocate stock to.');
+                return;
+            }
+            jobNumber = targetJobId;
+        } else {
+            jobNumber = this.stockSearchData?.job?.jobNumber || '';
+            customerName = this.stockSearchData?.job?.customerName || '';
+        }
+        
         // Build items array from selected indices
+        const sourceItems = isPartSearch ? this._partSearchItems : this._stockReceivedItems;
         const items = this.stockSelectedItems.map(idx => {
-            const item = this._stockReceivedItems[idx];
+            const item = sourceItems[idx];
             return {
                 catalogId: item.catalogId,
                 partNo: item.partNo,
@@ -2287,10 +2322,10 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                 quantity: item.quantity,
                 sourceId: item.storageId,
                 sourceName: item.storageName,
-                jobId: item.jobId,
-                sectionId: item.sectionId,
-                costCentreId: item.costCentreId,
-                poOrderNo: item.poOrderNo
+                jobId: item.jobId || null,
+                sectionId: item.sectionId || null,
+                costCentreId: item.costCentreId || null,
+                poOrderNo: item.poOrderNo || ''
             };
         });
         
@@ -2299,16 +2334,21 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         btn.textContent = '\u23f3 Moving items...';
         
         try {
+            const payload = {
+                destId: parseInt(destId),
+                destName: destName,
+                jobNumber: jobNumber,
+                customerName: customerName,
+                items: items
+            };
+            if (isPartSearch && targetJobId) {
+                payload.targetJobId = targetJobId;
+            }
+            
             const response = await this.authFetch('/api/allocate-from-stock', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    destId: parseInt(destId),
-                    destName: destName,
-                    jobNumber: this.stockSearchData?.job?.jobNumber || '',
-                    customerName: this.stockSearchData?.job?.customerName || '',
-                    items: items
-                })
+                body: JSON.stringify(payload)
             });
             
             const result = await response.json();
@@ -2318,6 +2358,14 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                 btn.disabled = false;
                 btn.textContent = '\ud83d\udce6 Move & Print Labels';
                 return;
+            }
+            
+            // Update customerName from backend response if available
+            if (result.customerName) {
+                customerName = result.customerName;
+            }
+            if (result.jobNumber) {
+                jobNumber = result.jobNumber;
             }
             
             const successCount = result.results ? result.results.filter(r => r.success).length : 0;
@@ -2331,8 +2379,8 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                         const origItem = items.find(i => String(i.catalogId) === String(r.catalogId));
                         if (origItem) {
                             successItems.push({
-                                jobNumber: this.stockSearchData?.job?.jobNumber || '',
-                                customerName: this.stockSearchData?.job?.customerName || '',
+                                jobNumber: jobNumber,
+                                customerName: customerName,
                                 partNo: origItem.partNo,
                                 description: origItem.description,
                                 quantity: origItem.quantity,
@@ -2342,13 +2390,13 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                     }
                 }
                 
-                // Use the existing generateAndShowLabels function
                 const poNumber = items[0]?.poOrderNo || 'Stock';
                 await this.generateAndShowLabels(successItems, poNumber);
             }
             
             // Show result message
             let msg = '\u2705 ' + successCount + ' item(s) moved to ' + destName;
+            if (jobNumber) msg += ' for Job ' + jobNumber;
             if (failCount > 0) {
                 msg += '\n\u26a0\ufe0f ' + failCount + ' item(s) failed:';
                 result.results.filter(r => !r.success).forEach(r => {
@@ -2357,10 +2405,14 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             }
             alert(msg);
             
-            // Refresh the stock search
+            // Refresh
             this.stockSelectedItems = [];
             document.getElementById('stock-action-panel').style.display = 'none';
-            this.stockJobLookup();
+            if (isPartSearch) {
+                this.stockPartSearch();
+            } else {
+                this.stockJobLookup();
+            }
             
         } catch (error) {
             console.error('Allocate from stock error:', error);
