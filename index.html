@@ -710,6 +710,10 @@
             </div>
             <div id="stock-action-panel" style="display:none; position:sticky; bottom:0; background:#1a1a2e; border-top:2px solid #22d3ee; padding:16px; border-radius:12px 12px 0 0; margin-top:16px;">
                 <p style="color:#94a3b8; margin-bottom:8px;">Move <strong id="stock-item-count" style="color:#22d3ee;">0</strong> selected items to:</p>
+                <div id="stock-target-job-group" style="display:none; margin-bottom:12px;">
+                    <p style="color:#94a3b8; margin-bottom:4px; font-size:14px;">Allocate to Job:</p>
+                    <input type="text" id="stock-target-job" placeholder="Enter Job number..." inputmode="numeric" style="width:100%; padding:10px; border-radius:8px; border:1px solid #334155; background:#0f172a; color:#e2e8f0; font-size:16px;">
+                </div>
                 <select id="stock-storage-dropdown" class="storage-dropdown" style="width:100%; margin-bottom:12px;">
                     <option value="">-- Select Destination --</option>
                     <optgroup label="📌 Special Locations">
