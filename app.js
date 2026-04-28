@@ -44,6 +44,11 @@ const app = {
     suggestedStorageId: null,
     suggestedStorageName: null,
     
+    // Stock selection state
+    stockSelectedItems: [],
+    stockSearchData: null,
+    _stockReceivedItems: [],
+    
     // ============================================
     // Initialization
     // ============================================
@@ -76,6 +81,7 @@ const app = {
         document.getElementById('job-number')?.addEventListener('keypress', (e) => { if (e.key === 'Enter') this.stockJobLookup(); });
         document.getElementById('part-search-btn')?.addEventListener('click', () => this.stockPartSearch());
         document.getElementById('part-search')?.addEventListener('keypress', (e) => { if (e.key === 'Enter') this.stockPartSearch(); });
+        document.getElementById('stock-allocate-btn')?.addEventListener('click', () => this.allocateFromStock());
         document.getElementById('option-picklist')?.addEventListener('click', () => this.showPicklist());
         document.getElementById('option-relocate')?.addEventListener('click', () => this.showScreen('relocate-source'));
         document.getElementById('option-mystery')?.addEventListener('click', () => this.showScreen('mystery'));
@@ -2123,6 +2129,8 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             // Sort: received first, then awaiting
             const sortedGroups = Object.values(groups).sort((a, b) => (a.isAwaiting ? 1 : 0) - (b.isAwaiting ? 1 : 0));
             
+            let globalIdx = 0;
+            
             sortedGroups.forEach(group => {
                 html += '<div class="location-group">';
                 html += '<div class="location-group-header">';
@@ -2132,20 +2140,47 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                 html += '</div>';
                 
                 group.items.forEach(item => {
-                    html += '<div class="item-card' + (group.isAwaiting ? ' awaiting-item' : '') + '">';
-                    html += '<div class="item-details" style="width:100%">';
-                    html += '<div class="item-name">' + (item.description || 'Unknown') + '</div>';
-                    html += '<div class="item-meta">';
-                    if (item.partNo) html += '<span class="item-part">' + item.partNo + '</span>';
-                    html += '<span class="item-qty">' + (group.isAwaiting ? 'Ordered' : 'Qty: ' + item.quantity) + '</span>';
-                    if (item.poOrderNo) html += '<span class="item-job">PO: ' + item.poOrderNo + '</span>';
-                    html += '</div></div></div>';
+                    if (group.isAwaiting) {
+                        html += '<div class="item-card awaiting-item">';
+                        html += '<div class="item-details" style="width:100%">';
+                        html += '<div class="item-name">' + (item.description || 'Unknown') + '</div>';
+                        html += '<div class="item-meta">';
+                        if (item.partNo) html += '<span class="item-part">' + item.partNo + '</span>';
+                        html += '<span class="item-qty">Ordered</span>';
+                        if (item.poOrderNo) html += '<span class="item-job">PO: ' + item.poOrderNo + '</span>';
+                        html += '</div></div></div>';
+                    } else {
+                        const itemIdx = globalIdx++;
+                        html += '<div class="item-card" onclick="app.toggleStockItem(' + itemIdx + ')" style="cursor:pointer;">';
+                        html += '<div style="display:flex;align-items:center;gap:10px;width:100%">';
+                        html += '<input type="checkbox" id="stock-cb-' + itemIdx + '" style="width:20px;height:20px;flex-shrink:0;" onclick="event.stopPropagation();" onchange="app.toggleStockItem(' + itemIdx + ')">';
+                        html += '<div class="item-details" style="flex:1">';
+                        html += '<div class="item-name">' + (item.description || 'Unknown') + '</div>';
+                        html += '<div class="item-meta">';
+                        if (item.partNo) html += '<span class="item-part">' + item.partNo + '</span>';
+                        html += '<span class="item-qty">Qty: ' + item.quantity + '</span>';
+                        if (item.poOrderNo) html += '<span class="item-job">PO: ' + item.poOrderNo + '</span>';
+                        html += '</div></div></div></div>';
+                    }
                 });
                 
                 html += '</div>';
             });
             
             resultsEl.innerHTML = html;
+            
+            // Store data for selection tracking
+            this.stockSearchData = data;
+            this.stockSelectedItems = [];
+            // Build flat array of received items (matching globalIdx order)
+            this._stockReceivedItems = [];
+            const sortedGroupsCopy = Object.values(groups).sort((a, b) => (a.isAwaiting ? 1 : 0) - (b.isAwaiting ? 1 : 0));
+            sortedGroupsCopy.forEach(g => {
+                if (!g.isAwaiting) {
+                    g.items.forEach(item => this._stockReceivedItems.push(item));
+                }
+            });
+            document.getElementById('stock-action-panel').style.display = 'none';
             
         } catch (error) {
             console.error('Stock job lookup error:', error);
@@ -2205,6 +2240,137 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             resultsEl.innerHTML = '<p class="hint" style="color:#ef4444;">\u274c Search failed: ' + error.message + '</p>';
         }
     },
+    
+    toggleStockItem(index) {
+        const cb = document.getElementById('stock-cb-' + index);
+        const idx = this.stockSelectedItems.indexOf(index);
+        if (idx >= 0) {
+            this.stockSelectedItems.splice(idx, 1);
+            if (cb) cb.checked = false;
+        } else {
+            this.stockSelectedItems.push(index);
+            if (cb) cb.checked = true;
+        }
+        // Show/hide action panel
+        const panel = document.getElementById('stock-action-panel');
+        const countEl = document.getElementById('stock-item-count');
+        if (this.stockSelectedItems.length > 0) {
+            panel.style.display = 'block';
+            countEl.textContent = this.stockSelectedItems.length;
+        } else {
+            panel.style.display = 'none';
+        }
+    },
+    
+    async allocateFromStock() {
+        const destDropdown = document.getElementById('stock-storage-dropdown');
+        const destId = destDropdown.value;
+        const destName = destDropdown.options[destDropdown.selectedIndex]?.text || '';
+        
+        if (!destId) {
+            alert('Please select a destination storage location.');
+            return;
+        }
+        
+        if (this.stockSelectedItems.length === 0) {
+            alert('Please select at least one item.');
+            return;
+        }
+        
+        // Build items array from selected indices
+        const items = this.stockSelectedItems.map(idx => {
+            const item = this._stockReceivedItems[idx];
+            return {
+                catalogId: item.catalogId,
+                partNo: item.partNo,
+                description: item.description,
+                quantity: item.quantity,
+                sourceId: item.storageId,
+                sourceName: item.storageName,
+                jobId: item.jobId,
+                sectionId: item.sectionId,
+                costCentreId: item.costCentreId,
+                poOrderNo: item.poOrderNo
+            };
+        });
+        
+        const btn = document.getElementById('stock-allocate-btn');
+        btn.disabled = true;
+        btn.textContent = '\u23f3 Moving items...';
+        
+        try {
+            const response = await this.authFetch('/api/allocate-from-stock', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    destId: parseInt(destId),
+                    destName: destName,
+                    jobNumber: this.stockSearchData?.job?.jobNumber || '',
+                    customerName: this.stockSearchData?.job?.customerName || '',
+                    items: items
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (result.error) {
+                alert('Error: ' + result.error);
+                btn.disabled = false;
+                btn.textContent = '\ud83d\udce6 Move & Print Labels';
+                return;
+            }
+            
+            const successCount = result.results ? result.results.filter(r => r.success).length : 0;
+            const failCount = result.results ? result.results.filter(r => !r.success).length : 0;
+            
+            // Generate labels for successful items
+            if (successCount > 0) {
+                const successItems = [];
+                for (const r of result.results) {
+                    if (r.success) {
+                        const origItem = items.find(i => String(i.catalogId) === String(r.catalogId));
+                        if (origItem) {
+                            successItems.push({
+                                jobNumber: this.stockSearchData?.job?.jobNumber || '',
+                                customerName: this.stockSearchData?.job?.customerName || '',
+                                partNo: origItem.partNo,
+                                description: origItem.description,
+                                quantity: origItem.quantity,
+                                storageLocation: destName
+                            });
+                        }
+                    }
+                }
+                
+                // Use the existing generateAndShowLabels function
+                const poNumber = items[0]?.poOrderNo || 'Stock';
+                await this.generateAndShowLabels(successItems, poNumber);
+            }
+            
+            // Show result message
+            let msg = '\u2705 ' + successCount + ' item(s) moved to ' + destName;
+            if (failCount > 0) {
+                msg += '\n\u26a0\ufe0f ' + failCount + ' item(s) failed:';
+                result.results.filter(r => !r.success).forEach(r => {
+                    msg += '\n  - ' + r.partNo + ': ' + (r.error || 'Unknown error');
+                });
+            }
+            alert(msg);
+            
+            // Refresh the stock search
+            this.stockSelectedItems = [];
+            document.getElementById('stock-action-panel').style.display = 'none';
+            this.stockJobLookup();
+            
+        } catch (error) {
+            console.error('Allocate from stock error:', error);
+            alert('Error: ' + error.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '\ud83d\udce6 Move & Print Labels';
+        }
+    },
+    
     toggleSearchItem(globalIndex) {
         const items = this.relocateSearchResults.items;
         const item = items[globalIndex];
