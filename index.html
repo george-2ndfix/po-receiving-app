@@ -708,6 +708,75 @@
             <div id="stock-results" class="stock-results">
                 <p class="hint">Enter a job number to see items available in stock</p>
             </div>
+            <div id="stock-action-panel" style="display:none; position:sticky; bottom:0; background:#1a1a2e; border-top:2px solid #22d3ee; padding:16px; border-radius:12px 12px 0 0; margin-top:16px;">
+                <p style="color:#94a3b8; margin-bottom:8px;">Move <strong id="stock-item-count" style="color:#22d3ee;">0</strong> selected items to:</p>
+                <select id="stock-storage-dropdown" class="storage-dropdown" style="width:100%; margin-bottom:12px;">
+                    <option value="">-- Select Destination --</option>
+                    <optgroup label="📌 Special Locations">
+                        <option value="4">Customer Cupboard</option>
+                        <option value="21">Builders Cupboard</option>
+                        <option value="38">ON TOP - Builders Cupboard</option>
+                    </optgroup>
+                    <optgroup label="📦 Container 1">
+                        <option value="5">1.01 Blue Shipping Container</option>
+                        <option value="6">1.02 Blue Shipping Container</option>
+                        <option value="7">1.03</option>
+                        <option value="8">1.04</option>
+                        <option value="48">1.05</option>
+                        <option value="49">1.06</option>
+                        <option value="50">1.07</option>
+                        <option value="51">1.08</option>
+                    </optgroup>
+                    <optgroup label="📦 Container 2">
+                        <option value="13">2.01</option>
+                        <option value="14">2.02</option>
+                        <option value="15">2.03</option>
+                        <option value="16">2.04</option>
+                        <option value="17">2.05</option>
+                        <option value="18">2.06</option>
+                        <option value="19">2.07</option>
+                        <option value="20">2.08</option>
+                        <option value="255">2.09 - Container Side</option>
+                    </optgroup>
+                    <optgroup label="📦 Container 3">
+                        <option value="22">3.01</option>
+                        <option value="23">3.02</option>
+                        <option value="24">3.03</option>
+                        <option value="25">3.04</option>
+                        <option value="26">3.05</option>
+                        <option value="27">3.06</option>
+                        <option value="28">3.07</option>
+                        <option value="29">3.08</option>
+                    </optgroup>
+                    <optgroup label="📦 Container 4">
+                        <option value="30">4.01</option>
+                        <option value="31">4.02</option>
+                        <option value="32">4.03</option>
+                        <option value="33">4.04</option>
+                        <option value="34">4.05</option>
+                        <option value="35">4.06</option>
+                        <option value="36">4.07</option>
+                        <option value="37">4.08</option>
+                    </optgroup>
+                    <optgroup label="📦 Container 5">
+                        <option value="39">5.01</option>
+                        <option value="40">5.02</option>
+                        <option value="41">5.03</option>
+                        <option value="42">5.04</option>
+                        <option value="43">5.05</option>
+                        <option value="44">5.06</option>
+                        <option value="45">5.07</option>
+                        <option value="46">5.08</option>
+                    </optgroup>
+                    <optgroup label="🏢 Other">
+                        <option value="1">Stock Holding</option>
+                        <option value="47">Stock Holding 2</option>
+                        <option value="2">Vehicle - George</option>
+                        <option value="3">Vehicle - Jim</option>
+                    </optgroup>
+                </select>
+                <button class="btn btn-primary btn-large" id="stock-allocate-btn" style="width:100%; padding:14px; font-size:16px;">📦 Move & Print Labels</button>
+            </div>
         </main>
     </div>
     
