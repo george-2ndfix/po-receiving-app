@@ -2631,6 +2631,7 @@ def allocate_from_stock():
         items = data.get('items', [])
         staff_member = session.get('username', 'unknown')
         staff_name = session.get('display_name', staff_member)
+        target_job_id = data.get('targetJobId', '')
         
         if not dest_id or not items:
             return jsonify({"error": "Missing destination or items"}), 400
@@ -2763,6 +2764,101 @@ def allocate_from_stock():
                 results.append({"catalogId": catalog_id, "partNo": part_no, "success": True, "method": "job_3step"})
                 success_count += 1
                 print(f"  SUCCESS: {part_no} moved")
+            elif target_job_id and not job_id:
+                # General stock → allocate to target job
+                print(f"  General stock → Job {target_job_id}")
+                
+                # Step 1: Find section/CC for the target job
+                found_section = None
+                found_cc = None
+                try:
+                    sec_resp = simpro_request("GET", f"/companies/{COMPANY_ID}/jobs/{target_job_id}/sections/")
+                    if sec_resp.status_code == 200:
+                        for sec in sec_resp.json():
+                            sid = sec.get("ID")
+                            if not sid:
+                                continue
+                            cc_resp = simpro_request("GET", f"/companies/{COMPANY_ID}/jobs/{target_job_id}/sections/{sid}/costCenters/")
+                            if cc_resp.status_code == 200:
+                                ccs = cc_resp.json()
+                                # Check if catalog item already exists on any CC
+                                for cc in ccs:
+                                    ccid = cc.get("ID")
+                                    if not ccid:
+                                        continue
+                                    stock_check = simpro_request("GET", f"/companies/{COMPANY_ID}/jobs/{target_job_id}/sections/{sid}/costCenters/{ccid}/stock/{catalog_id}")
+                                    if stock_check.status_code == 200:
+                                        found_section = sid
+                                        found_cc = ccid
+                                        print(f"  Found item on CC {ccid} in section {sid}")
+                                        break
+                                if found_section:
+                                    break
+                                # If not found on any CC, use first CC
+                                if not found_section and ccs:
+                                    found_section = sid
+                                    found_cc = ccs[0].get("ID")
+                            if found_section:
+                                break
+                except Exception as e:
+                    print(f"  Job lookup error: {e}")
+                
+                if not found_section or not found_cc:
+                    results.append({"catalogId": catalog_id, "partNo": part_no, "success": False, "error": f"Could not find cost centre on Job {target_job_id}"})
+                    continue
+                
+                # Step 2: Transfer stock from source to dest
+                if source_id and str(source_id) != str(dest_id):
+                    print(f"  Transfer: {source_name} -> {dest_name}")
+                    try:
+                        transfer_payload = {
+                            "SourceStorageDeviceID": int(source_id),
+                            "Items": [{
+                                "CatalogID": int(catalog_id),
+                                "DestinationStorageDeviceID": int(dest_id),
+                                "Quantity": int(quantity)
+                            }]
+                        }
+                        transfer_resp = simpro_request("POST", f"/companies/{COMPANY_ID}/stockTransfer/", json=transfer_payload)
+                        print(f"  Transfer: {transfer_resp.status_code}")
+                        if transfer_resp.status_code not in (200, 201, 204):
+                            err_msg = f"Transfer failed: HTTP {transfer_resp.status_code}"
+                            try:
+                                err = transfer_resp.json()
+                                if "Message" in err:
+                                    err_msg = err["Message"]
+                            except:
+                                pass
+                            results.append({"catalogId": catalog_id, "partNo": part_no, "success": False, "error": err_msg})
+                            continue
+                    except Exception as e:
+                        results.append({"catalogId": catalog_id, "partNo": part_no, "success": False, "error": f"Transfer error: {str(e)}"})
+                        continue
+                
+                # Step 3: Assign to job CC at destination
+                print(f"  Assign to Job {target_job_id} CC {found_cc}")
+                try:
+                    assign_resp = simpro_request(
+                        "POST",
+                        f"/companies/{COMPANY_ID}/jobs/{target_job_id}/sections/{found_section}/costCenters/{found_cc}/stock/",
+                        json={"Catalog": int(catalog_id), "AssignedBreakdown": [{"Storage": int(dest_id), "Quantity": int(quantity)}]}
+                    )
+                    print(f"  Assign: {assign_resp.status_code}")
+                    if assign_resp.status_code in (200, 201, 204):
+                        results.append({"catalogId": catalog_id, "partNo": part_no, "success": True, "method": "stock_to_job"})
+                        success_count += 1
+                        print(f"  SUCCESS: {part_no} allocated to Job {target_job_id}")
+                    else:
+                        err_msg = f"CC assign failed: HTTP {assign_resp.status_code}"
+                        try:
+                            err = assign_resp.json()
+                            if "Message" in err:
+                                err_msg = err["Message"]
+                        except:
+                            pass
+                        results.append({"catalogId": catalog_id, "partNo": part_no, "success": False, "error": err_msg})
+                except Exception as e:
+                    results.append({"catalogId": catalog_id, "partNo": part_no, "success": False, "error": f"CC assign error: {str(e)}"})
             else:
                 # Non-job stock: simple transfer
                 if not source_id:
@@ -2795,6 +2891,21 @@ def allocate_from_stock():
                 except Exception as e:
                     results.append({"catalogId": catalog_id, "partNo": part_no, "success": False, "error": str(e)})
         
+        # Look up job info for response
+        response_customer = customer_name
+        response_job = job_number
+        if target_job_id and not customer_name:
+            try:
+                job_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{target_job_id}?columns=ID,Name,Customer')
+                if job_resp.status_code == 200:
+                    jd = job_resp.json()
+                    cust = jd.get('Customer', {})
+                    if isinstance(cust, dict):
+                        response_customer = cust.get('CompanyName', cust.get('GivenName', ''))
+                    response_job = jd.get('Name', str(target_job_id))
+            except:
+                pass
+        
         # Log the allocation
         try:
             db = get_db()
@@ -2806,7 +2917,7 @@ def allocate_from_stock():
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                         (orig.get("poOrderNo", "Stock"), str(r.get("catalogId")), r.get("partNo", ""),
                          orig.get("quantity", 1), dest_name, staff_name, "stock_allocation",
-                         job_number, customer_name))
+                         job_number, response_customer or customer_name))
             db.commit()
         except Exception as log_err:
             print(f"Allocation log error: {log_err}")
@@ -2816,7 +2927,9 @@ def allocate_from_stock():
             "totalItems": len(items),
             "successCount": success_count,
             "failCount": len(items) - success_count,
-            "results": results
+            "results": results,
+            "customerName": response_customer,
+            "jobNumber": response_job
         })
     except Exception as e:
         print(f"Allocate from stock error: {e}")
