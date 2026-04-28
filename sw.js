@@ -1,4 +1,4 @@
-const CACHE_NAME = 'po-receiving-v78'; // v74 deploy
+const CACHE_NAME = 'po-receiving-v79'; // v79 stock-to-job
 const urlsToCache = [
   '/styles.css',
   '/storage-locations.json',
