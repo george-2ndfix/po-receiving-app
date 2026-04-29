@@ -2530,55 +2530,51 @@ def get_all_storage_devices():
 @app.route('/api/stock-part-search', methods=['POST'])
 @login_required
 def stock_part_search():
-    """Search for a part number across all storage devices using parallel search."""
-    import concurrent.futures
+    """Search for a part number across all storage devices (sequential, thread-safe)."""
+    from urllib.parse import quote as url_quote
     try:
         data = request.get_json()
         part_number = data.get('partNumber', '').strip()
-        
+
         if not part_number:
             return jsonify({'error': 'Please enter a part number'}), 400
-        
+
         # Dynamically fetch all storage devices (cached for 60s)
         STORAGE_DEVICES = get_all_storage_devices()
-        
+
         items = []
-        
-        def search_device_exact(sid_name):
-            sid, sname = sid_name
+        search_lower = part_number.lower()
+
+        # Sequential search across all storage devices (avoids thread-safety issues)
+        for sid, sname in STORAGE_DEVICES.items():
             try:
-                resp = simpro_request('GET', f'/companies/{COMPANY_ID}/storageDevices/{sid}/stock/?columns=Catalog,InventoryCount&Catalog.PartNo={__import__('urllib.parse', fromlist=['quote']).quote(str(part_number), safe='')}')
+                # Try exact PartNo filter first
+                encoded = url_quote(str(part_number), safe='')
+                resp = simpro_request('GET', f'/companies/{COMPANY_ID}/storageDevices/{sid}/stock/?columns=Catalog,InventoryCount&Catalog.PartNo={encoded}')
                 if resp.status_code == 200:
-                    for s in resp.json():
+                    batch = resp.json()
+                    for s in batch:
                         inv = s.get('InventoryCount', 0)
                         if inv > 0:
                             cat = s.get('Catalog', {})
-                            return {
-                                'catalogId': cat.get('ID'),
-                                'partNo': cat.get('PartNo', '?'),
-                                'description': cat.get('Name', ''),
-                                'storageId': sid,
-                                'storageName': sname,
-                                'quantity': inv
-                            }
-            except Exception:
-                pass
-            return None
-        
-        # Parallel exact search across all key storage devices
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            results = list(executor.map(search_device_exact, STORAGE_DEVICES.items()))
-        
-        items = [r for r in results if r is not None]
-        
-        # If no exact match, try partial match on all storage locations
+                            pno = cat.get('PartNo', '') or ''
+                            # Filter client-side in case API ignores the filter
+                            if search_lower in pno.lower():
+                                items.append({
+                                    'catalogId': cat.get('ID'),
+                                    'partNo': pno,
+                                    'description': cat.get('Name', ''),
+                                    'storageId': sid,
+                                    'storageName': sname,
+                                    'quantity': inv
+                                })
+            except Exception as e:
+                print(f'stock_part_search device {sid} error: {e}')
+                continue
+
+        # If no exact match found, do a full scan with partial matching
         if not items:
-            main_storages = STORAGE_DEVICES  # Use same full dynamic list
-            search_lower = part_number.lower()
-            
-            def search_device_partial(sid_name):
-                sid, sname = sid_name
-                found = []
+            for sid, sname in STORAGE_DEVICES.items():
                 try:
                     page = 1
                     while True:
@@ -2593,7 +2589,7 @@ def stock_part_search():
                             pno = cat.get('PartNo', '') or ''
                             inv = s.get('InventoryCount', 0)
                             if search_lower in pno.lower() and inv > 0:
-                                found.append({
+                                items.append({
                                     'catalogId': cat.get('ID'),
                                     'partNo': pno,
                                     'description': cat.get('Name', ''),
@@ -2604,23 +2600,18 @@ def stock_part_search():
                         if len(batch) < 250:
                             break
                         page += 1
-                except Exception:
-                    pass
-                return found
-            
-            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-                partial_results = list(executor.map(search_device_partial, main_storages.items()))
-            
-            for batch in partial_results:
-                items.extend(batch)
-        
+                except Exception as e:
+                    print(f'stock_part_search partial device {sid} error: {e}')
+                    continue
+
         # Sort: highest quantity first
         items.sort(key=lambda x: x.get('quantity', 0), reverse=True)
-        
+
         return jsonify({'items': items})
     except Exception as e:
-        print(f"Part search error: {e}")
+        print(f'Part search error: {e}')
         return jsonify({'error': str(e)}), 500
+
 
 
 @app.route('/api/allocate-from-stock', methods=['POST'])
