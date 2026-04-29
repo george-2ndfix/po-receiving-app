@@ -62,6 +62,10 @@ token_cache = {
     'expires_at': None
 }
 
+# Storage devices cache (for stock_part_search)
+_storage_devices_cache = None
+_storage_devices_cache_time = 0
+
 # ============================================
 # Database Setup
 # ============================================
@@ -2499,6 +2503,30 @@ def stock_search():
 
 
 
+def get_all_storage_devices():
+    """Fetch all storage devices from Simpro API, with 60-second cache."""
+    global _storage_devices_cache, _storage_devices_cache_time
+    now = time.time()
+    if _storage_devices_cache is not None and (now - _storage_devices_cache_time) < 60:
+        return _storage_devices_cache
+    try:
+        resp = simpro_request('GET', f'/companies/{COMPANY_ID}/storageDevices/?pageSize=200')
+        if resp.status_code == 200:
+            devices = {}
+            for dev in resp.json():
+                did = dev.get('ID')
+                dname = dev.get('Name', f'Device {did}')
+                if did:
+                    devices[did] = dname
+            _storage_devices_cache = devices
+            _storage_devices_cache_time = now
+            return devices
+    except Exception as e:
+        print(f'get_all_storage_devices error: {e}')
+    # Return cached version even if stale, or empty dict
+    return _storage_devices_cache or {}
+
+
 @app.route('/api/stock-part-search', methods=['POST'])
 @login_required
 def stock_part_search():
@@ -2511,30 +2539,8 @@ def stock_part_search():
         if not part_number:
             return jsonify({'error': 'Please enter a part number'}), 400
         
-        # Key storage devices to search (main stock areas + tubs)
-        STORAGE_DEVICES = {
-            3: 'Stock Holding',
-            4: 'Customer Cupboard',
-            21: 'Builders Cupboard',
-            38: 'ON TOP - Builders Cupboard',
-            52: 'Stock - Seal Room',
-            53: 'Stock Shelves - Tub 13',
-            54: 'Stock Shelves - Tub 2',
-            55: 'Stock Shelves - Tub 3',
-            56: 'Stock Shelves - Tub 4',
-            57: 'Stock Shelves - Tub 5',
-            58: 'Stock Shelves - Tub 6',
-            59: 'Stock Shelves - Tub 7',
-            60: 'Stock Shelves - Tub 8',
-            61: 'Stock Shelves - Tub 9',
-            62: 'Stock Shelves - Tub 10',
-            63: 'Stock Shelves - Tub 11',
-            64: 'Stock Shelves - Tub 12',
-            65: 'Stock Shelves - Tub 1',
-            66: 'Stock Shelves - Tub 14',
-            68: 'Timber Racks',
-            69: 'Shed',
-        }
+        # Dynamically fetch all storage devices (cached for 60s)
+        STORAGE_DEVICES = get_all_storage_devices()
         
         items = []
         
@@ -2565,9 +2571,9 @@ def stock_part_search():
         
         items = [r for r in results if r is not None]
         
-        # If no exact match, try partial match on main storage locations
+        # If no exact match, try partial match on all storage locations
         if not items:
-            main_storages = {3: 'Stock Holding', 4: 'Customer Cupboard', 21: 'Builders Cupboard', 52: 'Stock - Seal Room'}
+            main_storages = STORAGE_DEVICES  # Use same full dynamic list
             search_lower = part_number.lower()
             
             def search_device_partial(sid_name):
