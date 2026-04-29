@@ -2547,7 +2547,7 @@ def stock_part_search():
         def search_device_exact(sid_name):
             sid, sname = sid_name
             try:
-                resp = simpro_request('GET', f'/companies/{COMPANY_ID}/storageDevices/{sid}/stock/?columns=Catalog,InventoryCount&Catalog.PartNo={part_number}')
+                resp = simpro_request('GET', f'/companies/{COMPANY_ID}/storageDevices/{sid}/stock/?columns=Catalog,InventoryCount&Catalog.PartNo={__import__('urllib.parse', fromlist=['quote']).quote(str(part_number), safe='')}')
                 if resp.status_code == 200:
                     for s in resp.json():
                         inv = s.get('InventoryCount', 0)
