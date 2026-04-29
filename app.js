@@ -2168,6 +2168,12 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                 html += '</div>';
             });
             
+            // Show message if all items are awaiting receipt (no clickable items)
+            const allAwaiting = sortedGroups.length > 0 && sortedGroups.every(g => g.isAwaiting);
+            if (allAwaiting) {
+                html += '<p class="hint" style="color:#f59e0b;margin-top:12px;">⚠️ All items for this job are awaiting receipt — receive them via the PO receiving screen first.</p>';
+            }
+            
             resultsEl.innerHTML = html;
             
             // Store data for selection tracking
