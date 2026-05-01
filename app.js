@@ -2141,7 +2141,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                 html += '</div>';
                 
                 group.items.forEach(item => {
-                    if (group.isAwaiting) {
+                    if (item.awaitingReceipt) {
                         html += '<div class="item-card awaiting-item" onclick="app.showAwaitingTip()" style="opacity:0.55;cursor:not-allowed;border-left:3px solid #f59e0b;">';
                         html += '<div class="item-details" style="width:100%">';
                         html += '<div class="item-name">' + (item.description || 'Unknown') + ' <span style="font-size:11px;background:#f59e0b22;color:#f59e0b;border:1px solid #f59e0b44;border-radius:4px;padding:1px 5px;">⏳ Awaiting Receipt</span></div>';
