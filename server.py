@@ -2292,7 +2292,8 @@ def stock_search():
                             best_storage_name = breakdown[0].get('Storage', {}).get('Name', 'Unknown')
                         
                         true_qty = best_qty if best_qty > 0 else assigned_qty
-                        awaiting = not (assigned_qty > 0 and best_storage_id)
+                        # v85 fix: awaiting only when nothing assigned — empty breakdown ≠ not received
+                        awaiting = assigned_qty <= 0
                         
                         item_data = {
                             'catalogId': cat_id,
