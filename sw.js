@@ -1,4 +1,4 @@
-const CACHE_NAME = 'po-receiving-v84'; // v84 fix awaiting item UX clarity
+const CACHE_NAME = 'po-receiving-v85'; // v84 fix awaiting item UX clarity
 const urlsToCache = [
   '/styles.css',
   '/storage-locations.json',
