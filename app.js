@@ -2304,7 +2304,6 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         let customerName = '';
         
         if (isPartSearch) {
-            // Get target job from input
             const jobInput = document.getElementById('stock-target-job');
             targetJobId = jobInput ? jobInput.value.trim() : '';
             if (!targetJobId) {
@@ -2335,6 +2334,283 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             };
         });
         
+        // If part search with target job: do CC confirmation first
+        if (isPartSearch && targetJobId) {
+            await this.doJobCCLookup(targetJobId, destId, destName, items, jobNumber);
+            return;
+        }
+        
+        // Non-part-search (job mode): items already have jobId/sectionId/costCentreId from search
+        await this.doDirectAllocation(destId, destName, items, jobNumber, customerName, '');
+    },
+    
+    async doJobCCLookup(targetJobId, destId, destName, items, jobNumber) {
+        const btn = document.getElementById('stock-allocate-btn');
+        btn.disabled = true;
+        btn.textContent = '\u23f3 Looking up job cost centres...';
+        
+        // Remove any existing CC panel
+        const existing = document.getElementById('cc-confirm-panel');
+        if (existing) existing.remove();
+        
+        try {
+            // Use first item for lookup
+            const firstItem = items[0];
+            const lookupPayload = {
+                jobId: parseInt(targetJobId),
+                catalogId: firstItem.catalogId,
+                partNo: firstItem.partNo,
+                description: firstItem.description
+            };
+            
+            const response = await this.authFetch('/api/job-cc-lookup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(lookupPayload)
+            });
+            
+            const data = await response.json();
+            
+            if (data.error) {
+                alert('CC Lookup error: ' + data.error);
+                btn.disabled = false;
+                btn.textContent = '\ud83d\udce6 Move & Print Labels';
+                return;
+            }
+            
+            btn.disabled = false;
+            btn.textContent = '\ud83d\udce6 Move & Print Labels';
+            
+            this.showCCConfirmPanel(data, targetJobId, destId, destName, items, jobNumber);
+            
+        } catch (error) {
+            console.error('CC lookup error:', error);
+            alert('Error looking up cost centres: ' + error.message);
+            btn.disabled = false;
+            btn.textContent = '\ud83d\udce6 Move & Print Labels';
+        }
+    },
+    
+    showCCConfirmPanel(data, targetJobId, destId, destName, items, jobNumber) {
+        const actionPanel = document.getElementById('stock-action-panel');
+        
+        // Remove any existing CC panel
+        const existing = document.getElementById('cc-confirm-panel');
+        if (existing) existing.remove();
+        
+        const job = data.job || {};
+        const matches = data.matches || [];
+        const notFound = data.notFound;
+        
+        const firstItem = items[0];
+        
+        let html = '<div id="cc-confirm-panel" style="margin-top:16px; border:2px solid #22d3ee; border-radius:10px; padding:14px; background:#0f172a;">';
+        html += '<div style="font-size:13px; font-weight:600; color:#22d3ee; margin-bottom:10px; border-bottom:1px solid #334155; padding-bottom:8px;">── Confirm Job Cost Centre ──</div>';
+        
+        // Job info
+        html += '<div style="font-size:13px; color:#94a3b8; margin-bottom:8px;">';
+        html += '<strong style="color:#e2e8f0;">Job: ' + (job.name || targetJobId) + '</strong>';
+        if (job.customer) html += ' &nbsp;|&nbsp; ' + job.customer;
+        if (job.site) html += '<br><span style="font-size:12px;">' + job.site + '</span>';
+        html += '</div>';
+        
+        // Selected items
+        html += '<div style="font-size:12px; color:#94a3b8; margin-bottom:10px;">';
+        items.forEach(item => {
+            html += '<div>\u25cf ' + (item.description || item.partNo) + (item.partNo ? ' (' + item.partNo + ')' : '') + ' &times;' + item.quantity + '</div>';
+        });
+        html += '</div>';
+        
+        if (notFound) {
+            // Item not on job
+            html += '<div style="background:#7c3d00; border:1px solid #f59e0b; border-radius:8px; padding:10px; margin-bottom:12px; color:#fef3c7; font-size:13px;">';
+            html += '\u26a0\ufe0f Item not found on this job\'s material list';
+            html += '</div>';
+            
+            html += '<button onclick="app.showManualAllocConfirm(\'' + targetJobId + '\', \'' + (job.name || targetJobId).replace(/'/g, '') + '\', \'' + destId + '\', \'' + destName.replace(/'/g, '') + '\', app._pendingCCItems)" style="width:100%; padding:12px; border-radius:8px; background:#f59e0b; color:#000; font-weight:600; border:none; cursor:pointer; margin-bottom:8px; font-size:14px;">Add to Job after Confirmation</button>';
+            html += '<button onclick="app.cancelCCConfirm()" style="width:100%; padding:10px; border-radius:8px; background:#334155; color:#e2e8f0; font-weight:500; border:none; cursor:pointer; font-size:14px;">Cancel</button>';
+            
+        } else {
+            // Show matching CCs
+            html += '<div style="font-size:13px; color:#94a3b8; margin-bottom:8px;">Matching job material lines:</div>';
+            
+            matches.forEach((m, idx) => {
+                const storeLocs = m.storageLocations.map(s => s.name + ' (\u00d7' + s.qty + ')').join(', ');
+                html += '<div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:10px;padding:8px;border:1px solid #334155;border-radius:8px;">';
+                html += '<input type="radio" name="cc-choice" value="' + idx + '" id="cc-r-' + idx + '" style="margin-top:3px;flex-shrink:0;" ' + (idx === 0 ? 'checked' : '') + '>';
+                html += '<label for="cc-r-' + idx + '" style="cursor:pointer;flex:1;">';
+                html += '<div style="font-size:13px; color:#e2e8f0; font-weight:500;">' + m.costCentreName + '</div>';
+                if (m.sectionName && m.sectionName !== m.costCentreName) {
+                    html += '<div style="font-size:12px; color:#64748b;">Section: ' + m.sectionName + '</div>';
+                }
+                html += '<div style="font-size:12px; color:#94a3b8; margin-top:3px;">';
+                html += 'Required: ' + m.requiredQty + ' &nbsp; Allocated: ' + m.assignedQty + ' &nbsp; Remaining: ' + m.remainingQty;
+                html += '</div>';
+                if (storeLocs) {
+                    html += '<div style="font-size:12px; color:#64748b;">Currently in: ' + storeLocs + '</div>';
+                }
+                html += '</label>';
+                html += '</div>';
+            });
+            
+            // Source/dest info
+            const firstItem = items[0];
+            html += '<div style="font-size:12px; color:#64748b; margin-bottom:10px;">';
+            html += 'Source: ' + (firstItem.sourceName || 'Unknown') + ' &rarr; Destination: ' + destName;
+            html += '</div>';
+            
+            html += '<button onclick="app.doAllocateWithSelectedCC(\'' + targetJobId + '\', \'' + destId + '\', \'' + destName.replace(/'/g, '') + '\', app._pendingCCItems, app._pendingCCMatches, \'' + (job.customer || '').replace(/'/g, '') + '\', \'' + (job.name || '').replace(/'/g, '') + '\')" style="width:100%; padding:12px; border-radius:8px; background:#22d3ee; color:#000; font-weight:600; border:none; cursor:pointer; margin-bottom:8px; font-size:14px;">\u2705 Allocate to Selected Cost Centre</button>';
+            html += '<button onclick="app.cancelCCConfirm()" style="width:100%; padding:10px; border-radius:8px; background:#334155; color:#e2e8f0; font-weight:500; border:none; cursor:pointer; font-size:14px;">Cancel</button>';
+        }
+        
+        html += '</div>';
+        
+        // Store pending data
+        this._pendingCCItems = items;
+        this._pendingCCMatches = matches;
+        
+        // Insert CC panel after the allocate button
+        const allocBtn = document.getElementById('stock-allocate-btn');
+        allocBtn.insertAdjacentHTML('afterend', html);
+        
+        // Scroll to panel
+        setTimeout(() => {
+            document.getElementById('cc-confirm-panel')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }, 100);
+    },
+    
+    cancelCCConfirm() {
+        const panel = document.getElementById('cc-confirm-panel');
+        if (panel) panel.remove();
+    },
+    
+    async doAllocateWithSelectedCC(targetJobId, destId, destName, items, matches, customerName, jobName) {
+        // Get selected CC radio
+        const selected = document.querySelector('input[name="cc-choice"]:checked');
+        const matchIdx = selected ? parseInt(selected.value) : 0;
+        const match = matches[matchIdx];
+        
+        if (!match) {
+            alert('Please select a cost centre.');
+            return;
+        }
+        
+        // Add confirmed section/CC to each item
+        const confirmedItems = items.map(item => ({
+            ...item,
+            sectionId: match.sectionId,
+            costCentreId: match.costCentreId
+        }));
+        
+        // Remove CC panel
+        document.getElementById('cc-confirm-panel')?.remove();
+        
+        await this.doDirectAllocation(
+            destId, destName, confirmedItems, 
+            jobName || targetJobId, customerName, targetJobId
+        );
+    },
+    
+    showManualAllocConfirm(targetJobId, jobName, destId, destName, items) {
+        const panel = document.getElementById('cc-confirm-panel');
+        const noteText = 'Stock manually adjusted and allocated to Job ' + targetJobId + '. Item was physically available but not showing as available stock in Simpro.';
+        
+        let html = '<div id="cc-confirm-panel" style="margin-top:16px; border:2px solid #f59e0b; border-radius:10px; padding:14px; background:#0f172a;">';
+        html += '<div style="font-size:13px; font-weight:600; color:#f59e0b; margin-bottom:10px;">\u26a0\ufe0f Manual Stock Adjustment</div>';
+        html += '<div style="font-size:13px; color:#94a3b8; margin-bottom:12px; line-height:1.5;">';
+        html += 'This item is not on the job\'s material list. Allocating anyway will create a manual stock adjustment.<br><br>';
+        html += '<strong style="color:#e2e8f0;">A note will be added to the job:</strong><br>';
+        html += '<em style="color:#94a3b8;">"' + noteText + '"</em>';
+        html += '</div>';
+        html += '<button onclick="app.doManualAllocation(\'' + targetJobId + '\', \'' + destId + '\', \'' + destName.replace(/'/g, '') + '\', app._pendingCCItems, \'' + noteText.replace(/'/g, '') + '\')" style="width:100%; padding:12px; border-radius:8px; background:#f59e0b; color:#000; font-weight:600; border:none; cursor:pointer; margin-bottom:8px; font-size:14px;">Confirm Manual Allocation</button>';
+        html += '<button onclick="app.cancelCCConfirm()" style="width:100%; padding:10px; border-radius:8px; background:#334155; color:#e2e8f0; font-weight:500; border:none; cursor:pointer; font-size:14px;">Cancel</button>';
+        html += '</div>';
+        
+        if (panel) {
+            panel.outerHTML = html;
+        } else {
+            const allocBtn = document.getElementById('stock-allocate-btn');
+            allocBtn.insertAdjacentHTML('afterend', html);
+        }
+    },
+    
+    async doManualAllocation(targetJobId, destId, destName, items, noteText) {
+        const btn = document.getElementById('stock-allocate-btn');
+        btn.disabled = true;
+        btn.textContent = '\u23f3 Moving items...';
+        document.getElementById('cc-confirm-panel')?.remove();
+        
+        try {
+            // Simple stock transfer (no job allocation - item not on job)
+            const payload = {
+                destId: parseInt(destId),
+                destName: destName,
+                jobNumber: targetJobId,
+                customerName: '',
+                items: items
+                // No targetJobId - simple transfer only
+            };
+            
+            const response = await this.authFetch('/api/allocate-from-stock', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            
+            const result = await response.json();
+            
+            // Add job note regardless of transfer result
+            try {
+                await this.authFetch('/api/job-note', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ jobId: parseInt(targetJobId), note: noteText })
+                });
+            } catch (noteErr) {
+                console.warn('Note error:', noteErr);
+            }
+            
+            const successCount = result.results ? result.results.filter(r => r.success).length : 0;
+            
+            if (successCount > 0) {
+                const successItems = [];
+                for (const r of result.results) {
+                    if (r.success) {
+                        const origItem = items.find(i => String(i.catalogId) === String(r.catalogId));
+                        if (origItem) {
+                            successItems.push({
+                                jobNumber: targetJobId,
+                                customerName: '',
+                                partNo: origItem.partNo,
+                                description: origItem.description,
+                                quantity: origItem.quantity,
+                                storageLocation: destName
+                            });
+                        }
+                    }
+                }
+                const poNumber = items[0]?.poOrderNo || 'Stock';
+                await this.generateAndShowLabels(successItems, poNumber);
+            }
+            
+            let msg = '\u2705 ' + successCount + ' item(s) moved to ' + destName;
+            msg += '\n\ud83d\udcdd Note added to Job ' + targetJobId;
+            alert(msg);
+            
+            this.stockSelectedItems = [];
+            document.getElementById('stock-action-panel').style.display = 'none';
+            this.stockPartSearch();
+            
+        } catch (error) {
+            console.error('Manual allocation error:', error);
+            alert('Error: ' + error.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '\ud83d\udce6 Move & Print Labels';
+        }
+    },
+    
+    async doDirectAllocation(destId, destName, items, jobNumber, customerName, targetJobId) {
         const btn = document.getElementById('stock-allocate-btn');
         btn.disabled = true;
         btn.textContent = '\u23f3 Moving items...';
@@ -2347,7 +2623,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                 customerName: customerName,
                 items: items
             };
-            if (isPartSearch && targetJobId) {
+            if (targetJobId) {
                 payload.targetJobId = targetJobId;
             }
             
@@ -2361,23 +2637,15 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             
             if (result.error) {
                 alert('Error: ' + result.error);
-                btn.disabled = false;
-                btn.textContent = '\ud83d\udce6 Move & Print Labels';
                 return;
             }
             
-            // Update customerName from backend response if available
-            if (result.customerName) {
-                customerName = result.customerName;
-            }
-            if (result.jobNumber) {
-                jobNumber = result.jobNumber;
-            }
+            if (result.customerName) customerName = result.customerName;
+            if (result.jobNumber) jobNumber = result.jobNumber;
             
             const successCount = result.results ? result.results.filter(r => r.success).length : 0;
             const failCount = result.results ? result.results.filter(r => !r.success).length : 0;
             
-            // Generate labels for successful items
             if (successCount > 0) {
                 const successItems = [];
                 for (const r of result.results) {
@@ -2395,12 +2663,10 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                         }
                     }
                 }
-                
                 const poNumber = items[0]?.poOrderNo || 'Stock';
                 await this.generateAndShowLabels(successItems, poNumber);
             }
             
-            // Show result message
             let msg = '\u2705 ' + successCount + ' item(s) moved to ' + destName;
             if (jobNumber) msg += ' for Job ' + jobNumber;
             if (failCount > 0) {
@@ -2411,17 +2677,17 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             }
             alert(msg);
             
-            // Refresh
             this.stockSelectedItems = [];
             document.getElementById('stock-action-panel').style.display = 'none';
-            if (isPartSearch) {
+            document.getElementById('cc-confirm-panel')?.remove();
+            if (this._stockSearchMode === 'part') {
                 this.stockPartSearch();
             } else {
                 this.stockJobLookup();
             }
             
         } catch (error) {
-            console.error('Allocate from stock error:', error);
+            console.error('Allocation error:', error);
             alert('Error: ' + error.message);
         } finally {
             btn.disabled = false;
