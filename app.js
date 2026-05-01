@@ -2168,8 +2168,9 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                             costCentreId: item.costCentreId || '',
                             catalogId: item.catalogId || '',
                             quantity: item.quantityOrdered || 1
-                        }).replace(/'/g, '&#39;');
-                        html += '<button onclick="app.showAwaitingAllocModal(\'' + awData + '\')" style="margin-top:8px;padding:6px 14px;background:#2563eb;color:#fff;border:none;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600;">📦 Allocate from Stock</button>';
+                        });
+                        const awDataB64 = btoa(unescape(encodeURIComponent(awData)));
+                        html += '<button onclick="app.showAwaitingAllocModal(\'' + awDataB64 + '\')" style="margin-top:8px;padding:6px 14px;background:#2563eb;color:#fff;border:none;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600;">📦 Allocate from Stock</button>';
                         html += '</div></div>';
                     } else {
                         const itemIdx = globalIdx++;
@@ -3660,7 +3661,11 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
 
     showAwaitingAllocModal(itemJson) {
         let item;
-        try { item = JSON.parse(itemJson.replace(/&#39;/g, "'")); } catch(e) { alert('Error parsing item'); return; }
+        try {
+            // itemJson is base64 encoded to avoid quote issues in onclick attributes
+            const decoded = decodeURIComponent(escape(atob(itemJson)));
+            item = JSON.parse(decoded);
+        } catch(e) { alert('Error parsing item: ' + e.message); return; }
         
         // Remove existing modal if any
         document.getElementById('awaiting-modal')?.remove();
