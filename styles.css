@@ -2935,8 +2935,8 @@ footer {
 
 /* Awaiting receipt items */
 .item-card.awaiting-item {
-    opacity: 0.6;
-    background: #f9f9f9;
+    background: #fffbeb;
+    border-left: 3px solid #f59e0b;
 }
 .awaiting-badge {
     width: 40px;
