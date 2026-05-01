@@ -2142,14 +2142,25 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                 
                 group.items.forEach(item => {
                     if (item.awaitingReceipt) {
-                        html += '<div class="item-card awaiting-item" onclick="app.showAwaitingTip()" style="opacity:0.55;cursor:not-allowed;border-left:3px solid #f59e0b;">';
+                        const awItemJson = JSON.stringify({
+                            partNo: item.partNo || '',
+                            description: item.description || '',
+                            jobId: item.jobId || '',
+                            jobNumber: item.jobNumber || jobNumber,
+                            sectionId: item.sectionId || '',
+                            costCentreId: item.costCentreId || '',
+                            quantity: item.quantityOrdered || 0
+                        }).replace(/'/g, '&#39;');
+                        html += '<div class="item-card awaiting-item" style="border-left:3px solid #f59e0b;">';
                         html += '<div class="item-details" style="width:100%">';
                         html += '<div class="item-name">' + (item.description || 'Unknown') + ' <span style="font-size:11px;background:#f59e0b22;color:#f59e0b;border:1px solid #f59e0b44;border-radius:4px;padding:1px 5px;">⏳ Awaiting Receipt</span></div>';
                         html += '<div class="item-meta">';
                         if (item.partNo) html += '<span class="item-part">' + item.partNo + '</span>';
-                        html += '<span class="item-qty">Not received</span>';
+                        if (item.quantityOrdered) html += '<span class="item-qty">Ordered: ' + item.quantityOrdered + '</span>';
                         if (item.poOrderNo) html += '<span class="item-job">PO: ' + item.poOrderNo + '</span>';
-                        html += '</div></div></div>';
+                        html += '</div>';
+                        html += '<button onclick="app.navigateToStockSearch(\'' + (item.partNo||'').replace(/'/g, "\\'") + '\', \'' + (item.description||'').replace(/'/g, "\\'") + '\', ' + (item.jobId||'null') + ', \'' + (item.jobNumber||jobNumber||'').replace(/'/g, "\\'") + '\', ' + (item.sectionId||'null') + ', ' + (item.costCentreId||'null') + ', ' + (item.quantityOrdered||0) + ')" style="margin-top:8px;padding:6px 14px;background:#2563eb;color:#fff;border:none;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600;">📦 Allocate from Stock</button>';
+                        html += '</div></div>';
                     } else {
                         const itemIdx = globalIdx++;
                         html += '<div class="item-card" onclick="app.toggleStockItem(' + itemIdx + ')" style="cursor:pointer;">';
@@ -2269,6 +2280,61 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         setTimeout(() => toast.remove(), 2500);
     },
 
+    navigateToStockSearch(partNo, description, jobId, jobNumber, sectionId, costCentreId, quantity) {
+        // Store job context for pre-fill during allocation step
+        this._pendingJobContext = {
+            partNo: partNo,
+            description: description,
+            jobId: jobId,
+            jobNumber: jobNumber,
+            sectionId: sectionId,
+            costCentreId: costCentreId,
+            quantity: quantity
+        };
+        
+        // Navigate to stock screen
+        this.showScreen('stock');
+        
+        // Switch to part search mode by clicking the Part Search tab if it exists
+        const partTab = document.getElementById('tab-part-search') || document.querySelector('[data-tab="part-search"]') || document.querySelector('.tab-btn[onclick*="part"]');
+        if (partTab) partTab.click();
+        
+        // Pre-fill part search input
+        const partInput = document.getElementById('part-search');
+        if (partInput && partNo) {
+            partInput.value = partNo;
+        }
+        
+        // Also pre-fill job number input if it exists on the stock screen
+        const jobInput = document.getElementById('stock-job-number') || document.getElementById('allocate-job-number');
+        if (jobInput && jobNumber) {
+            jobInput.value = jobNumber;
+        }
+        
+        // Auto-trigger part search after a short delay
+        setTimeout(() => {
+            if (partNo) {
+                this.stockPartSearch();
+            }
+        }, 100);
+        
+        // Show a status hint
+        setTimeout(() => {
+            const resultsEl = document.getElementById('stock-results');
+            if (resultsEl && this._stockSearchMode === 'part') {
+                // After search runs, show a job context banner if results present
+                const existingBanner = resultsEl.querySelector('.pending-job-banner');
+                if (!existingBanner && jobNumber) {
+                    const banner = document.createElement('div');
+                    banner.className = 'pending-job-banner';
+                    banner.style.cssText = 'background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px 12px;margin-bottom:8px;font-size:13px;color:#1e40af;';
+                    banner.innerHTML = '📋 Allocating to Job <strong>' + jobNumber + '</strong>' + (description ? ' — ' + description : '') + (quantity ? ' (need: ' + quantity + ')' : '');
+                    resultsEl.insertBefore(banner, resultsEl.firstChild);
+                }
+            }
+        }, 500);
+    },
+
     toggleStockItem(index) {
         const cb = document.getElementById('stock-cb-' + index);
         const idx = this.stockSelectedItems.indexOf(index);
@@ -2317,6 +2383,10 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         
         if (isPartSearch) {
             const jobInput = document.getElementById('stock-target-job');
+            // Pre-fill from pending job context if available and input is empty
+            if (this._pendingJobContext && jobInput && !jobInput.value && this._pendingJobContext.jobNumber) {
+                jobInput.value = this._pendingJobContext.jobNumber;
+            }
             targetJobId = jobInput ? jobInput.value.trim() : '';
             if (!targetJobId) {
                 alert('Please enter a Job number to allocate stock to.');
