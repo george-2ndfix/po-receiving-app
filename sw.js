@@ -1,4 +1,4 @@
-const CACHE_NAME = 'po-receiving-v82'; // v82 fix stock-part-search thread-safety
+const CACHE_NAME = 'po-receiving-v83'; // v82 fix stock-part-search thread-safety
 const urlsToCache = [
   '/styles.css',
   '/storage-locations.json',
