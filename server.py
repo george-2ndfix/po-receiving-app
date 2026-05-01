@@ -2662,32 +2662,11 @@ def allocate_from_stock():
                 success_count += 1
                 continue
             
-            # Auto-lookup section/CC if we have jobId but missing section/CC
-            if job_id and (not section_id or not cost_centre_id):
-                print(f"  Auto-looking up section/CC for job {job_id}")
-                try:
-                    sec_resp = simpro_request("GET", f"/companies/{COMPANY_ID}/jobs/{job_id}/sections/")
-                    if sec_resp.status_code == 200:
-                        for sec in sec_resp.json():
-                            sid = sec.get("ID")
-                            if not sid:
-                                continue
-                            cc_resp = simpro_request("GET", f"/companies/{COMPANY_ID}/jobs/{job_id}/sections/{sid}/costCenters/")
-                            if cc_resp.status_code == 200:
-                                for cc in cc_resp.json():
-                                    ccid = cc.get("ID")
-                                    if not ccid:
-                                        continue
-                                    stock_resp = simpro_request("GET", f"/companies/{COMPANY_ID}/jobs/{job_id}/sections/{sid}/costCenters/{ccid}/stock/{catalog_id}")
-                                    if stock_resp.status_code == 200:
-                                        section_id = sid
-                                        cost_centre_id = ccid
-                                        print(f"  Found: section={section_id}, cc={cost_centre_id}")
-                                        break
-                                if section_id and cost_centre_id:
-                                    break
-                except Exception as e:
-                    print(f"  Auto-lookup error: {e}")
+            # CC confirmation required - block silent auto-allocation
+            if target_job_id and not (section_id and cost_centre_id):
+                results.append({"catalogId": catalog_id, "partNo": part_no, "success": False,
+                                "error": "Cost centre confirmation required before allocation"})
+                continue
             
             if job_id and section_id and cost_centre_id:
                 # Job-allocated stock: 3-step CC move
@@ -2765,43 +2744,12 @@ def allocate_from_stock():
                 # General stock → allocate to target job
                 print(f"  General stock → Job {target_job_id}")
                 
-                # Step 1: Find section/CC for the target job
-                found_section = None
-                found_cc = None
-                try:
-                    sec_resp = simpro_request("GET", f"/companies/{COMPANY_ID}/jobs/{target_job_id}/sections/")
-                    if sec_resp.status_code == 200:
-                        for sec in sec_resp.json():
-                            sid = sec.get("ID")
-                            if not sid:
-                                continue
-                            cc_resp = simpro_request("GET", f"/companies/{COMPANY_ID}/jobs/{target_job_id}/sections/{sid}/costCenters/")
-                            if cc_resp.status_code == 200:
-                                ccs = cc_resp.json()
-                                # Check if catalog item already exists on any CC
-                                for cc in ccs:
-                                    ccid = cc.get("ID")
-                                    if not ccid:
-                                        continue
-                                    stock_check = simpro_request("GET", f"/companies/{COMPANY_ID}/jobs/{target_job_id}/sections/{sid}/costCenters/{ccid}/stock/{catalog_id}")
-                                    if stock_check.status_code == 200:
-                                        found_section = sid
-                                        found_cc = ccid
-                                        print(f"  Found item on CC {ccid} in section {sid}")
-                                        break
-                                if found_section:
-                                    break
-                                # If not found on any CC, use first CC
-                                if not found_section and ccs:
-                                    found_section = sid
-                                    found_cc = ccs[0].get("ID")
-                            if found_section:
-                                break
-                except Exception as e:
-                    print(f"  Job lookup error: {e}")
+                # Use confirmed section/CC from frontend CC confirmation step
+                found_section = section_id
+                found_cc = cost_centre_id
                 
                 if not found_section or not found_cc:
-                    results.append({"catalogId": catalog_id, "partNo": part_no, "success": False, "error": f"Could not find cost centre on Job {target_job_id}"})
+                    results.append({"catalogId": catalog_id, "partNo": part_no, "success": False, "error": "Missing confirmed cost centre for job allocation"})
                     continue
                 
                 # Step 2: Transfer stock from source to dest
@@ -4504,6 +4452,166 @@ def resolve_damage_report(report_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
+
+
+@app.route('/api/job-cc-lookup', methods=['POST'])
+@login_required
+def job_cc_lookup():
+    """Look up job details and matching cost centres for a catalog item.
+    No AI - pure string/ID matching only."""
+    try:
+        data = request.get_json()
+        job_id = data.get('jobId')
+        catalog_id = data.get('catalogId')
+        part_no = (data.get('partNo') or '').strip().lower()
+        description = (data.get('description') or '').strip().lower()
+
+        if not job_id:
+            return jsonify({'error': 'jobId is required'}), 400
+        if not catalog_id and not part_no and not description:
+            return jsonify({'error': 'At least one of catalogId, partNo, or description is required'}), 400
+
+        # Get job details
+        job_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id}?columns=ID,Name,Customer,Site')
+        if job_resp.status_code != 200:
+            return jsonify({'error': f'Job not found: HTTP {job_resp.status_code}'}), 400
+        
+        jd = job_resp.json()
+        cust = jd.get('Customer', {})
+        customer_name = ''
+        if isinstance(cust, dict):
+            customer_name = cust.get('CompanyName') or cust.get('GivenName', '')
+        site = jd.get('Site', {})
+        site_address = ''
+        if isinstance(site, dict):
+            addr = site.get('Address', {})
+            if isinstance(addr, dict):
+                parts = [addr.get('Line1', ''), addr.get('City', ''), addr.get('State', '')]
+                site_address = ', '.join(p for p in parts if p)
+            elif isinstance(site, dict):
+                site_address = site.get('Name', '')
+
+        job_info = {
+            'id': job_id,
+            'name': jd.get('Name', str(job_id)),
+            'customer': customer_name,
+            'site': site_address
+        }
+
+        # Get all sections
+        sec_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/')
+        if sec_resp.status_code != 200:
+            return jsonify({'job': job_info, 'matches': [], 'notFound': True})
+
+        matches = []
+
+        for sec in sec_resp.json():
+            sid = sec.get('ID')
+            section_name = sec.get('Name', f'Section {sid}')
+            if not sid:
+                continue
+
+            cc_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{sid}/costCenters/')
+            if cc_resp.status_code != 200:
+                continue
+
+            for cc in cc_resp.json():
+                ccid = cc.get('ID')
+                cc_name = cc.get('Name', f'Cost Centre {ccid}')
+                if not ccid:
+                    continue
+
+                # Get stock items on this CC
+                stock_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{sid}/costCenters/{ccid}/stock/')
+                if stock_resp.status_code != 200:
+                    continue
+
+                stock_items = stock_resp.json()
+                if not isinstance(stock_items, list):
+                    stock_items = []
+
+                for stock_item in stock_items:
+                    item_catalog_id = stock_item.get('Catalog', {})
+                    if isinstance(item_catalog_id, dict):
+                        item_catalog_id = item_catalog_id.get('ID')
+                    
+                    item_part_no = (stock_item.get('PartNo') or stock_item.get('Catalog', {}).get('PartNo', '') if isinstance(stock_item.get('Catalog'), dict) else '').strip().lower()
+                    item_desc = (stock_item.get('Name') or stock_item.get('Catalog', {}).get('Name', '') if isinstance(stock_item.get('Catalog'), dict) else '').strip().lower()
+
+                    # Match logic: primary catalogId, secondary partNo, tertiary description
+                    matched = False
+                    if catalog_id and item_catalog_id and str(item_catalog_id) == str(catalog_id):
+                        matched = True
+                    elif part_no and item_part_no and item_part_no == part_no:
+                        matched = True
+                    elif description and item_desc and item_desc == description:
+                        matched = True
+
+                    if matched:
+                        required_qty = stock_item.get('Quantity', 0) or 0
+                        assigned_qty = stock_item.get('AssignedQuantity', 0) or 0
+                        remaining_qty = max(0, required_qty - assigned_qty)
+
+                        # Get storage locations
+                        storage_locs = []
+                        breakdown = stock_item.get('AssignedBreakdown', [])
+                        if isinstance(breakdown, list):
+                            for b in breakdown:
+                                storage_id = b.get('Storage')
+                                if isinstance(storage_id, dict):
+                                    storage_id = storage_id.get('ID')
+                                storage_name = b.get('StorageName', '')
+                                if not storage_name and isinstance(b.get('Storage'), dict):
+                                    storage_name = b['Storage'].get('Name', '')
+                                qty = b.get('Quantity', 0)
+                                if storage_id and qty:
+                                    storage_locs.append({'id': storage_id, 'name': storage_name, 'qty': qty})
+
+                        matches.append({
+                            'sectionId': sid,
+                            'sectionName': section_name,
+                            'costCentreId': ccid,
+                            'costCentreName': cc_name,
+                            'catalogId': item_catalog_id,
+                            'description': stock_item.get('Name') or (stock_item.get('Catalog', {}).get('Name', '') if isinstance(stock_item.get('Catalog'), dict) else ''),
+                            'partNo': stock_item.get('PartNo') or (stock_item.get('Catalog', {}).get('PartNo', '') if isinstance(stock_item.get('Catalog'), dict) else ''),
+                            'requiredQty': required_qty,
+                            'assignedQty': assigned_qty,
+                            'remainingQty': remaining_qty,
+                            'storageLocations': storage_locs
+                        })
+
+        not_found = len(matches) == 0
+        return jsonify({'job': job_info, 'matches': matches, 'notFound': not_found})
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/job-note', methods=['POST'])
+@login_required
+def job_note():
+    """Add a note to a job in Simpro."""
+    try:
+        data = request.get_json()
+        job_id = data.get('jobId')
+        note = data.get('note', '')
+
+        if not job_id or not note:
+            return jsonify({'error': 'jobId and note are required'}), 400
+
+        note_resp = simpro_request('POST', f'/companies/{COMPANY_ID}/jobs/{job_id}/notes/',
+                                   json={'Description': note})
+        if note_resp.status_code in (200, 201):
+            return jsonify({'success': True})
+        else:
+            return jsonify({'error': f'Failed to add note: HTTP {note_resp.status_code}'}), 500
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 # Initialize and Run
 # ============================================
