@@ -2142,12 +2142,12 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                 
                 group.items.forEach(item => {
                     if (group.isAwaiting) {
-                        html += '<div class="item-card awaiting-item">';
+                        html += '<div class="item-card awaiting-item" onclick="app.showAwaitingTip()" style="opacity:0.55;cursor:not-allowed;border-left:3px solid #f59e0b;">';
                         html += '<div class="item-details" style="width:100%">';
-                        html += '<div class="item-name">' + (item.description || 'Unknown') + '</div>';
+                        html += '<div class="item-name">' + (item.description || 'Unknown') + ' <span style="font-size:11px;background:#f59e0b22;color:#f59e0b;border:1px solid #f59e0b44;border-radius:4px;padding:1px 5px;">⏳ Awaiting Receipt</span></div>';
                         html += '<div class="item-meta">';
                         if (item.partNo) html += '<span class="item-part">' + item.partNo + '</span>';
-                        html += '<span class="item-qty">Ordered</span>';
+                        html += '<span class="item-qty">Not received</span>';
                         if (item.poOrderNo) html += '<span class="item-job">PO: ' + item.poOrderNo + '</span>';
                         html += '</div></div></div>';
                     } else {
@@ -2257,6 +2257,18 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         }
     },
     
+    showAwaitingTip() {
+        // Show a brief toast instead of an alert
+        const existing = document.getElementById('awaiting-toast');
+        if (existing) return;
+        const toast = document.createElement('div');
+        toast.id = 'awaiting-toast';
+        toast.style.cssText = 'position:fixed;bottom:120px;left:50%;transform:translateX(-50%);background:#f59e0b;color:#000;padding:10px 18px;border-radius:20px;font-size:14px;font-weight:600;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,0.3);pointer-events:none;';
+        toast.textContent = '⏳ Not received yet — receive via PO screen first';
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 2500);
+    },
+
     toggleStockItem(index) {
         const cb = document.getElementById('stock-cb-' + index);
         const idx = this.stockSelectedItems.indexOf(index);
