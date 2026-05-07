@@ -3936,7 +3936,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
     });
   },
 
-    },  showStatus(elementId, message, type) {
+    showStatus(elementId, message, type) {
         const el = document.getElementById(elementId);
         if (el) {
             el.textContent = message;
