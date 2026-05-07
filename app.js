@@ -3659,248 +3659,283 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
     // Utilities
     // ============================================
 
-    showAwaitingAllocModal(itemJson) {
-        let item;
-        try {
-            const decoded = decodeURIComponent(escape(atob(itemJson)));
-            item = JSON.parse(decoded);
-        } catch(e) { alert('Error parsing item: ' + e.message); return; }
+    showAwaitingAllocModal(itemOrJson) {
+    let item = itemOrJson;
+    if (typeof itemOrJson === 'string') {
+      try {
+        const decoded = decodeURIComponent(escape(atob(itemOrJson)));
+        item = JSON.parse(decoded);
+      } catch(e) { alert('Error parsing item: ' + e.message); return; }
+    }
+    // Remove any existing modal
+    const existingModal = document.getElementById('aw-modal');
+    if (existingModal) existingModal.remove();
 
-        document.getElementById('awaiting-modal')?.remove();
+    const partNo = item.partNo || item.catalogPartNo || '';
+    const description = item.description || item.name || '';
+    const jobNumber = this.currentJob ? this.currentJob.ID || '' : '';
+    const jobId = this.currentJob ? this.currentJob.ID || '' : '';
+    const customerId = this.currentJob ? (this.currentJob.Customer ? this.currentJob.Customer.ID : '') : '';
+    const customerName = this.currentJob ? (this.currentJob.Customer ? this.currentJob.Customer.CompanyName || this.currentJob.Customer.Name || '' : '') : '';
+    const catalogId = item.catalogId || item.CatalogID || '';
 
-        const modal = document.createElement('div');
-        modal.id = 'awaiting-modal';
-        modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:9999;overflow-y:auto;padding:16px;';
+    const modal = document.createElement('div');
+    modal.id = 'aw-modal';
+    modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
+    modal.innerHTML = `
+      <div style="background:#fff;border-radius:12px;padding:20px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto;">
+        <h3 style="margin:0 0 4px;font-size:16px;">📦 Allocate from Stock</h3>
+        <p style="margin:0 0 16px;font-size:13px;color:#555;">${description}${partNo ? ' <span style="color:#888;">('+partNo+')</span>' : ''}</p>
+        <div id="aw-search-status" style="text-align:center;padding:20px;color:#555;font-size:14px;">
+          🔍 Searching storage areas...
+        </div>
+        <div id="aw-form" style="display:none;">
+          <div id="aw-found-msg" style="display:none;margin-bottom:12px;padding:8px 12px;background:#e8f5e9;border-radius:8px;font-size:13px;color:#2e7d32;"></div>
+          <label style="display:block;margin-bottom:4px;font-size:13px;font-weight:600;">Taking stock from</label>
+          <select id="aw-source-select" style="width:100%;padding:10px;border:1px solid #ddd;border-radius:8px;font-size:14px;margin-bottom:12px;">
+            <option value="">-- Select source storage --</option>
+          </select>
+          <label style="display:block;margin-bottom:4px;font-size:13px;font-weight:600;">Quantity</label>
+          <input type="number" id="aw-qty" value="1" min="1" style="width:100%;padding:10px;border:1px solid #ddd;border-radius:8px;font-size:14px;margin-bottom:12px;box-sizing:border-box;">
+          <label style="display:block;margin-bottom:4px;font-size:13px;font-weight:600;">Put in storage (destination)</label>
+          <select id="aw-dest-select" style="width:100%;padding:10px;border:1px solid #ddd;border-radius:8px;font-size:14px;margin-bottom:16px;">
+            <option value="">-- Select destination --</option>
+          </select>
+          <div style="display:flex;gap:10px;">
+            <button id="aw-cancel-btn" style="flex:1;padding:12px;border:1px solid #ddd;border-radius:8px;background:#f5f5f5;font-size:14px;cursor:pointer;">Cancel</button>
+            <button id="aw-continue-btn" style="flex:2;padding:12px;border:none;border-radius:8px;background:#2196F3;color:#fff;font-size:14px;font-weight:600;cursor:pointer;">Check Cost Centre & Continue ▶</button>
+          </div>
+        </div>
+        <div id="aw-cc-panel" style="display:none;"></div>
+      </div>
+    `;
+    document.body.appendChild(modal);
 
-        modal.innerHTML = `
-            <div style="background:#1e293b;border-radius:12px;padding:16px;max-width:480px;margin:0 auto;margin-top:20px;">
-                <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;">
-                    <div>
-                        <div style="font-weight:700;color:#e2e8f0;font-size:15px;">${item.description || 'Unknown Item'}</div>
-                        <div style="font-size:12px;color:#64748b;margin-top:2px;">${item.partNo || ''} · Job ${item.jobNumber || ''}</div>
-                    </div>
-                    <button onclick="document.getElementById('awaiting-modal').remove()" style="background:#334155;border:none;color:#94a3b8;border-radius:6px;padding:6px 10px;cursor:pointer;font-size:14px;">✕</button>
-                </div>
-                <div id="aw-modal-body">
-                    <p style="color:#94a3b8;font-size:13px;">⏳ Loading storage locations...</p>
-                </div>
-            </div>
-        `;
+    // Close on backdrop click
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
 
-        document.body.appendChild(modal);
-        this._awItem = item;
-        this._awSourceId = null;
-        this._awSourceName = null;
+    // Load storage devices for destination dropdown
+    const destSelect = document.getElementById('aw-dest-select');
+    const sourceSelect = document.getElementById('aw-source-select');
 
-        // Just fetch storage locations — fast, no stock search
-        this.authFetch('/api/storage-locations').then(r => r.json()).then(storageData => {
-            const body = document.getElementById('aw-modal-body');
-            if (!body) return;
-
-            const storages = Array.isArray(storageData) ? storageData : (storageData.locations || []);
-
-            let opts = '<option value="">Select storage...</option>';
-            storages.forEach(s => {
-                opts += `<option value="${s.ID || s.id}">${s.Name || s.name}</option>`;
-            });
-
-            const defaultQty = item.quantity > 0 ? item.quantity : 1;
-
-            body.innerHTML = `
-                <div style="font-size:12px;color:#94a3b8;margin-bottom:4px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">📦 Taking stock from</div>
-                <select id="aw-source" style="width:100%;padding:8px 10px;border-radius:6px;background:#0f172a;border:1px solid #334155;color:#e2e8f0;font-size:14px;box-sizing:border-box;margin-bottom:12px;">
-                    ${opts}
-                </select>
-
-                <div style="font-size:12px;color:#94a3b8;margin-bottom:4px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">QUANTITY</div>
-                <input id="aw-qty" type="number" min="1" value="${defaultQty}" style="width:100%;padding:8px 10px;border-radius:6px;background:#0f172a;border:1px solid #334155;color:#e2e8f0;font-size:14px;box-sizing:border-box;margin-bottom:12px;">
-
-                <div style="font-size:12px;color:#94a3b8;margin-bottom:4px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">📍 Put in storage</div>
-                <select id="aw-dest" style="width:100%;padding:8px 10px;border-radius:6px;background:#0f172a;border:1px solid #334155;color:#e2e8f0;font-size:14px;box-sizing:border-box;margin-bottom:12px;">
-                    ${opts}
-                </select>
-
-                <div id="aw-cc-area"></div>
-
-                <button id="aw-check-cc-btn" onclick="app._awCheckCC()" style="width:100%;margin-top:6px;padding:12px;border-radius:8px;background:#2563eb;color:#fff;font-weight:700;border:none;cursor:pointer;font-size:14px;">Check Cost Centre & Continue →</button>
-            `;
-
-            this._awStorages = storages;
-
-        }).catch(err => {
-            const body = document.getElementById('aw-modal-body');
-            if (body) body.innerHTML = `<p style="color:#ef4444;">Error loading storages: ${err.message}</p>`;
+    fetch('/api/storage-locations', { credentials: 'include' })
+      .then(r => r.json())
+      .then(locs => {
+        const locations = Array.isArray(locs) ? locs : (locs.locations || []);
+        locations.forEach(loc => {
+          const o = document.createElement('option');
+          o.value = loc.ID || loc.id || '';
+          o.textContent = loc.Name || loc.name || loc.StorageID || '';
+          o.dataset.name = o.textContent;
+          destSelect.appendChild(o.cloneNode(true));
+          sourceSelect.appendChild(o);
         });
-    },
+      })
+      .catch(() => {});
 
-    async _awCheckCC() {
-        const item = this._awItem;
-        if (!item) return;
+    // Search for stock
+    fetch('/api/stock-part-search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ partNumber: partNo })
+    })
+    .then(r => r.json())
+    .then(result => {
+      const statusDiv = document.getElementById('aw-search-status');
+      const formDiv = document.getElementById('aw-form');
+      const foundMsg = document.getElementById('aw-found-msg');
+      const src = document.getElementById('aw-source-select');
 
-        const srcEl = document.getElementById('aw-source');
-        const srcId = srcEl?.value;
-        const srcName = srcEl?.options[srcEl.selectedIndex]?.text || '';
-
-        const destEl = document.getElementById('aw-dest');
-        const destId = destEl?.value;
-        const destName = destEl?.options[destEl.selectedIndex]?.text || '';
-
-        if (!srcId) { alert('Please select where the stock is coming from.'); return; }
-        if (!destId) { alert('Please select where to put it.'); return; }
-
-        const qty = parseInt(document.getElementById('aw-qty')?.value) || 1;
-
-        const btn = document.getElementById('aw-check-cc-btn');
-        if (btn) { btn.disabled = true; btn.textContent = '⏳ Checking cost centre...'; }
-
-        try {
-            const resp = await this.authFetch('/api/job-cc-lookup', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    jobId: parseInt(item.jobId),
-                    catalogId: item.catalogId,
-                    partNo: item.partNo,
-                    description: item.description
-                })
-            });
-            const data = await resp.json();
-
-            if (btn) { btn.disabled = false; btn.textContent = 'Check Cost Centre & Continue →'; }
-
-            const ccArea = document.getElementById('aw-cc-area');
-            if (!ccArea) return;
-
-            if (data.error || !data.matches || data.matches.length === 0) {
-                ccArea.innerHTML = `<div style="margin-top:12px;border:2px solid #f59e0b;border-radius:8px;padding:12px;background:#0f172a;">
-                    <div style="color:#f59e0b;font-weight:600;margin-bottom:8px;">⚠️ Item Not Found on Job</div>
-                    <div style="color:#94a3b8;font-size:13px;">This item is not on Job ${item.jobNumber}'s material list. Cannot allocate automatically.</div>
-                </div>`;
-                return;
-            }
-
-            this._awSourceId = parseInt(srcId);
-            this._awSourceName = srcName;
-            this._awDestId = destId;
-            this._awDestName = destName;
-            this._awQty = qty;
-            this._awMatches = data.matches;
-            this._awJobInfo = data.job || {};
-
-            let html = '<div style="margin-top:12px;border:2px solid #22d3ee;border-radius:8px;padding:12px;background:#0f172a;">';
-            html += '<div style="color:#22d3ee;font-weight:600;margin-bottom:10px;">✅ Select Cost Centre</div>';
-            data.matches.forEach((m, i) => {
-                const remaining = (m.required || 0) - (m.allocated || 0);
-                html += `<label style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px;cursor:pointer;">
-                    <input type="radio" name="aw-cc" value="${i}" ${i === 0 ? 'checked' : ''} style="margin-top:2px;flex-shrink:0;">
-                    <div>
-                        <div style="color:#e2e8f0;font-weight:600;font-size:13px;">${m.costCentreName || 'Cost Centre ' + m.costCentreId}</div>
-                        <div style="color:#64748b;font-size:12px;">Required: ${m.required || 0} · Allocated: ${m.allocated || 0} · Remaining: ${remaining}</div>
-                    </div>
-                </label>`;
-            });
-            html += `<button onclick="app._awConfirmAlloc()" style="width:100%;margin-top:10px;padding:12px;border-radius:8px;background:#16a34a;color:#fff;font-weight:700;border:none;cursor:pointer;font-size:14px;" id="aw-confirm-btn">✅ Allocate + Print Labels</button>`;
-            html += '</div>';
-            ccArea.innerHTML = html;
-
-        } catch(err) {
-            if (btn) { btn.disabled = false; btn.textContent = 'Check Cost Centre & Continue →'; }
-            alert('CC lookup error: ' + err.message);
+      if (result.items && result.items.length > 0) {
+        // Pre-populate source dropdown with found locations
+        // Insert found items at top of source dropdown
+        src.innerHTML = '<option value="">-- Select source storage --</option>';
+        result.items.forEach(it => {
+          const o = document.createElement('option');
+          o.value = it.storageId;
+          o.dataset.name = it.storageName;
+          o.textContent = `${it.storageName} (${it.quantity} in stock)`;
+          o.dataset.catalogId = it.catalogId;
+          src.appendChild(o);
+        });
+        // Auto-select if only one result
+        if (result.items.length === 1) {
+          src.selectedIndex = 1;
         }
-    },
+        foundMsg.style.display = 'block';
+        foundMsg.textContent = `✅ Found in ${result.items.length} location${result.items.length > 1 ? 's' : ''}`;
+      } else {
+        // Nothing found — show manual selection
+        foundMsg.style.display = 'block';
+        foundMsg.style.background = '#fff8e1';
+        foundMsg.style.color = '#f57f17';
+        foundMsg.textContent = '⚠️ Part not found in storage areas — select source manually';
+      }
 
-    async _awConfirmAlloc() {
-        const item = this._awItem;
-        const matches = this._awMatches || [];
-        const jobInfo = this._awJobInfo || {};
+      statusDiv.style.display = 'none';
+      formDiv.style.display = 'block';
 
-        const selected = document.querySelector('input[name="aw-cc"]:checked');
-        const matchIdx = selected ? parseInt(selected.value) : 0;
-        const match = matches[matchIdx];
+      // Wire up cancel
+      document.getElementById('aw-cancel-btn').addEventListener('click', () => modal.remove());
 
-        if (!match) { alert('Please select a cost centre.'); return; }
+      // Wire up continue
+      document.getElementById('aw-continue-btn').addEventListener('click', () => {
+        const sourceOpt = src.options[src.selectedIndex];
+        const sourceId = src.value;
+        const sourceName = sourceOpt ? (sourceOpt.dataset.name || sourceOpt.textContent) : '';
+        const destOpt = destSelect.options[destSelect.selectedIndex];
+        const destId = destSelect.value;
+        const destName = destOpt ? (destOpt.dataset.name || destOpt.textContent) : '';
+        const qty = parseInt(document.getElementById('aw-qty').value, 10) || 1;
 
-        const btn = document.getElementById('aw-confirm-btn');
-        if (btn) { btn.disabled = true; btn.textContent = '⏳ Allocating...'; }
+        if (!sourceId) { alert('Please select a source storage location.'); return; }
+        if (!destId) { alert('Please select a destination storage location.'); return; }
 
-        const qty = this._awQty || 1;
-        const destId = this._awDestId;
-        const destName = this._awDestName;
-        const sourceId = this._awSourceId;
-        const sourceName = this._awSourceName;
+        // Look up CC
+        const ccPanel = document.getElementById('aw-cc-panel');
+        ccPanel.style.display = 'block';
+        ccPanel.innerHTML = '<p style="text-align:center;padding:16px;color:#555;">🔍 Looking up cost centre...</p>';
+        document.getElementById('aw-form').style.display = 'none';
 
-        const payload = {
-            destId: parseInt(destId),
-            destName: destName,
-            jobNumber: item.jobNumber,
-            customerName: jobInfo.customerName || jobInfo.customer || '',
-            targetJobId: parseInt(item.jobId),
-            items: [{
-                catalogId: item.catalogId,
-                partNo: item.partNo,
-                description: item.description,
-                quantity: qty,
-                sourceId: sourceId,
-                sourceName: sourceName,
-                jobId: parseInt(item.jobId),
-                sectionId: match.sectionId,
-                costCentreId: match.costCentreId
-            }]
-        };
-
-        try {
-            const resp = await this.authFetch('/api/allocate-from-stock', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(payload)
+        fetch('/api/job-cc-lookup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            jobId: jobId,
+            catalogId: catalogId,
+            partNo: partNo,
+            description: description
+          })
+        })
+        .then(r => r.json())
+        .then(ccResult => {
+          if (ccResult.error || !ccResult.matches || ccResult.matches.length === 0) {
+            // Item not on job — show warning
+            ccPanel.innerHTML = `
+              <div style="background:#fff8e1;border-radius:8px;padding:16px;margin-bottom:12px;">
+                <p style="margin:0 0 8px;font-weight:600;">⚠️ Item Not Found on Job ${jobNumber}</p>
+                <p style="margin:0;font-size:13px;color:#555;">This part is not listed in the job materials. You can still transfer it to the storage location.</p>
+              </div>
+              <div style="display:flex;gap:10px;">
+                <button id="aw-back-btn2" style="flex:1;padding:12px;border:1px solid #ddd;border-radius:8px;background:#f5f5f5;font-size:14px;cursor:pointer;">← Back</button>
+                <button id="aw-manual-btn" style="flex:2;padding:12px;border:none;border-radius:8px;background:#FF9800;color:#fff;font-size:14px;font-weight:600;cursor:pointer;">Transfer Anyway</button>
+              </div>`;
+            document.getElementById('aw-back-btn2').addEventListener('click', () => {
+              ccPanel.style.display = 'none';
+              document.getElementById('aw-form').style.display = 'block';
             });
-            const result = await resp.json();
+            document.getElementById('aw-manual-btn').addEventListener('click', () => {
+              this._awDoTransfer({ catalogId, partNo, description, sourceId, sourceName, destId, destName, qty, jobId, jobNumber, customerName, sectionId: null, ccId: null });
+            });
+            return;
+          }
+          // Show CC matches
+          let ccHtml = `<p style="font-weight:600;margin:0 0 12px;">Select Cost Centre for Job ${jobNumber}:</p>`;
+          ccResult.matches.forEach((m, i) => {
+            ccHtml += `
+              <label style="display:flex;align-items:flex-start;gap:10px;padding:10px;border:1px solid #ddd;border-radius:8px;margin-bottom:8px;cursor:pointer;">
+                <input type="radio" name="aw-cc" value="${i}" style="margin-top:2px;">
+                <div>
+                  <div style="font-weight:600;font-size:14px;">${m.costCentreName || 'Cost Centre'}</div>
+                  <div style="font-size:12px;color:#555;">Required: ${m.required || 0} | Allocated: ${m.allocated || 0} | Remaining: ${m.remaining || 0}</div>
+                </div>
+              </label>`;
+          });
+          ccHtml += `
+            <div style="display:flex;gap:10px;margin-top:12px;">
+              <button id="aw-back-btn3" style="flex:1;padding:12px;border:1px solid #ddd;border-radius:8px;background:#f5f5f5;font-size:14px;cursor:pointer;">← Back</button>
+              <button id="aw-confirm-btn" style="flex:2;padding:12px;border:none;border-radius:8px;background:#4CAF50;color:#fff;font-size:14px;font-weight:600;cursor:pointer;">✅ Confirm Allocation</button>
+            </div>`;
+          ccPanel.innerHTML = ccHtml;
+          document.getElementById('aw-back-btn3').addEventListener('click', () => {
+            ccPanel.style.display = 'none';
+            document.getElementById('aw-form').style.display = 'block';
+          });
+          document.getElementById('aw-confirm-btn').addEventListener('click', () => {
+            const radios = document.querySelectorAll('input[name="aw-cc"]');
+            let selectedIdx = -1;
+            radios.forEach((r, i) => { if (r.checked) selectedIdx = i; });
+            if (selectedIdx < 0) { alert('Please select a cost centre.'); return; }
+            const m = ccResult.matches[selectedIdx];
+            this._awDoTransfer({ catalogId, partNo, description, sourceId, sourceName, destId, destName, qty, jobId, jobNumber, customerName, sectionId: m.sectionId, ccId: m.costCentreId });
+          });
+        })
+        .catch(err => {
+          ccPanel.innerHTML = `<p style="color:red;">Error looking up cost centre: ${err.message}</p>
+            <button onclick="document.getElementById('aw-modal').remove()" style="padding:10px 20px;border:1px solid #ddd;border-radius:8px;background:#f5f5f5;cursor:pointer;">Close</button>`;
+        });
+      });
+    })
+    .catch(err => {
+      const statusDiv = document.getElementById('aw-search-status');
+      statusDiv.innerHTML = '⚠️ Could not search stock. Select source manually.';
+      document.getElementById('aw-form').style.display = 'block';
+      statusDiv.style.display = 'none';
+      document.getElementById('aw-found-msg').style.display = 'block';
+      document.getElementById('aw-found-msg').style.background = '#fff8e1';
+      document.getElementById('aw-found-msg').style.color = '#f57f17';
+      document.getElementById('aw-found-msg').textContent = '⚠️ Could not search — select source manually';
+    });
+  },
 
-            if (result.error) {
-                if (btn) { btn.disabled = false; btn.textContent = '✅ Allocate + Print Labels'; }
-                alert('Error: ' + result.error);
-                return;
-            }
+  _awDoTransfer({ catalogId, partNo, description, sourceId, sourceName, destId, destName, qty, jobId, jobNumber, customerName, sectionId, ccId }) {
+    const modal = document.getElementById('aw-modal');
+    const ccPanel = document.getElementById('aw-cc-panel');
+    if (ccPanel) ccPanel.innerHTML = '<p style="text-align:center;padding:20px;color:#555;">⏳ Allocating...</p>';
 
-            const customerName = result.customerName || jobInfo.customerName || '';
-            const jobNumber = result.jobNumber || item.jobNumber;
-            const successCount = result.results ? result.results.filter(r => r.success).length : 0;
-            const failCount = result.results ? result.results.filter(r => !r.success).length : 0;
-
-            // Generate labels
-            if (successCount > 0) {
-                const labelItems = [{
-                    jobNumber: jobNumber,
-                    customerName: customerName,
-                    partNo: item.partNo,
-                    description: item.description,
-                    quantity: qty,
-                    storageLocation: destName
-                }];
-                await this.generateAndShowLabels(labelItems, item.poOrderNo || 'Stock');
-            }
-
-            // Close modal
-            document.getElementById('awaiting-modal')?.remove();
-
-            // Show result
-            let msg = successCount > 0 ? '\u2705 ' + successCount + ' item(s) allocated to ' + destName : '';
-            if (failCount > 0) {
-                msg += (msg ? '\n' : '') + '\u26a0\ufe0f ' + failCount + ' failed: ';
-                result.results.filter(r => !r.success).forEach(r => { msg += '\n  - ' + (r.error || 'Unknown'); });
-            }
-            if (msg) alert(msg);
-
-            // Refresh job view
-            const jobNumEl = document.getElementById('job-number');
-            if (jobNumEl && jobNumEl.value === item.jobNumber) {
-                this.stockJobLookup();
-            }
-
-        } catch(err) {
-            if (btn) { btn.disabled = false; btn.textContent = '✅ Allocate + Print Labels'; }
-            alert('Allocation error: ' + err.message);
+    fetch('/api/allocate-from-stock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        destId,
+        destName,
+        jobNumber,
+        customerName,
+        targetJobId: jobId,
+        items: [{
+          catalogId,
+          quantity: qty,
+          partNo,
+          description,
+          sourceId,
+          sourceName,
+          jobId,
+          sectionId,
+          ccId
+        }]
+      })
+    })
+    .then(r => r.json())
+    .then(result => {
+      if (result.success || (result.results && result.results.some(r => r.success))) {
+        if (ccPanel) ccPanel.innerHTML = '<p style="text-align:center;padding:20px;color:#2e7d32;font-weight:600;">✅ Allocated successfully!</p>';
+        setTimeout(() => {
+          if (modal) modal.remove();
+          // Refresh job materials
+          if (this.currentJob) {
+            const jn = this.currentJob.ID || '';
+            if (jn) this.lookupJob(jn);
+          }
+        }, 1500);
+        // Print labels
+        if (result.labels || result.results) {
+          try { this.generateAndShowLabels(result.labels || result.results[0]?.labels || []); } catch(e) {}
         }
+      } else {
+        const errMsg = result.error || (result.results && result.results[0]?.error) || 'Unknown error';
+        if (ccPanel) ccPanel.innerHTML = `<p style="color:red;text-align:center;padding:16px;">❌ Error: ${errMsg}</p>
+          <button onclick="document.getElementById('aw-modal').remove()" style="display:block;margin:0 auto;padding:10px 20px;border:1px solid #ddd;border-radius:8px;background:#f5f5f5;cursor:pointer;">Close</button>`;
+      }
+    })
+    .catch(err => {
+      if (ccPanel) ccPanel.innerHTML = `<p style="color:red;text-align:center;padding:16px;">❌ ${err.message}</p>
+        <button onclick="document.getElementById('aw-modal').remove()" style="display:block;margin:0 auto;padding:10px 20px;border:1px solid #ddd;border-radius:8px;background:#f5f5f5;cursor:pointer;">Close</button>`;
+    });
+  },
+
     },  showStatus(elementId, message, type) {
         const el = document.getElementById(elementId);
         if (el) {
