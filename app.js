@@ -3734,12 +3734,15 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
       .catch(() => {});
 
     // Search for stock
+    const _awController = new AbortController();
+    const _awTimeout = setTimeout(() => _awController.abort(), 8000);
     fetch('/api/stock-part-search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
+      signal: _awController.signal,
       body: JSON.stringify({ partNumber: partNo })
-    })
+    }).then(r => { clearTimeout(_awTimeout); return r; })
     .then(r => r.json())
     .then(result => {
       const statusDiv = document.getElementById('aw-search-status');
