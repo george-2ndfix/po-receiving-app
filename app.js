@@ -2199,7 +2199,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             
             resultsEl.innerHTML = html;
             
-            // v94: Background check — update "Awaiting Receipt" badges for items that are actually in stock
+            // v95: Background check — update "Awaiting Receipt" badges for items that are actually in stock
             const _awaitingIds = data.items ? data.items.filter(i => i.awaitingReceipt && i.catalogId).map(i => i.catalogId) : [];
             if (_awaitingIds.length > 0) {
                 this.authFetch('/api/check-stock-for-catalogs', {
@@ -3865,94 +3865,97 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
       });
     });
 
-    // Search for stock — skip if location already known from job load
+    // v95: Find where this item actually is in stock using /api/find-item-stock
     const _preKnownStorageId = item.storageId || '';
-    const _preKnownStorageName = item.storageName || '';
-    const _preKnownInStock = !!item.inStock;
-
-    if (_preKnownStorageId && _preKnownInStock) {
-      // We already know where it is from the job load — skip search, show form immediately
+    {
       const statusDiv = document.getElementById('aw-search-status');
       const formDiv = document.getElementById('aw-form');
       const foundMsg = document.getElementById('aw-found-msg');
       const src = document.getElementById('aw-source-select');
-      // Wait for storage dropdown to populate then pre-select
-      setTimeout(() => {
-        // Try to find the matching option in the source dropdown
-        let found = false;
-        for (let i = 0; i < src.options.length; i++) {
-          if (String(src.options[i].value) === String(_preKnownStorageId)) {
-            src.selectedIndex = i;
-            found = true;
-            break;
-          }
-        }
-        if (!found) {
-          // Add it if not present
-          const o = document.createElement('option');
-          o.value = _preKnownStorageId;
-          o.dataset.name = _preKnownStorageName;
-          o.textContent = _preKnownStorageName + ' (in stock)';
-          src.appendChild(o);
-          src.selectedIndex = src.options.length - 1;
-        }
-        foundMsg.style.display = 'block';
-        foundMsg.textContent = '✅ In stock at ' + _preKnownStorageName;
-        statusDiv.style.display = 'none';
-        formDiv.style.display = 'block';
-      }, 600);
-    } else {
-      // Search for stock
-      const _awController = new AbortController();
-      const _awTimeout = setTimeout(() => _awController.abort(), 8000);
-      fetch('/api/stock-part-search', {
+
+      // Show the form immediately, display search progress in source dropdown
+      statusDiv.style.display = 'none';
+      formDiv.style.display = 'block';
+      src.innerHTML = '<option value="">🔍 Finding stock locations...</option>';
+      src.disabled = true;
+
+      fetch('/api/find-item-stock', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        signal: _awController.signal,
-        body: JSON.stringify({ partNumber: partNo })
-      }).then(r => { clearTimeout(_awTimeout); return r; })
+        body: JSON.stringify({ catalogId: catalogId, jobId: jobId })
+      })
       .then(r => r.json())
       .then(result => {
-        const statusDiv = document.getElementById('aw-search-status');
-        const formDiv = document.getElementById('aw-form');
-        const foundMsg = document.getElementById('aw-found-msg');
-        const src = document.getElementById('aw-source-select');
+        src.disabled = false;
+        src.innerHTML = '<option value="">-- Select source storage --</option>';
 
-        if (result.items && result.items.length > 0) {
-          src.innerHTML = '<option value="">-- Select source storage --</option>';
-          result.items.forEach(it => {
+        if (result.locations && result.locations.length > 0) {
+          result.locations.forEach(loc => {
             const o = document.createElement('option');
-            o.value = it.storageId;
-            o.dataset.name = it.storageName;
-            o.textContent = `${it.storageName} (${it.quantity} in stock)`;
-            o.dataset.catalogId = it.catalogId;
+            o.value = loc.storageId;
+            o.dataset.name = loc.storageName;
+            o.textContent = `${loc.storageName} (${loc.quantity} in stock)`;
             src.appendChild(o);
           });
-          if (result.items.length === 1) {
+          // Auto-select if only one location
+          if (result.locations.length === 1) {
             src.selectedIndex = 1;
           }
+          // If pre-known storage, try to select it
+          if (_preKnownStorageId) {
+            for (let i = 0; i < src.options.length; i++) {
+              if (String(src.options[i].value) === String(_preKnownStorageId)) {
+                src.selectedIndex = i;
+                break;
+              }
+            }
+          }
           foundMsg.style.display = 'block';
-          foundMsg.textContent = `✅ Found in ${result.items.length} location${result.items.length > 1 ? 's' : ''}`;
+          foundMsg.style.background = '#e8f5e9';
+          foundMsg.style.color = '#2e7d32';
+          foundMsg.textContent = `✅ Found in ${result.locations.length} location${result.locations.length > 1 ? 's' : ''}`;
         } else {
+          // Not found — let user pick manually from all locations
+          src.innerHTML = '<option value="">-- Select source storage (not found automatically) --</option>';
+          fetch('/api/storage-locations', { credentials: 'include' })
+            .then(r => r.json())
+            .then(locs => {
+              const locations = Array.isArray(locs) ? locs : (locs.locations || []);
+              locations.forEach(loc => {
+                const o = document.createElement('option');
+                o.value = loc.ID || loc.id || '';
+                o.dataset.name = loc.Name || loc.name || '';
+                o.textContent = loc.Name || loc.name || '';
+                src.appendChild(o);
+              });
+            }).catch(() => {});
           foundMsg.style.display = 'block';
           foundMsg.style.background = '#fff8e1';
           foundMsg.style.color = '#f57f17';
-          foundMsg.textContent = '⚠️ Part not found in storage areas — select source manually';
+          foundMsg.textContent = '⚠️ Item not found in stock — select source manually';
         }
-
-        statusDiv.style.display = 'none';
-        formDiv.style.display = 'block';
       })
-      .catch(err => {
-        const statusDiv = document.getElementById('aw-search-status');
-        statusDiv.innerHTML = '⚠️ Could not search stock. Select source manually.';
-        document.getElementById('aw-form').style.display = 'block';
-        statusDiv.style.display = 'none';
-        document.getElementById('aw-found-msg').style.display = 'block';
-        document.getElementById('aw-found-msg').style.background = '#fff8e1';
-        document.getElementById('aw-found-msg').style.color = '#f57f17';
-        document.getElementById('aw-found-msg').textContent = '⚠️ Could not search — select source manually';
+      .catch(() => {
+        src.disabled = false;
+        src.innerHTML = '<option value="">-- Select source storage --</option>';
+        // Fallback to all locations
+        fetch('/api/storage-locations', { credentials: 'include' })
+          .then(r => r.json())
+          .then(locs => {
+            const locations = Array.isArray(locs) ? locs : (locs.locations || []);
+            locations.forEach(loc => {
+              const o = document.createElement('option');
+              o.value = loc.ID || loc.id || '';
+              o.dataset.name = loc.Name || loc.name || '';
+              o.textContent = loc.Name || loc.name || '';
+              src.appendChild(o);
+            });
+          }).catch(() => {});
+        foundMsg.style.display = 'block';
+        foundMsg.style.background = '#fff8e1';
+        foundMsg.style.color = '#f57f17';
+        foundMsg.textContent = '⚠️ Could not search — select source manually';
       });
     }
   },
