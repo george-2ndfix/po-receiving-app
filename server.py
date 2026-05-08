@@ -2312,47 +2312,6 @@ def stock_search():
                         all_items.append(item_data)
                         print(f"  Job stock: {part_no}: storage={best_storage_name}, qty={true_qty}, awaiting={awaiting}")
             
-            # v94: Check storage devices for items marked awaitingReceipt
-            # Some items with Assigned=0 are actually in stock (received but not CC-allocated)
-            try:
-                _unassigned = [i for i in all_items if i.get('awaitingReceipt') and i.get('catalogId')]
-                if _unassigned:
-                    import concurrent.futures as _cf
-                    _unassigned_ids = {i['catalogId'] for i in _unassigned}
-                    _storage_devs = get_all_storage_devices()  # {sid: sname}
-                    _stock_loc_map = {}  # catalogId -> {storageId, storageName, quantity}
-                    def _chk_dev(sid_sname):
-                        _sid, _sname = sid_sname
-                        _res = {}
-                        try:
-                            _r = simpro_request('GET', f'/companies/{COMPANY_ID}/storageDevices/{_sid}/stock/?columns=Catalog,InventoryCount')
-                            if _r.status_code == 200:
-                                for _s in _r.json():
-                                    _cid = _s.get('Catalog', {}).get('ID')
-                                    _inv = _s.get('InventoryCount', 0)
-                                    if _cid in _unassigned_ids and _inv > 0:
-                                        _res[_cid] = {'storageId': _sid, 'storageName': _sname, 'quantity': _inv}
-                        except Exception as _e:
-                            print(f'v94 storage check {_sid}: {_e}')
-                        return _res
-                    with _cf.ThreadPoolExecutor(max_workers=10) as _ex:
-                        _futs = [_ex.submit(_chk_dev, (sid, sname)) for sid, sname in _storage_devs.items()]
-                        for _fut in _cf.as_completed(_futs, timeout=20):
-                            try:
-                                _stock_loc_map.update(_fut.result())
-                            except Exception:
-                                pass
-                    for _item in all_items:
-                        if _item.get('awaitingReceipt') and _item.get('catalogId') in _stock_loc_map:
-                            _loc = _stock_loc_map[_item['catalogId']]
-                            _item['awaitingReceipt'] = False
-                            _item['inStock'] = True
-                            _item['storageId'] = _loc['storageId']
-                            _item['storageName'] = _loc['storageName']
-                            _item['quantity'] = _loc['quantity']
-                            print(f"  v94: {_item.get('partNo','?')} found in stock at {_loc['storageName']} qty:{_loc['quantity']}")
-            except Exception as _v94err:
-                print(f'v94 storage check skipped: {_v94err}')
             received_items = [i for i in all_items if not i['awaitingReceipt']]
             awaiting_items = [i for i in all_items if i['awaitingReceipt']]
             
@@ -2567,6 +2526,53 @@ def get_all_storage_devices():
         print(f'get_all_storage_devices error: {e}')
     # Return cached version even if stale, or empty dict
     return _storage_devices_cache or {}
+
+
+@app.route('/api/check-stock-for-catalogs', methods=['POST'])
+@login_required
+def check_stock_for_catalogs():
+    """Check which catalog IDs are in stock across all storage devices.
+    Fast: one API call per storage device (parallel), all catalog IDs in one pass.
+    Returns {catalogId: {storageId, storageName, quantity}} for any found."""
+    try:
+        data = request.get_json()
+        catalog_ids = set(data.get('catalogIds', []))
+        if not catalog_ids:
+            return jsonify({'stockMap': {}})
+        
+        storage_devs = get_all_storage_devices()
+        stock_map = {}
+        
+        import concurrent.futures as _cf
+        
+        def check_dev(sid_sname):
+            sid, sname = sid_sname
+            res = {}
+            try:
+                r = simpro_request('GET', f'/companies/{COMPANY_ID}/storageDevices/{sid}/stock/?columns=Catalog,InventoryCount&pageSize=200')
+                if r.status_code == 200:
+                    for s in r.json():
+                        cid = s.get('Catalog', {}).get('ID')
+                        inv = s.get('InventoryCount', 0)
+                        if cid in catalog_ids and inv > 0:
+                            res[cid] = {'storageId': sid, 'storageName': sname, 'quantity': inv}
+            except Exception as e:
+                print(f'check_stock_for_catalogs dev {sid}: {e}')
+            return res
+        
+        with _cf.ThreadPoolExecutor(max_workers=10) as ex:
+            futs = [ex.submit(check_dev, (sid, sname)) for sid, sname in storage_devs.items()]
+            for fut in _cf.as_completed(futs, timeout=20):
+                try:
+                    stock_map.update(fut.result())
+                except Exception:
+                    pass
+        
+        # Convert keys to strings for JSON
+        return jsonify({'stockMap': {str(k): v for k, v in stock_map.items()}})
+    except Exception as e:
+        print(f'check_stock_for_catalogs error: {e}')
+        return jsonify({'stockMap': {}, 'error': str(e)})
 
 
 @app.route('/api/stock-part-search', methods=['POST'])
