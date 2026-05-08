@@ -2121,7 +2121,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                     groups[key] = {
                         storageName: item.awaitingReceipt ? '\u23f3 Awaiting Receipt' : (item.storageName || 'Unknown'),
                         items: [],
-                        isAwaiting: item.awaitingReceipt
+                        isAwaiting: item.awaitingReceipt && !item.inStock
                     };
                 }
                 groups[key].items.push(item);
@@ -2141,23 +2141,21 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                 html += '</div>';
                 
                 group.items.forEach(item => {
-                    if (item.awaitingReceipt) {
-                        const awItemJson = JSON.stringify({
-                            partNo: item.partNo || '',
-                            description: item.description || '',
-                            jobId: item.jobId || '',
-                            jobNumber: item.jobNumber || jobNumber,
-                            sectionId: item.sectionId || '',
-                            costCentreId: item.costCentreId || '',
-                            quantity: item.quantityOrdered || 0
-                        }).replace(/'/g, '&#39;');
-                        html += '<div class="item-card awaiting-item" style="border-left:3px solid #f59e0b;">';
+                    if (item.awaitingReceipt || item.inStock) {
+                        const isInStock = !!item.inStock;
+                        const borderColor = isInStock ? '#22c55e' : '#f59e0b';
+                        const badgeBg = isInStock ? '#dcfce7' : '#f59e0b22';
+                        const badgeColor = isInStock ? '#16a34a' : '#f59e0b';
+                        const badgeBorder = isInStock ? '#86efac' : '#f59e0b44';
+                        const badgeText = isInStock ? ('📦 In Stock' + (item.storageName ? ' — ' + item.storageName : '')) : '⏳ Awaiting Receipt';
+                        html += '<div class="item-card awaiting-item" style="border-left:3px solid ' + borderColor + ';">';
                         html += '<div class="item-details" style="width:100%">';
-                        html += '<div class="item-name">' + (item.description || 'Unknown') + ' <span style="font-size:11px;background:#f59e0b22;color:#f59e0b;border:1px solid #f59e0b44;border-radius:4px;padding:1px 5px;">⏳ Awaiting Receipt</span></div>';
+                        html += '<div class="item-name">' + (item.description || 'Unknown') + ' <span style="font-size:11px;background:' + badgeBg + ';color:' + badgeColor + ';border:1px solid ' + badgeBorder + ';border-radius:4px;padding:1px 5px;">' + badgeText + '</span></div>';
                         html += '<div class="item-meta">';
                         if (item.partNo) html += '<span class="item-part">' + item.partNo + '</span>';
                         if (item.quantityOrdered) html += '<span class="item-qty">Ordered: ' + item.quantityOrdered + '</span>';
                         if (item.poOrderNo) html += '<span class="item-job">PO: ' + item.poOrderNo + '</span>';
+                        if (isInStock && item.quantity) html += '<span class="item-qty">In Stock: ' + item.quantity + '</span>';
                         html += '</div>';
                         const awData = JSON.stringify({
                             partNo: item.partNo || '',
@@ -2167,7 +2165,10 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                             sectionId: item.sectionId || '',
                             costCentreId: item.costCentreId || '',
                             catalogId: item.catalogId || '',
-                            quantity: item.quantityOrdered || 1
+                            quantity: item.quantityOrdered || 1,
+                            storageId: item.storageId || '',
+                            storageName: item.storageName || '',
+                            inStock: isInStock
                         });
                         const awDataB64 = btoa(unescape(encodeURIComponent(awData)));
                         html += '<button onclick="app.showAwaitingAllocModal(\'' + awDataB64 + '\')" style="margin-top:8px;padding:6px 14px;background:#2563eb;color:#fff;border:none;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600;">📦 Allocate from Stock</button>';
@@ -3823,63 +3824,96 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
       });
     });
 
-    // Search for stock
-    const _awController = new AbortController();
-    const _awTimeout = setTimeout(() => _awController.abort(), 8000);
-    fetch('/api/stock-part-search', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      signal: _awController.signal,
-      body: JSON.stringify({ partNumber: partNo })
-    }).then(r => { clearTimeout(_awTimeout); return r; })
-    .then(r => r.json())
-    .then(result => {
+    // Search for stock — skip if location already known from job load
+    const _preKnownStorageId = item.storageId || '';
+    const _preKnownStorageName = item.storageName || '';
+    const _preKnownInStock = !!item.inStock;
+
+    if (_preKnownStorageId && _preKnownInStock) {
+      // We already know where it is from the job load — skip search, show form immediately
       const statusDiv = document.getElementById('aw-search-status');
       const formDiv = document.getElementById('aw-form');
       const foundMsg = document.getElementById('aw-found-msg');
       const src = document.getElementById('aw-source-select');
-
-      if (result.items && result.items.length > 0) {
-        // Pre-populate source dropdown with found locations
-        // Insert found items at top of source dropdown
-        src.innerHTML = '<option value="">-- Select source storage --</option>';
-        result.items.forEach(it => {
+      // Wait for storage dropdown to populate then pre-select
+      setTimeout(() => {
+        // Try to find the matching option in the source dropdown
+        let found = false;
+        for (let i = 0; i < src.options.length; i++) {
+          if (String(src.options[i].value) === String(_preKnownStorageId)) {
+            src.selectedIndex = i;
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          // Add it if not present
           const o = document.createElement('option');
-          o.value = it.storageId;
-          o.dataset.name = it.storageName;
-          o.textContent = `${it.storageName} (${it.quantity} in stock)`;
-          o.dataset.catalogId = it.catalogId;
+          o.value = _preKnownStorageId;
+          o.dataset.name = _preKnownStorageName;
+          o.textContent = _preKnownStorageName + ' (in stock)';
           src.appendChild(o);
-        });
-        // Auto-select if only one result
-        if (result.items.length === 1) {
-          src.selectedIndex = 1;
+          src.selectedIndex = src.options.length - 1;
         }
         foundMsg.style.display = 'block';
-        foundMsg.textContent = `✅ Found in ${result.items.length} location${result.items.length > 1 ? 's' : ''}`;
-      } else {
-        // Nothing found — show manual selection
-        foundMsg.style.display = 'block';
-        foundMsg.style.background = '#fff8e1';
-        foundMsg.style.color = '#f57f17';
-        foundMsg.textContent = '⚠️ Part not found in storage areas — select source manually';
-      }
+        foundMsg.textContent = '✅ In stock at ' + _preKnownStorageName;
+        statusDiv.style.display = 'none';
+        formDiv.style.display = 'block';
+      }, 600);
+    } else {
+      // Search for stock
+      const _awController = new AbortController();
+      const _awTimeout = setTimeout(() => _awController.abort(), 8000);
+      fetch('/api/stock-part-search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        signal: _awController.signal,
+        body: JSON.stringify({ partNumber: partNo })
+      }).then(r => { clearTimeout(_awTimeout); return r; })
+      .then(r => r.json())
+      .then(result => {
+        const statusDiv = document.getElementById('aw-search-status');
+        const formDiv = document.getElementById('aw-form');
+        const foundMsg = document.getElementById('aw-found-msg');
+        const src = document.getElementById('aw-source-select');
 
-      statusDiv.style.display = 'none';
-      formDiv.style.display = 'block';
+        if (result.items && result.items.length > 0) {
+          src.innerHTML = '<option value="">-- Select source storage --</option>';
+          result.items.forEach(it => {
+            const o = document.createElement('option');
+            o.value = it.storageId;
+            o.dataset.name = it.storageName;
+            o.textContent = `${it.storageName} (${it.quantity} in stock)`;
+            o.dataset.catalogId = it.catalogId;
+            src.appendChild(o);
+          });
+          if (result.items.length === 1) {
+            src.selectedIndex = 1;
+          }
+          foundMsg.style.display = 'block';
+          foundMsg.textContent = `✅ Found in ${result.items.length} location${result.items.length > 1 ? 's' : ''}`;
+        } else {
+          foundMsg.style.display = 'block';
+          foundMsg.style.background = '#fff8e1';
+          foundMsg.style.color = '#f57f17';
+          foundMsg.textContent = '⚠️ Part not found in storage areas — select source manually';
+        }
 
+        statusDiv.style.display = 'none';
+        formDiv.style.display = 'block';
       })
-    .catch(err => {
-      const statusDiv = document.getElementById('aw-search-status');
-      statusDiv.innerHTML = '⚠️ Could not search stock. Select source manually.';
-      document.getElementById('aw-form').style.display = 'block';
-      statusDiv.style.display = 'none';
-      document.getElementById('aw-found-msg').style.display = 'block';
-      document.getElementById('aw-found-msg').style.background = '#fff8e1';
-      document.getElementById('aw-found-msg').style.color = '#f57f17';
-      document.getElementById('aw-found-msg').textContent = '⚠️ Could not search — select source manually';
-    });
+      .catch(err => {
+        const statusDiv = document.getElementById('aw-search-status');
+        statusDiv.innerHTML = '⚠️ Could not search stock. Select source manually.';
+        document.getElementById('aw-form').style.display = 'block';
+        statusDiv.style.display = 'none';
+        document.getElementById('aw-found-msg').style.display = 'block';
+        document.getElementById('aw-found-msg').style.background = '#fff8e1';
+        document.getElementById('aw-found-msg').style.color = '#f57f17';
+        document.getElementById('aw-found-msg').textContent = '⚠️ Could not search — select source manually';
+      });
+    }
   },
 
   _awDoTransfer({ catalogId, partNo, description, sourceId, sourceName, destId, destName, qty, jobId, jobNumber, customerName, sectionId, ccId }) {
