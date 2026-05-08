@@ -4637,6 +4637,98 @@ def job_note():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
+@app.route('/api/find-item-stock', methods=['POST'])
+@login_required
+def find_item_stock():
+    """Find all storage locations where a catalog item has stock.
+    Checks CC stock first (job-allocated), then storage devices (unallocated stock).
+    Returns list of {storageId, storageName, quantity, source} sorted by quantity desc.
+    """
+    data = request.get_json()
+    catalog_id = data.get('catalogId')
+    job_id = data.get('jobId')
+
+    if not catalog_id:
+        return jsonify({'error': 'catalogId required'}), 400
+
+    locations = []
+    seen_storage_ids = set()
+
+    # Step 1: Check CC stock for this job (job-allocated items)
+    if job_id:
+        try:
+            sec_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/')
+            if sec_resp.status_code == 200:
+                sections = sec_resp.json()
+                for section in sections:
+                    sid = section.get('ID')
+                    if not sid:
+                        continue
+                    cc_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{sid}/costCenters/')
+                    if cc_resp.status_code != 200:
+                        continue
+                    for cc in cc_resp.json():
+                        ccid = cc.get('ID')
+                        if not ccid:
+                            continue
+                        stock_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{sid}/costCenters/{ccid}/stock/{catalog_id}/')
+                        if stock_resp.status_code != 200:
+                            continue
+                        stock = stock_resp.json()
+                        breakdown = stock.get('AssignedBreakdown', [])
+                        for bd in breakdown:
+                            qty = bd.get('Quantity', 0)
+                            if qty > 0:
+                                st = bd.get('Storage', {})
+                                st_id = st.get('ID')
+                                st_name = st.get('Name', 'Unknown')
+                                if st_id and st_id not in seen_storage_ids:
+                                    seen_storage_ids.add(st_id)
+                                    locations.append({
+                                        'storageId': st_id,
+                                        'storageName': st_name,
+                                        'quantity': qty,
+                                        'source': 'cc'
+                                    })
+        except Exception as e:
+            print(f"[find-item-stock] CC check error: {e}")
+
+    # Step 2: Check storage devices (for unallocated stock)
+    # Only if CC check found nothing (CC-allocated stock is invisible to storage device API)
+    if not locations:
+        try:
+            # Get all storage devices
+            dev_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/storageDevices/?pageSize=100')
+            if dev_resp.status_code == 200:
+                devices = dev_resp.json()
+                for dev in devices:
+                    dev_id = dev.get('ID')
+                    if not dev_id or dev_id in seen_storage_ids:
+                        continue
+                    # Check if this device has the catalog item
+                    st_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/storageDevices/{dev_id}/stock/{catalog_id}/')
+                    if st_resp.status_code == 200:
+                        st_data = st_resp.json()
+                        qty = st_data.get('Quantity', 0)
+                        if isinstance(qty, dict):
+                            qty = qty.get('Total', qty.get('Available', 0))
+                        if qty and float(qty) > 0:
+                            seen_storage_ids.add(dev_id)
+                            locations.append({
+                                'storageId': dev_id,
+                                'storageName': dev.get('Name', 'Unknown'),
+                                'quantity': float(qty),
+                                'source': 'storage_device'
+                            })
+        except Exception as e:
+            print(f"[find-item-stock] Storage device check error: {e}")
+
+    # Sort by quantity descending
+    locations.sort(key=lambda x: x['quantity'], reverse=True)
+
+    return jsonify({'locations': locations, 'found': len(locations) > 0})
+
 # Initialize and Run
 # ============================================
 # Initialize database on module load (for gunicorn)
