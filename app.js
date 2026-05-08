@@ -3733,6 +3733,96 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
       })
       .catch(() => {});
 
+    // Wire up cancel and continue — registered immediately so they work even if stock search fails
+    document.getElementById('aw-cancel-btn').addEventListener('click', () => modal.remove());
+    document.getElementById('aw-continue-btn').addEventListener('click', () => {
+      const src2 = document.getElementById('aw-source-select');
+      const dest2 = document.getElementById('aw-dest-select');
+      const sourceOpt = src2.options[src2.selectedIndex];
+      const sourceId = src2.value;
+      const sourceName = sourceOpt ? (sourceOpt.dataset.name || sourceOpt.textContent.split('(')[0].trim()) : '';
+      const destOpt = dest2.options[dest2.selectedIndex];
+      const destId = dest2.value;
+      const destName = destOpt ? (destOpt.dataset.name || destOpt.textContent) : '';
+      const qty = parseInt(document.getElementById('aw-qty').value, 10) || 1;
+
+      if (!sourceId) { alert('Please select a source storage location.'); return; }
+      if (!destId) { alert('Please select a destination storage location.'); return; }
+
+      // Look up CC
+      const ccPanel = document.getElementById('aw-cc-panel');
+      ccPanel.style.display = 'block';
+      ccPanel.innerHTML = '<p style="text-align:center;padding:16px;color:#555;">🔍 Looking up cost centre...</p>';
+      document.getElementById('aw-form').style.display = 'none';
+
+      fetch('/api/job-cc-lookup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          jobId: jobId,
+          catalogId: catalogId,
+          partNo: partNo,
+          description: description
+        })
+      })
+      .then(r => r.json())
+      .then(ccResult => {
+        if (ccResult.error || !ccResult.matches || ccResult.matches.length === 0) {
+          ccPanel.innerHTML = `
+            <div style="background:#fff8e1;border-radius:8px;padding:16px;margin-bottom:12px;">
+              <p style="margin:0 0 8px;font-weight:600;">⚠️ Item Not Found on Job ${jobNumber}</p>
+              <p style="margin:0;font-size:13px;color:#555;">This part is not listed in the job materials. You can still transfer it to the storage location.</p>
+            </div>
+            <div style="display:flex;gap:10px;">
+              <button id="aw-back-btn2" style="flex:1;padding:12px;border:1px solid #ddd;border-radius:8px;background:#f5f5f5;font-size:14px;cursor:pointer;">← Back</button>
+              <button id="aw-manual-btn" style="flex:2;padding:12px;border:none;border-radius:8px;background:#FF9800;color:#fff;font-size:14px;font-weight:600;cursor:pointer;">Transfer Anyway</button>
+            </div>`;
+          document.getElementById('aw-back-btn2').addEventListener('click', () => {
+            ccPanel.style.display = 'none';
+            document.getElementById('aw-form').style.display = 'block';
+          });
+          document.getElementById('aw-manual-btn').addEventListener('click', () => {
+            this._awDoTransfer({ catalogId, partNo, description, sourceId, sourceName, destId, destName, qty, jobId, jobNumber, customerName, sectionId: null, ccId: null });
+          });
+          return;
+        }
+        let ccHtml = `<p style="font-weight:600;margin:0 0 12px;">Select Cost Centre for Job ${jobNumber}:</p>`;
+        ccResult.matches.forEach((m, i) => {
+          ccHtml += `
+            <label style="display:flex;align-items:flex-start;gap:10px;padding:10px;border:1px solid #ddd;border-radius:8px;margin-bottom:8px;cursor:pointer;">
+              <input type="radio" name="aw-cc" value="${i}" style="margin-top:2px;">
+              <div>
+                <div style="font-weight:600;font-size:14px;">${m.costCentreName || 'Cost Centre'}</div>
+                <div style="font-size:12px;color:#555;">Required: ${m.required || 0} | Allocated: ${m.allocated || 0} | Remaining: ${m.remaining || 0}</div>
+              </div>
+            </label>`;
+        });
+        ccHtml += `
+          <div style="display:flex;gap:10px;margin-top:12px;">
+            <button id="aw-back-btn3" style="flex:1;padding:12px;border:1px solid #ddd;border-radius:8px;background:#f5f5f5;font-size:14px;cursor:pointer;">← Back</button>
+            <button id="aw-confirm-btn" style="flex:2;padding:12px;border:none;border-radius:8px;background:#4CAF50;color:#fff;font-size:14px;font-weight:600;cursor:pointer;">✅ Confirm Allocation</button>
+          </div>`;
+        ccPanel.innerHTML = ccHtml;
+        document.getElementById('aw-back-btn3').addEventListener('click', () => {
+          ccPanel.style.display = 'none';
+          document.getElementById('aw-form').style.display = 'block';
+        });
+        document.getElementById('aw-confirm-btn').addEventListener('click', () => {
+          const radios = document.querySelectorAll('input[name="aw-cc"]');
+          let selectedIdx = -1;
+          radios.forEach((r, i) => { if (r.checked) selectedIdx = i; });
+          if (selectedIdx < 0) { alert('Please select a cost centre.'); return; }
+          const m = ccResult.matches[selectedIdx];
+          this._awDoTransfer({ catalogId, partNo, description, sourceId, sourceName, destId, destName, qty, jobId, jobNumber, customerName, sectionId: m.sectionId, ccId: m.costCentreId });
+        });
+      })
+      .catch(err => {
+        ccPanel.innerHTML = `<p style="color:red;">Error: ${err.message}</p>
+          <button onclick="document.getElementById('aw-modal').remove()" style="padding:10px 20px;border:1px solid #ddd;border-radius:8px;background:#f5f5f5;cursor:pointer;">Close</button>`;
+      });
+    });
+
     // Search for stock
     const _awController = new AbortController();
     const _awTimeout = setTimeout(() => _awController.abort(), 8000);
@@ -3779,98 +3869,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
       statusDiv.style.display = 'none';
       formDiv.style.display = 'block';
 
-      // Wire up cancel
-      document.getElementById('aw-cancel-btn').addEventListener('click', () => modal.remove());
-
-      // Wire up continue
-      document.getElementById('aw-continue-btn').addEventListener('click', () => {
-        const sourceOpt = src.options[src.selectedIndex];
-        const sourceId = src.value;
-        const sourceName = sourceOpt ? (sourceOpt.dataset.name || sourceOpt.textContent) : '';
-        const destOpt = destSelect.options[destSelect.selectedIndex];
-        const destId = destSelect.value;
-        const destName = destOpt ? (destOpt.dataset.name || destOpt.textContent) : '';
-        const qty = parseInt(document.getElementById('aw-qty').value, 10) || 1;
-
-        if (!sourceId) { alert('Please select a source storage location.'); return; }
-        if (!destId) { alert('Please select a destination storage location.'); return; }
-
-        // Look up CC
-        const ccPanel = document.getElementById('aw-cc-panel');
-        ccPanel.style.display = 'block';
-        ccPanel.innerHTML = '<p style="text-align:center;padding:16px;color:#555;">🔍 Looking up cost centre...</p>';
-        document.getElementById('aw-form').style.display = 'none';
-
-        fetch('/api/job-cc-lookup', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({
-            jobId: jobId,
-            catalogId: catalogId,
-            partNo: partNo,
-            description: description
-          })
-        })
-        .then(r => r.json())
-        .then(ccResult => {
-          if (ccResult.error || !ccResult.matches || ccResult.matches.length === 0) {
-            // Item not on job — show warning
-            ccPanel.innerHTML = `
-              <div style="background:#fff8e1;border-radius:8px;padding:16px;margin-bottom:12px;">
-                <p style="margin:0 0 8px;font-weight:600;">⚠️ Item Not Found on Job ${jobNumber}</p>
-                <p style="margin:0;font-size:13px;color:#555;">This part is not listed in the job materials. You can still transfer it to the storage location.</p>
-              </div>
-              <div style="display:flex;gap:10px;">
-                <button id="aw-back-btn2" style="flex:1;padding:12px;border:1px solid #ddd;border-radius:8px;background:#f5f5f5;font-size:14px;cursor:pointer;">← Back</button>
-                <button id="aw-manual-btn" style="flex:2;padding:12px;border:none;border-radius:8px;background:#FF9800;color:#fff;font-size:14px;font-weight:600;cursor:pointer;">Transfer Anyway</button>
-              </div>`;
-            document.getElementById('aw-back-btn2').addEventListener('click', () => {
-              ccPanel.style.display = 'none';
-              document.getElementById('aw-form').style.display = 'block';
-            });
-            document.getElementById('aw-manual-btn').addEventListener('click', () => {
-              this._awDoTransfer({ catalogId, partNo, description, sourceId, sourceName, destId, destName, qty, jobId, jobNumber, customerName, sectionId: null, ccId: null });
-            });
-            return;
-          }
-          // Show CC matches
-          let ccHtml = `<p style="font-weight:600;margin:0 0 12px;">Select Cost Centre for Job ${jobNumber}:</p>`;
-          ccResult.matches.forEach((m, i) => {
-            ccHtml += `
-              <label style="display:flex;align-items:flex-start;gap:10px;padding:10px;border:1px solid #ddd;border-radius:8px;margin-bottom:8px;cursor:pointer;">
-                <input type="radio" name="aw-cc" value="${i}" style="margin-top:2px;">
-                <div>
-                  <div style="font-weight:600;font-size:14px;">${m.costCentreName || 'Cost Centre'}</div>
-                  <div style="font-size:12px;color:#555;">Required: ${m.required || 0} | Allocated: ${m.allocated || 0} | Remaining: ${m.remaining || 0}</div>
-                </div>
-              </label>`;
-          });
-          ccHtml += `
-            <div style="display:flex;gap:10px;margin-top:12px;">
-              <button id="aw-back-btn3" style="flex:1;padding:12px;border:1px solid #ddd;border-radius:8px;background:#f5f5f5;font-size:14px;cursor:pointer;">← Back</button>
-              <button id="aw-confirm-btn" style="flex:2;padding:12px;border:none;border-radius:8px;background:#4CAF50;color:#fff;font-size:14px;font-weight:600;cursor:pointer;">✅ Confirm Allocation</button>
-            </div>`;
-          ccPanel.innerHTML = ccHtml;
-          document.getElementById('aw-back-btn3').addEventListener('click', () => {
-            ccPanel.style.display = 'none';
-            document.getElementById('aw-form').style.display = 'block';
-          });
-          document.getElementById('aw-confirm-btn').addEventListener('click', () => {
-            const radios = document.querySelectorAll('input[name="aw-cc"]');
-            let selectedIdx = -1;
-            radios.forEach((r, i) => { if (r.checked) selectedIdx = i; });
-            if (selectedIdx < 0) { alert('Please select a cost centre.'); return; }
-            const m = ccResult.matches[selectedIdx];
-            this._awDoTransfer({ catalogId, partNo, description, sourceId, sourceName, destId, destName, qty, jobId, jobNumber, customerName, sectionId: m.sectionId, ccId: m.costCentreId });
-          });
-        })
-        .catch(err => {
-          ccPanel.innerHTML = `<p style="color:red;">Error looking up cost centre: ${err.message}</p>
-            <button onclick="document.getElementById('aw-modal').remove()" style="padding:10px 20px;border:1px solid #ddd;border-radius:8px;background:#f5f5f5;cursor:pointer;">Close</button>`;
-        });
-      });
-    })
+      })
     .catch(err => {
       const statusDiv = document.getElementById('aw-search-status');
       statusDiv.innerHTML = '⚠️ Could not search stock. Select source manually.';
