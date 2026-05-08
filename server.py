@@ -2312,6 +2312,44 @@ def stock_search():
                         all_items.append(item_data)
                         print(f"  Job stock: {part_no}: storage={best_storage_name}, qty={true_qty}, awaiting={awaiting}")
             
+            # v94: Check storage devices for items marked awaitingReceipt
+            # Some items with Assigned=0 are actually in stock (received but not CC-allocated)
+            _unassigned = [i for i in all_items if i.get('awaitingReceipt') and i.get('catalogId')]
+            if _unassigned:
+                import concurrent.futures as _cf
+                _unassigned_ids = {i['catalogId'] for i in _unassigned}
+                _storage_devs = get_all_storage_devices()  # {sid: sname}
+                _stock_loc_map = {}  # catalogId -> {storageId, storageName, quantity}
+                def _chk_dev(sid_sname):
+                    _sid, _sname = sid_sname
+                    _res = {}
+                    try:
+                        _r = simpro_request('GET', f'/companies/{COMPANY_ID}/storageDevices/{_sid}/stock/?columns=Catalog,InventoryCount')
+                        if _r.status_code == 200:
+                            for _s in _r.json():
+                                _cid = _s.get('Catalog', {}).get('ID')
+                                _inv = _s.get('InventoryCount', 0)
+                                if _cid in _unassigned_ids and _inv > 0:
+                                    _res[_cid] = {'storageId': _sid, 'storageName': _sname, 'quantity': _inv}
+                    except Exception as _e:
+                        print(f'v94 storage check {_sid}: {_e}')
+                    return _res
+                with _cf.ThreadPoolExecutor(max_workers=10) as _ex:
+                    _futs = [_ex.submit(_chk_dev, (sid, sname)) for sid, sname in _storage_devs.items()]
+                    for _fut in _cf.as_completed(_futs, timeout=15):
+                        try:
+                            _stock_loc_map.update(_fut.result())
+                        except Exception:
+                            pass
+                for _item in all_items:
+                    if _item.get('awaitingReceipt') and _item.get('catalogId') in _stock_loc_map:
+                        _loc = _stock_loc_map[_item['catalogId']]
+                        _item['awaitingReceipt'] = False
+                        _item['inStock'] = True
+                        _item['storageId'] = _loc['storageId']
+                        _item['storageName'] = _loc['storageName']
+                        _item['quantity'] = _loc['quantity']
+                        print(f"  v94: {_item.get('partNo','?')} found in stock at {_loc['storageName']} qty:{_loc['quantity']}")
             received_items = [i for i in all_items if not i['awaitingReceipt']]
             awaiting_items = [i for i in all_items if i['awaitingReceipt']]
             
