@@ -2148,7 +2148,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                         const badgeColor = isInStock ? '#16a34a' : '#f59e0b';
                         const badgeBorder = isInStock ? '#86efac' : '#f59e0b44';
                         const badgeText = isInStock ? ('📦 In Stock' + (item.storageName ? ' — ' + item.storageName : '')) : '⏳ Awaiting Receipt';
-                        html += '<div class="item-card awaiting-item" style="border-left:3px solid ' + borderColor + ';">';
+                        html += '<div class="item-card awaiting-item" data-catalog-id="' + (item.catalogId || '') + '" style="border-left:3px solid ' + borderColor + ';">';
                         html += '<div class="item-details" style="width:100%">';
                         html += '<div class="item-name">' + (item.description || 'Unknown') + ' <span style="font-size:11px;background:' + badgeBg + ';color:' + badgeColor + ';border:1px solid ' + badgeBorder + ';border-radius:4px;padding:1px 5px;">' + badgeText + '</span></div>';
                         html += '<div class="item-meta">';
@@ -2198,6 +2198,47 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             }
             
             resultsEl.innerHTML = html;
+            
+            // v94: Background check — update "Awaiting Receipt" badges for items that are actually in stock
+            const _awaitingIds = data.items ? data.items.filter(i => i.awaitingReceipt && i.catalogId).map(i => i.catalogId) : [];
+            if (_awaitingIds.length > 0) {
+                this.authFetch('/api/check-stock-for-catalogs', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ catalogIds: _awaitingIds })
+                }).then(r => r.json()).then(stockResult => {
+                    const sm = stockResult.stockMap || {};
+                    Object.keys(sm).forEach(catalogId => {
+                        const card = resultsEl.querySelector('.awaiting-item[data-catalog-id="' + catalogId + '"]');
+                        if (!card) return;
+                        const loc = sm[catalogId];
+                        // Update border color
+                        card.style.borderLeftColor = '#22c55e';
+                        // Update badge
+                        const nameDiv = card.querySelector('.item-name');
+                        if (nameDiv) {
+                            nameDiv.innerHTML = nameDiv.innerHTML
+                                .replace(/<span[^>]*>⏳ Awaiting Receipt<\/span>/, '<span style="font-size:11px;background:#dcfce7;color:#16a34a;border:1px solid #86efac;border-radius:4px;padding:1px 5px;">📦 In Stock — ' + (loc.storageName || '') + '</span>');
+                        }
+                        // Update allocate button data to include storageId/storageName/inStock
+                        const btn = card.querySelector('button[onclick]');
+                        if (btn) {
+                            const onclickStr = btn.getAttribute('onclick');
+                            const b64match = onclickStr.match(/showAwaitingAllocModal\('([^']+)'\)/);
+                            if (b64match) {
+                                try {
+                                    const decoded = JSON.parse(decodeURIComponent(escape(atob(b64match[1]))));
+                                    decoded.storageId = loc.storageId;
+                                    decoded.storageName = loc.storageName;
+                                    decoded.inStock = true;
+                                    const newB64 = btoa(unescape(encodeURIComponent(JSON.stringify(decoded))));
+                                    btn.setAttribute('onclick', "app.showAwaitingAllocModal('" + newB64 + "')");
+                                } catch(e) {}
+                            }
+                        }
+                    });
+                }).catch(() => {});
+            }
             
             // Store data for selection tracking
             this.stockSearchData = data;
