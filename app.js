@@ -817,9 +817,9 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             // For fully receipted items (remaining=0), use the ordered quantity
             let qty;
             if (item.receiptStatus === 'fully_receipted' || remaining <= 0) {
-                qty = qtyInput ? parseInt(qtyInput.value) || item.quantityOrdered : item.quantityOrdered;
+                qty = qtyInput ? parseFloat(qtyInput.value) || item.quantityOrdered : item.quantityOrdered;
             } else {
-                qty = qtyInput ? parseInt(qtyInput.value) || remaining : remaining;
+                qty = qtyInput ? parseFloat(qtyInput.value) || remaining : remaining;
             }
             this.selectedItems.push({
                 index,
@@ -851,7 +851,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         
         const remaining = item.quantityOrdered - item.quantityReceived;
         const maxQty = remaining > 0 ? remaining : item.quantityOrdered;
-        let qty = parseInt(qtyInput.value) || 0;
+        let qty = parseFloat(qtyInput.value) || 0;
         if (qty < 0) qty = 0;
         if (qty > maxQty) qty = maxQty;
         qtyInput.value = qty;
@@ -901,7 +901,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                 const item = this.currentPO.items[index];
                 const remaining = item.quantityOrdered - item.quantityReceived;
                 const effectiveQty = remaining > 0 ? remaining : item.quantityOrdered;
-                const qty = qtyInput ? parseInt(qtyInput.value) || effectiveQty : effectiveQty;
+                const qty = qtyInput ? parseFloat(qtyInput.value) || effectiveQty : effectiveQty;
                 this.selectedItems.push({
                     index,
                     catalogId: item.catalogId,
