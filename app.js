@@ -3728,20 +3728,20 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
       <div style="background:#fff;border-radius:12px;padding:20px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto;">
         <h3 style="margin:0 0 4px;font-size:16px;">📦 Allocate from Stock</h3>
         <p style="margin:0 0 16px;font-size:13px;color:#555;">${description}${partNo ? ' <span style="color:#888;">('+partNo+')</span>' : ''}</p>
-        <div id="aw-search-status" style="text-align:center;padding:20px;color:#555;font-size:14px;">
-          🔍 Searching storage areas...
-        </div>
-        <div id="aw-form" style="display:none;">
+        <div id="aw-search-status" style="display:none;"></div>
+        <div id="aw-form" style="display:block;">
           <div id="aw-found-msg" style="display:none;margin-bottom:12px;padding:8px 12px;background:#e8f5e9;border-radius:8px;font-size:13px;color:#2e7d32;"></div>
           <label style="display:block;margin-bottom:4px;font-size:13px;font-weight:600;">Taking stock from</label>
           <select id="aw-source-select" style="width:100%;padding:10px;border:1px solid #ddd;border-radius:8px;font-size:14px;margin-bottom:12px;">
             <option value="">-- Select source storage --</option>
+            <optgroup label="Default"><option value="3">Stock Holding</option></optgroup><optgroup label="Special"><option value="4">Customer Cupboard</option><option value="21">Builders Cupboard</option><option value="38">ON TOP - Builders Cupboard</option></optgroup><optgroup label="Container 1"><option value="5">1.01 Blue Shipping Container</option><option value="6">1.02 Blue Shipping Container</option><option value="7">1.03</option><option value="8">1.04</option><option value="48">1.05</option><option value="49">1.06</option><option value="50">1.07</option><option value="51">1.08</option></optgroup><optgroup label="Container 2"><option value="13">2.01</option><option value="14">2.02</option><option value="15">2.03</option><option value="16">2.04</option><option value="17">2.05</option><option value="18">2.06</option><option value="19">2.07</option><option value="20">2.08</option><option value="255">2.09 - Container Side</option></optgroup><optgroup label="Container 3"><option value="22">3.01</option><option value="23">3.02</option><option value="24">3.03</option><option value="25">3.04</option><option value="26">3.05</option><option value="27">3.06</option><option value="28">3.07</option><option value="29">3.08</option></optgroup><optgroup label="Container 4"><option value="30">4.01</option><option value="31">4.02</option><option value="32">4.03</option><option value="33">4.04</option><option value="34">4.05</option><option value="35">4.06</option><option value="36">4.07</option><option value="37">4.08</option></optgroup><optgroup label="Container 5"><option value="40">5.01</option><option value="41">5.02</option><option value="42">5.03</option><option value="43">5.04</option></optgroup><optgroup label="Back Room"><option value="110">BR.01</option><option value="111">BR.02</option><option value="112">BR.03</option><option value="113">BR.04</option><option value="114">BR.05</option><option value="115">BR.06</option><option value="116">BR.07</option><option value="117">BR.08</option><option value="118">BR.09</option><option value="119">BR.10</option><option value="120">BR.11</option><option value="121">BR.12</option><option value="122">BR.13</option><option value="123">BR.14</option><option value="125">BR.15</option><option value="126">BR.16</option><option value="127">BR.17</option><option value="129">BR.18</option><option value="130">BR.19</option><option value="131">BR.20</option><option value="132">BR.21</option><option value="133">BR.22</option><option value="134">BR.23</option><option value="135">BR.24</option><option value="136">BR.25</option><option value="137">BR.26</option><option value="138">BR.27</option><option value="139">BR.28</option><option value="140">BR.29</option><option value="141">BR.30</option><option value="142">BR.31</option><option value="143">BR.32</option><option value="144">BR.33</option><option value="145">BR.34</option></optgroup><optgroup label="Showroom Racks"><option value="102">S01A - CUSTOMER RACK</option><option value="106">S01B - CUSTOMER RACK</option><option value="103">S02A</option><option value="107">S02B</option><option value="104">S03A</option><option value="108">S03B</option><option value="105">S04A</option><option value="109">S04B</option></optgroup><optgroup label="Other"><option value="149">Back Room</option><option value="219">Boardroom</option><option value="258">Customer Collected</option><option value="220">Delivered to Site</option><option value="152">Delivery by Supplier</option><option value="260">Hall - Entrance</option><option value="186">Materials used - KALL CORP</option><option value="151">On Site</option><option value="147">PICK UP FROM SUPPLIER</option><option value="153">Reception</option><option value="69">Shed</option><option value="146">Showroom Display</option></optgroup><optgroup label="Stock"><option value="52">Stock - Seal Room</option><option value="67">Stock Shelves</option><option value="65">Stock Shelves - Tub 1</option><option value="54">Stock Shelves - Tub 2</option><option value="55">Stock Shelves - Tub 3</option><option value="56">Stock Shelves - Tub 4</option><option value="57">Stock Shelves - Tub 5</option><option value="58">Stock Shelves - Tub 6</option><option value="59">Stock Shelves - Tub 7</option><option value="60">Stock Shelves - Tub 8</option><option value="61">Stock Shelves - Tub 9</option><option value="62">Stock Shelves - Tub 10</option><option value="63">Stock Shelves - Tub 11</option><option value="64">Stock Shelves - Tub 12</option><option value="53">Stock Shelves - Tub 13</option><option value="66">Stock Shelves - Tub 14</option></optgroup>
           </select>
           <label style="display:block;margin-bottom:4px;font-size:13px;font-weight:600;">Quantity</label>
           <input type="number" id="aw-qty" value="1" min="1" style="width:100%;padding:10px;border:1px solid #ddd;border-radius:8px;font-size:14px;margin-bottom:12px;box-sizing:border-box;">
           <label style="display:block;margin-bottom:4px;font-size:13px;font-weight:600;">Put in storage (destination)</label>
           <select id="aw-dest-select" style="width:100%;padding:10px;border:1px solid #ddd;border-radius:8px;font-size:14px;margin-bottom:16px;">
             <option value="">-- Select destination --</option>
+            <optgroup label="Default"><option value="3">Stock Holding</option></optgroup><optgroup label="Special"><option value="4">Customer Cupboard</option><option value="21">Builders Cupboard</option><option value="38">ON TOP - Builders Cupboard</option></optgroup><optgroup label="Container 1"><option value="5">1.01 Blue Shipping Container</option><option value="6">1.02 Blue Shipping Container</option><option value="7">1.03</option><option value="8">1.04</option><option value="48">1.05</option><option value="49">1.06</option><option value="50">1.07</option><option value="51">1.08</option></optgroup><optgroup label="Container 2"><option value="13">2.01</option><option value="14">2.02</option><option value="15">2.03</option><option value="16">2.04</option><option value="17">2.05</option><option value="18">2.06</option><option value="19">2.07</option><option value="20">2.08</option><option value="255">2.09 - Container Side</option></optgroup><optgroup label="Container 3"><option value="22">3.01</option><option value="23">3.02</option><option value="24">3.03</option><option value="25">3.04</option><option value="26">3.05</option><option value="27">3.06</option><option value="28">3.07</option><option value="29">3.08</option></optgroup><optgroup label="Container 4"><option value="30">4.01</option><option value="31">4.02</option><option value="32">4.03</option><option value="33">4.04</option><option value="34">4.05</option><option value="35">4.06</option><option value="36">4.07</option><option value="37">4.08</option></optgroup><optgroup label="Container 5"><option value="40">5.01</option><option value="41">5.02</option><option value="42">5.03</option><option value="43">5.04</option></optgroup><optgroup label="Back Room"><option value="110">BR.01</option><option value="111">BR.02</option><option value="112">BR.03</option><option value="113">BR.04</option><option value="114">BR.05</option><option value="115">BR.06</option><option value="116">BR.07</option><option value="117">BR.08</option><option value="118">BR.09</option><option value="119">BR.10</option><option value="120">BR.11</option><option value="121">BR.12</option><option value="122">BR.13</option><option value="123">BR.14</option><option value="125">BR.15</option><option value="126">BR.16</option><option value="127">BR.17</option><option value="129">BR.18</option><option value="130">BR.19</option><option value="131">BR.20</option><option value="132">BR.21</option><option value="133">BR.22</option><option value="134">BR.23</option><option value="135">BR.24</option><option value="136">BR.25</option><option value="137">BR.26</option><option value="138">BR.27</option><option value="139">BR.28</option><option value="140">BR.29</option><option value="141">BR.30</option><option value="142">BR.31</option><option value="143">BR.32</option><option value="144">BR.33</option><option value="145">BR.34</option></optgroup><optgroup label="Showroom Racks"><option value="102">S01A - CUSTOMER RACK</option><option value="106">S01B - CUSTOMER RACK</option><option value="103">S02A</option><option value="107">S02B</option><option value="104">S03A</option><option value="108">S03B</option><option value="105">S04A</option><option value="109">S04B</option></optgroup><optgroup label="Other"><option value="149">Back Room</option><option value="219">Boardroom</option><option value="258">Customer Collected</option><option value="220">Delivered to Site</option><option value="152">Delivery by Supplier</option><option value="260">Hall - Entrance</option><option value="186">Materials used - KALL CORP</option><option value="151">On Site</option><option value="147">PICK UP FROM SUPPLIER</option><option value="153">Reception</option><option value="69">Shed</option><option value="146">Showroom Display</option></optgroup><optgroup label="Stock"><option value="52">Stock - Seal Room</option><option value="67">Stock Shelves</option><option value="65">Stock Shelves - Tub 1</option><option value="54">Stock Shelves - Tub 2</option><option value="55">Stock Shelves - Tub 3</option><option value="56">Stock Shelves - Tub 4</option><option value="57">Stock Shelves - Tub 5</option><option value="58">Stock Shelves - Tub 6</option><option value="59">Stock Shelves - Tub 7</option><option value="60">Stock Shelves - Tub 8</option><option value="61">Stock Shelves - Tub 9</option><option value="62">Stock Shelves - Tub 10</option><option value="63">Stock Shelves - Tub 11</option><option value="64">Stock Shelves - Tub 12</option><option value="53">Stock Shelves - Tub 13</option><option value="66">Stock Shelves - Tub 14</option></optgroup>
           </select>
           <div style="display:flex;gap:10px;">
             <button id="aw-cancel-btn" style="flex:1;padding:12px;border:1px solid #ddd;border-radius:8px;background:#f5f5f5;font-size:14px;cursor:pointer;">Cancel</button>
@@ -3756,24 +3756,9 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
     // Close on backdrop click
     modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
 
-    // Load storage devices for destination dropdown
+    // Dropdowns are pre-populated with hardcoded options in the modal template
     const destSelect = document.getElementById('aw-dest-select');
     const sourceSelect = document.getElementById('aw-source-select');
-
-    fetch('/api/storage-locations', { credentials: 'include' })
-      .then(r => r.json())
-      .then(locs => {
-        const locations = Array.isArray(locs) ? locs : (locs.locations || []);
-        locations.forEach(loc => {
-          const o = document.createElement('option');
-          o.value = loc.ID || loc.id || '';
-          o.textContent = loc.Name || loc.name || loc.StorageID || '';
-          o.dataset.name = o.textContent;
-          destSelect.appendChild(o.cloneNode(true));
-          sourceSelect.appendChild(o);
-        });
-      })
-      .catch(() => {});
 
     // Wire up cancel and continue — registered immediately so they work even if stock search fails
     document.getElementById('aw-cancel-btn').addEventListener('click', () => modal.remove());
@@ -3873,11 +3858,8 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
       const foundMsg = document.getElementById('aw-found-msg');
       const src = document.getElementById('aw-source-select');
 
-      // Show the form immediately, display search progress in source dropdown
-      statusDiv.style.display = 'none';
-      formDiv.style.display = 'block';
-      src.innerHTML = '<option value="">🔍 Finding stock locations...</option>';
-      src.disabled = true;
+      // Form is already shown with hardcoded options - just try to auto-select source
+      if (foundMsg) { foundMsg.style.display = 'block'; foundMsg.style.background = '#e3f2fd'; foundMsg.style.color = '#1565c0'; foundMsg.textContent = '🔍 Searching for item location...'; }
 
       fetch('/api/find-item-stock', {
         method: 'POST',
@@ -3887,75 +3869,23 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
       })
       .then(r => r.json())
       .then(result => {
-        src.disabled = false;
-        src.innerHTML = '<option value="">-- Select source storage --</option>';
-
+        // Auto-select the found location in the hardcoded dropdown
         if (result.locations && result.locations.length > 0) {
-          result.locations.forEach(loc => {
-            const o = document.createElement('option');
-            o.value = loc.storageId;
-            o.dataset.name = loc.storageName;
-            o.textContent = `${loc.storageName} (${loc.quantity} in stock)`;
-            src.appendChild(o);
-          });
-          // Auto-select if only one location
-          if (result.locations.length === 1) {
-            src.selectedIndex = 1;
-          }
-          // If pre-known storage, try to select it
-          if (_preKnownStorageId) {
-            for (let i = 0; i < src.options.length; i++) {
-              if (String(src.options[i].value) === String(_preKnownStorageId)) {
-                src.selectedIndex = i;
-                break;
-              }
+          const bestLoc = result.locations[0]; // highest qty first
+          const tryId = _preKnownStorageId || String(bestLoc.storageId);
+          for (let i = 0; i < src.options.length; i++) {
+            if (String(src.options[i].value) === tryId) {
+              src.selectedIndex = i;
+              break;
             }
           }
-          foundMsg.style.display = 'block';
-          foundMsg.style.background = '#e8f5e9';
-          foundMsg.style.color = '#2e7d32';
-          foundMsg.textContent = `✅ Found in ${result.locations.length} location${result.locations.length > 1 ? 's' : ''}`;
+          if (foundMsg) { foundMsg.style.display = 'block'; foundMsg.style.background = '#e8f5e9'; foundMsg.style.color = '#2e7d32'; foundMsg.textContent = `✅ Found in: ${bestLoc.storageName} (${bestLoc.quantity} available) — pre-selected`; }
         } else {
-          // Not found — let user pick manually from all locations
-          src.innerHTML = '<option value="">-- Select source storage (not found automatically) --</option>';
-          fetch('/api/storage-locations', { credentials: 'include' })
-            .then(r => r.json())
-            .then(locs => {
-              const locations = Array.isArray(locs) ? locs : (locs.locations || []);
-              locations.forEach(loc => {
-                const o = document.createElement('option');
-                o.value = loc.ID || loc.id || '';
-                o.dataset.name = loc.Name || loc.name || '';
-                o.textContent = loc.Name || loc.name || '';
-                src.appendChild(o);
-              });
-            }).catch(() => {});
-          foundMsg.style.display = 'block';
-          foundMsg.style.background = '#fff8e1';
-          foundMsg.style.color = '#f57f17';
-          foundMsg.textContent = '⚠️ Item not found in stock — select source manually';
+          if (foundMsg) { foundMsg.style.display = 'block'; foundMsg.style.background = '#fff8e1'; foundMsg.style.color = '#f57f17'; foundMsg.textContent = '⚠️ Item not found automatically — select source manually'; }
         }
       })
       .catch(() => {
-        src.disabled = false;
-        src.innerHTML = '<option value="">-- Select source storage --</option>';
-        // Fallback to all locations
-        fetch('/api/storage-locations', { credentials: 'include' })
-          .then(r => r.json())
-          .then(locs => {
-            const locations = Array.isArray(locs) ? locs : (locs.locations || []);
-            locations.forEach(loc => {
-              const o = document.createElement('option');
-              o.value = loc.ID || loc.id || '';
-              o.dataset.name = loc.Name || loc.name || '';
-              o.textContent = loc.Name || loc.name || '';
-              src.appendChild(o);
-            });
-          }).catch(() => {});
-        foundMsg.style.display = 'block';
-        foundMsg.style.background = '#fff8e1';
-        foundMsg.style.color = '#f57f17';
-        foundMsg.textContent = '⚠️ Could not search — select source manually';
+        if (foundMsg) { foundMsg.style.display = 'none'; }
       });
     }
   },
