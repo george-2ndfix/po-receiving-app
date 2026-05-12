@@ -11,6 +11,137 @@ import secrets
 import sqlite3
 import uuid
 import concurrent.futures
+
+# ============ STOCK CACHE (v106) ============
+import threading
+
+_stock_cache = {}        # {catalog_id: [{storageId, storageName, availableQty}]}
+_stock_cache_lock = threading.Lock()
+_stock_cache_built_at = 0  # timestamp
+_stock_cache_ttl = 300     # 5 minutes
+_stock_cache_building = False
+
+def _build_stock_cache():
+    """Scan all storage devices and build full stock index. ~40 sec first time."""
+    global _stock_cache, _stock_cache_built_at, _stock_cache_building
+    import time as _time
+    
+    _stock_cache_building = True
+    print("[stock-cache] Building stock cache...")
+    start = _time.time()
+    
+    try:
+        token = get_simpro_token()
+        headers = {"Authorization": f"Bearer {token}"}
+        
+        # Get all storage devices
+        storage_resp = requests.get(
+            f"{SIMPRO_BASE_URL}/companies/{COMPANY_ID}/storageDevices/?pageSize=250",
+            headers=headers, timeout=15
+        )
+        if storage_resp.status_code != 200:
+            print(f"[stock-cache] Failed to get storage devices: {storage_resp.status_code}")
+            _stock_cache_building = False
+            return
+        
+        all_storage = storage_resp.json()
+        if not isinstance(all_storage, list):
+            all_storage = []
+        
+        SKIP_NAMES = {"Delivered to Site", "On Site", "Customer Collected", "PICK UP FROM SUPPLIER", "Delivery by Supplier"}
+        physical_storage = [d for d in all_storage if d.get("Name", "") not in SKIP_NAMES]
+        
+        new_cache = {}
+        
+        def fetch_device_stock(device):
+            dev_id = device.get("ID")
+            dev_name = device.get("Name", f"Storage {dev_id}")
+            if not dev_id:
+                return []
+            try:
+                t = get_simpro_token()
+                url = f"{SIMPRO_BASE_URL}/companies/{COMPANY_ID}/storageDevices/{dev_id}/stock/?pageSize=250"
+                resp = requests.get(url, headers={"Authorization": f"Bearer {t}"}, timeout=10)
+                if resp.status_code != 200:
+                    return []
+                items = resp.json()
+                if not isinstance(items, list):
+                    return []
+                results = []
+                for s in items:
+                    cat = s.get("Catalog", {})
+                    c_id = cat.get("ID")
+                    if c_id:
+                        qty = s.get("InventoryCount", 0) or s.get("Quantity", 0) or 0
+                        if isinstance(qty, dict):
+                            qty = qty.get("Available", 0) or qty.get("Quantity", 0) or 0
+                        if qty and qty > 0:
+                            results.append({"catalogId": c_id, "storageId": dev_id, "storageName": dev_name, "availableQty": qty})
+                return results
+            except Exception as e:
+                print(f"[stock-cache] Error fetching device {dev_id}: {e}")
+                return []
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=30) as executor:
+            futures = {executor.submit(fetch_device_stock, dev): dev for dev in physical_storage}
+            for future in concurrent.futures.as_completed(futures, timeout=120):
+                try:
+                    results = future.result(timeout=15)
+                    for r in results:
+                        cid = r["catalogId"]
+                        if cid not in new_cache:
+                            new_cache[cid] = []
+                        new_cache[cid].append({
+                            "storageId": r["storageId"],
+                            "storageName": r["storageName"],
+                            "availableQty": r["availableQty"]
+                        })
+                except Exception as e:
+                    print(f"[stock-cache] Future error: {e}")
+        
+        with _stock_cache_lock:
+            _stock_cache = new_cache
+            _stock_cache_built_at = _time.time()
+        
+        elapsed = _time.time() - start
+        total_items = sum(len(v) for v in new_cache.values())
+        print(f"[stock-cache] Cache built in {elapsed:.1f}s - {len(new_cache)} catalog items across {total_items} locations")
+        
+    except Exception as e:
+        print(f"[stock-cache] Error building cache: {e}")
+    finally:
+        _stock_cache_building = False
+
+
+def _get_stock_cache():
+    """Get the stock cache, rebuilding if expired or empty."""
+    import time as _time
+    global _stock_cache_built_at
+    
+    now = _time.time()
+    if now - _stock_cache_built_at > _stock_cache_ttl or not _stock_cache:
+        _build_stock_cache()
+    
+    with _stock_cache_lock:
+        # Return a deep copy so callers dont mutate the cache
+        import copy
+        return copy.deepcopy(_stock_cache)
+
+
+def _deduct_from_cache(catalog_id, storage_id, quantity):
+    """Deduct quantity from cache after allocation. Updates in-place."""
+    with _stock_cache_lock:
+        if catalog_id in _stock_cache:
+            for loc in _stock_cache[catalog_id]:
+                if loc["storageId"] == storage_id:
+                    loc["availableQty"] = max(0, loc["availableQty"] - quantity)
+                    if loc["availableQty"] == 0:
+                        _stock_cache[catalog_id].remove(loc)
+                    print(f"[stock-cache] Deducted {quantity} of catalog {catalog_id} from storage {storage_id}, remaining: {loc.get('availableQty', 0)}")
+                    return
+        print(f"[stock-cache] Warning: catalog {catalog_id} / storage {storage_id} not found in cache")
+
+# ============ END STOCK CACHE ============
 from datetime import datetime, timedelta
 from functools import wraps
 from flask import Flask, request, jsonify, send_from_directory, send_file, session
@@ -2703,74 +2834,17 @@ def job_stock_search():
 
         print(f"[job-stock-search] Found {len(job_materials)} needed materials, scanning storage devices...")
 
-        # 4. Get all storage devices
-        storage_resp = simpro_request("GET", f"/companies/{COMPANY_ID}/storageDevices/?pageSize=250")
-        if storage_resp.status_code != 200:
-            return jsonify({"error": "Failed to get storage devices"}), 500
-        all_storage = storage_resp.json()
-        if not isinstance(all_storage, list):
-            all_storage = []
-
         # Build catalog IDs we need to find
         needed_catalog_ids = set(m["catalogId"] for m in job_materials)
 
-        # Pre-warm the token cache before parallel requests
-        get_simpro_token()
-
-        # 5. Query storage devices in parallel for matching catalog IDs
-        # Skip virtual/non-physical locations to stay under Render's 30s timeout
-        SKIP_NAMES = {"Delivered to Site", "On Site", "Customer Collected", "PICK UP FROM SUPPLIER", "Delivery by Supplier"}
-        physical_storage = [d for d in all_storage if d.get("Name", "") not in SKIP_NAMES]
-        print(f"[job-stock-search] Scanning {len(physical_storage)} storage devices (skipped {len(all_storage) - len(physical_storage)} virtual)")
-
-        catalog_stock_map = {}  # catalog_id -> [{storage_id, storage_name, available_qty}]
-
-        def fetch_storage_stock(device):
-            dev_id = device.get("ID")
-            dev_name = device.get("Name", f"Storage {dev_id}")
-            if not dev_id:
-                return []
-            try:
-                token = get_simpro_token()
-                url = f"{SIMPRO_BASE_URL}/companies/{COMPANY_ID}/storageDevices/{dev_id}/stock/?pageSize=250"
-                resp = requests.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=10)
-                if resp.status_code != 200:
-                    return []
-                items = resp.json()
-                if not isinstance(items, list):
-                    return []
-                results = []
-                for s in items:
-                    cat = s.get("Catalog", {})
-                    c_id = cat.get("ID")
-                    if c_id in needed_catalog_ids:
-                        # Storage device stock uses InventoryCount, not Quantity
-                        qty = s.get("InventoryCount", 0) or s.get("Quantity", 0) or 0
-                        if isinstance(qty, dict):
-                            qty = qty.get("Available", 0) or qty.get("Quantity", 0) or 0
-                        if qty and qty > 0:
-                            results.append({"catalogId": c_id, "storageId": dev_id, "storageName": dev_name, "availableQty": qty})
-                return results
-            except Exception as e:
-                print(f"[job-stock-search] Error fetching stock for device {dev_id}: {e}")
-                return []
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=30) as executor:
-            futures = {executor.submit(fetch_storage_stock, dev): dev for dev in physical_storage}
-            for future in concurrent.futures.as_completed(futures, timeout=90):
-                try:
-                    results = future.result(timeout=15)
-                    for r in results:
-                        cid = r["catalogId"]
-                        if cid not in catalog_stock_map:
-                            catalog_stock_map[cid] = []
-                        catalog_stock_map[cid].append({
-                            "storageId": r["storageId"],
-                            "storageName": r["storageName"],
-                            "availableQty": r["availableQty"]
-                        })
-                except Exception as e:
-                    print(f"[job-stock-search] Future error: {e}")
+        # 5. Use stock cache instead of scanning all devices every time
+        print(f"[job-stock-search] Looking up {len(needed_catalog_ids)} catalog items in stock cache...")
+        stock_cache = _get_stock_cache()
+        
+        catalog_stock_map = {}
+        for cat_id in needed_catalog_ids:
+            if cat_id in stock_cache:
+                catalog_stock_map[cat_id] = stock_cache[cat_id]
 
         # 6. Match job materials with available stock
         matched_items = []
@@ -2884,6 +2958,9 @@ def allocate_from_stock_v2():
 
                 result_entry["success"] = True
                 result_entry["message"] = f"Moved {quantity} from {src_name} to {dest_storage_name}"
+
+                # Update stock cache in-place (deduct from source)
+                _deduct_from_cache(int(cat_id), int(src_id), int(quantity))
 
                 # Log to allocation_log if table exists
                 try:
