@@ -1897,17 +1897,129 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                 <div style="display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap;justify-content:center;">
                     <a href="${url}" download="labels.pdf" style="padding:12px 24px;background:#2563eb;color:white;border-radius:8px;text-decoration:none;font-size:16px;font-weight:600;">\u2b07\ufe0f Download PDF</a>
                     <button onclick="window.open('${url}','_blank')" style="padding:12px 24px;background:#059669;color:white;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">\ud83d\udda8\ufe0f Open to Print</button>
+                    <button id="print-later-btn" style="padding:12px 24px;background:#f59e0b;color:white;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">\ud83d\udce5 Print Later</button>
                     <button onclick="document.getElementById('label-overlay').style.display='none'" style="padding:12px 24px;background:#dc2626;color:white;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">\u2716 Close</button>
                 </div>
                 <iframe src="${url}" style="flex:1;width:100%;max-width:600px;border:none;border-radius:8px;background:white;"></iframe>
             `;
             
+            // Wire up Print Later button
+            const printLaterBtn = document.getElementById('print-later-btn');
+            if (printLaterBtn) {
+                printLaterBtn.onclick = () => {
+                    const desc = items.length > 0 ? ('Job ' + (items[0].jobNumber || 'N/A') + ' - PO ' + poNumber) : 'Labels';
+                    this.saveLabelsToPrintQueue(labels, desc);
+                    document.getElementById('label-overlay').style.display = 'none';
+                };
+            }
+
             // Clean up blob URL after 5 minutes
             setTimeout(() => URL.revokeObjectURL(url), 300000);
             
         } catch (err) {
-            alert('Label error: ' + err.message);
+            // If offline or server error, auto-save to print queue
             console.error('Label PDF error:', err);
+            const desc = items.length > 0 ? ('Job ' + (items[0].jobNumber || 'N/A') + ' - PO ' + poNumber) : 'Labels';
+            this.saveLabelsToPrintQueue(labels, desc);
+        }
+    },
+
+    // ============================================
+    // Print Later Queue
+    // ============================================
+    saveLabelsToPrintQueue(labels, description) {
+        const queue = JSON.parse(localStorage.getItem('label_print_queue') || '[]');
+        queue.push({
+            labels: labels,
+            description: description || 'Labels',
+            savedAt: new Date().toISOString(),
+            id: Date.now().toString(36)
+        });
+        localStorage.setItem('label_print_queue', JSON.stringify(queue));
+        this.updatePrintQueueBadge();
+        alert('\u2705 Labels saved to print queue. Tap the printer icon when you\'re back on WiFi.');
+    },
+
+    getPrintQueue() {
+        return JSON.parse(localStorage.getItem('label_print_queue') || '[]');
+    },
+
+    updatePrintQueueBadge() {
+        const queue = this.getPrintQueue();
+        let badge = document.getElementById('print-queue-badge');
+        if (!badge) {
+            // Create floating badge
+            badge = document.createElement('button');
+            badge.id = 'print-queue-badge';
+            badge.onclick = () => this.showPrintQueue();
+            document.body.appendChild(badge);
+        }
+        if (queue.length > 0) {
+            badge.style.display = 'flex';
+            badge.innerHTML = '\ud83d\udda8\ufe0f ' + queue.length;
+        } else {
+            badge.style.display = 'none';
+        }
+    },
+
+    async showPrintQueue() {
+        const queue = this.getPrintQueue();
+        if (queue.length === 0) {
+            alert('Print queue is empty.');
+            return;
+        }
+
+        // Combine all queued labels into one PDF
+        const allLabels = [];
+        const descriptions = [];
+        for (const item of queue) {
+            allLabels.push(...item.labels);
+            descriptions.push(item.description);
+        }
+
+        try {
+            const response = await this.authFetch('/api/label-pdf', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ labels: allLabels })
+            });
+
+            if (!response.ok) {
+                throw new Error('Still offline or server error. Try again when connected to WiFi.');
+            }
+
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+
+            var overlay = document.getElementById('label-overlay');
+            if (!overlay) {
+                overlay = document.createElement('div');
+                overlay.id = 'label-overlay';
+                overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:10000;display:flex;flex-direction:column;align-items:center;padding:10px;';
+                document.body.appendChild(overlay);
+            }
+            overlay.style.display = 'flex';
+            overlay.innerHTML = `
+                <div style="color:white;font-size:14px;margin-bottom:8px;text-align:center;">
+                    \ud83d\udda8\ufe0f Print Queue: ${allLabels.length} label(s) from ${queue.length} job(s)
+                </div>
+                <div style="display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap;justify-content:center;">
+                    <a href="${url}" download="print_queue_labels.pdf" style="padding:12px 24px;background:#2563eb;color:white;border-radius:8px;text-decoration:none;font-size:16px;font-weight:600;">\u2b07\ufe0f Download PDF</a>
+                    <button onclick="window.open('${url}','_blank')" style="padding:12px 24px;background:#059669;color:white;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">\ud83d\udda8\ufe0f Open to Print</button>
+                    <button id="clear-queue-btn" style="padding:12px 24px;background:#dc2626;color:white;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">\u2716 Done - Clear Queue</button>
+                </div>
+                <iframe src="${url}" style="flex:1;width:100%;max-width:600px;border:none;border-radius:8px;background:white;"></iframe>
+            `;
+            document.getElementById('clear-queue-btn').onclick = () => {
+                localStorage.setItem('label_print_queue', '[]');
+                this.updatePrintQueueBadge();
+                overlay.style.display = 'none';
+                URL.revokeObjectURL(url);
+            };
+
+            setTimeout(() => URL.revokeObjectURL(url), 300000);
+        } catch (err) {
+            alert('\u274c ' + err.message);
         }
     },
     

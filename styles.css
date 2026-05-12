@@ -3112,3 +3112,28 @@ footer {
     color: #1a73e8;
     font-weight: 500;
 }
+
+/* Print Queue Badge */
+#print-queue-badge {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: #2563eb;
+    color: white;
+    border: none;
+    border-radius: 50px;
+    padding: 12px 20px;
+    font-size: 18px;
+    font-weight: 700;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    z-index: 9999;
+    display: none;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    animation: pulse-badge 2s infinite;
+}
+@keyframes pulse-badge {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.08); }
+}
