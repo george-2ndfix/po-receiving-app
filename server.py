@@ -721,85 +721,126 @@ def generate_labels():
 
 @app.route('/api/label-pdf', methods=['POST'])
 @login_required
-def generate_label_pdf():
-    """Generate PDF labels for QL-810W DK-2225 38mm tape - LANDSCAPE orientation."""
+def label_pdf():
+    """Generate label PDF for QL-810W printer - landscape, DK-2225 38mm tape."""
     try:
-        from reportlab.lib.units import mm
-        from reportlab.pdfgen import canvas
-        from reportlab.pdfbase.pdfmetrics import stringWidth
-        
         data = request.get_json()
-        if not data or 'labels' not in data:
-            return jsonify({'error': 'Missing labels'}), 400
-        labels = data['labels']
-        if not labels:
-            return jsonify({'error': 'No labels'}), 400
+        if not data or 'items' not in data:
+            return jsonify({'error': 'Missing items'}), 400
         
-        # QL-810W DK-2225: 38mm wide continuous tape
-        # LANDSCAPE: label width = tape feed length, label height = 38mm tape width
-        TAPE_WIDTH = 38 * mm      # Fixed by physical tape
-        ITEM_LABEL_W = 90 * mm    # Length of tape per item label
-        FILING_LABEL_W = 70 * mm  # Shorter filing label
-        MARGIN = 2 * mm
+        items = data['items']
+        po_number = data.get('poNumber', 'N/A')
+        job_number = data.get('jobNumber', '')
+        customer_name = data.get('customerName', '')
+        today = datetime.now().strftime('%d/%m/%Y')
         
-        buffer = io.BytesIO()
+        from reportlab.lib.pagesizes import mm
+        from reportlab.pdfgen import canvas as pdf_canvas
+        from reportlab.lib.utils import simpleSplit
         
-        # Each label = one page (landscape on 38mm tape)
-        c = canvas.Canvas(buffer)
+        # Label dimensions - 38mm tape, 120mm long for more room
+        LABEL_W = 120 * mm
+        LABEL_H = 38 * mm
         
-        for i, label in enumerate(labels):
-            is_filing = label.get('type') == 'filing'
-            lw = FILING_LABEL_W if is_filing else ITEM_LABEL_W
-            lh = TAPE_WIDTH
+        buf = io.BytesIO()
+        c = pdf_canvas.Canvas(buf, pagesize=(LABEL_W, LABEL_H))
+        
+        for item in items:
+            part_no = item.get('partNo', '')
+            description = item.get('description', '')
+            quantity = item.get('quantity', 0)
+            storage = item.get('storageLocation', '')
+            item_job = item.get('jobNumber', job_number)
+            item_customer = item.get('customerName', customer_name)
             
-            c.setPageSize((lw, lh))
+            y = LABEL_H - 4 * mm  # Start near top
+            x = 3 * mm
+            max_w = LABEL_W - 6 * mm
             
-            line1 = label.get('line1', '') or ''
-            line2 = label.get('line2', '') or ''
-            line3 = label.get('line3', '') or ''
+            # LINE 1: Job number (large, bold)
+            c.setFont("Helvetica-Bold", 14)
+            job_text = f"Job {item_job}" if item_job else ""
+            c.drawString(x, y, job_text)
+            job_w = c.stringWidth(job_text, "Helvetica-Bold", 14)
             
-            avail_w = lw - 2 * MARGIN
+            # Customer name next to job (regular, slightly smaller)
+            if item_customer:
+                c.setFont("Helvetica", 11)
+                c.drawString(x + job_w + 3*mm, y, item_customer)
             
-            def _trunc(text, font, size, max_w):
-                if not text: return ''
-                if stringWidth(text, font, size) <= max_w: return text
-                t = text
-                while t and stringWidth(t + '...', font, size) > max_w:
-                    t = t[:-1]
-                return t + '...'
+            # LINE 2: Part code (bold) + description
+            y -= 11 * mm
+            c.setFont("Helvetica-Bold", 12)
+            c.drawString(x, y, part_no)
+            part_w = c.stringWidth(part_no, "Helvetica-Bold", 12)
             
-            # Draw border
-            c.setStrokeColorRGB(0.7, 0.7, 0.7)
-            c.setLineWidth(0.5)
-            c.rect(0.5, 0.5, lw - 1, lh - 1)
-            c.setFillColorRGB(0, 0, 0)
+            # Description in regular - fit remaining space
+            if description:
+                c.setFont("Helvetica", 9)
+                desc_x = x + part_w + 2*mm
+                avail = max_w - part_w - 2*mm
+                # Truncate if needed
+                desc = description
+                while desc and c.stringWidth(desc, "Helvetica", 9) > avail:
+                    desc = desc[:-1]
+                if desc != description and len(desc) > 3:
+                    desc = desc[:-3] + "..."
+                c.drawString(desc_x, y, desc)
             
-            if is_filing:
-                # Filing label: 3 lines, slightly smaller
-                c.setFont("Helvetica-Bold", 9)
-                c.drawString(MARGIN, lh - 10 * mm, _trunc("FILE: " + line1, "Helvetica-Bold", 9, avail_w))
-                c.setFont("Helvetica", 8)
-                c.drawString(MARGIN, lh - 18 * mm, _trunc(line2, "Helvetica", 8, avail_w))
-                if line3:
-                    c.drawString(MARGIN, lh - 26 * mm, _trunc(line3, "Helvetica", 8, avail_w))
-            else:
-                # Item label: Job/customer line, part number (bold), qty/location/date
-                c.setFont("Helvetica-Bold", 8)
-                c.drawString(MARGIN, lh - 9 * mm, _trunc(line1, "Helvetica-Bold", 8, avail_w))
-                c.setFont("Helvetica-Bold", 10)
-                c.drawString(MARGIN, lh - 19 * mm, _trunc(line2, "Helvetica-Bold", 10, avail_w))
-                c.setFont("Helvetica", 8)
-                c.drawString(MARGIN, lh - 28 * mm, _trunc(line3, "Helvetica", 8, avail_w))
+            # LINE 3: Qty | Storage | Date | PO
+            y -= 9 * mm
+            c.setFont("Helvetica", 10)
+            parts = []
+            parts.append(f"Qty: {quantity}")
+            if storage:
+                parts.append(storage)
+            parts.append(today)
+            parts.append(f"PO {po_number}")
+            line3 = "    ".join(parts)
+            c.drawString(x, y, line3)
+            
+            c.showPage()
+        
+        # Filing label (last page) - compact summary
+        if job_number:
+            c.setFont("Helvetica-Bold", 14)
+            y = LABEL_H - 4 * mm
+            x = 3 * mm
+            c.drawString(x, y, f"Job {job_number}")
+            job_w = c.stringWidth(f"Job {job_number}", "Helvetica-Bold", 14)
+            
+            c.setFont("Helvetica-Bold", 11)
+            c.drawString(x + job_w + 3*mm, y, f"PO {po_number}")
+            
+            y -= 11 * mm
+            c.setFont("Helvetica", 11)
+            if customer_name:
+                c.drawString(x, y, customer_name)
+            
+            y -= 9 * mm
+            c.setFont("Helvetica", 10)
+            storage_loc = items[0].get('storageLocation', '') if items else ''
+            filing_parts = []
+            if storage_loc:
+                filing_parts.append(f"Storage: {storage_loc}")
+            filing_parts.append(today)
+            c.drawString(x, y, "    ".join(filing_parts))
             
             c.showPage()
         
         c.save()
-        buffer.seek(0)
-        return send_file(buffer, mimetype='application/pdf', download_name='labels.pdf')
+        buf.seek(0)
+        
+        return send_file(
+            buf,
+            mimetype='application/pdf',
+            as_attachment=False,
+            download_name=f'labels_PO_{po_number}.pdf'
+        )
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        print(f"[{datetime.now()}] Label PDF error: {e}")
         return jsonify({'error': str(e)}), 500
+
 
 @app.route('/')
 def serve_index():
