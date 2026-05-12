@@ -2631,7 +2631,15 @@ def job_stock_search():
         # Build catalog IDs we need to find
         needed_catalog_ids = set(m["catalogId"] for m in job_materials)
 
-        # 5. Query ALL storage devices in parallel for stock
+        # Pre-warm the token cache before parallel requests
+        get_simpro_token()
+
+        # 5. Query storage devices in parallel for matching catalog IDs
+        # Skip virtual/non-physical locations to stay under Render's 30s timeout
+        SKIP_NAMES = {"Delivered to Site", "On Site", "Customer Collected", "PICK UP FROM SUPPLIER", "Delivery by Supplier"}
+        physical_storage = [d for d in all_storage if d.get("Name", "") not in SKIP_NAMES]
+        print(f"[job-stock-search] Scanning {len(physical_storage)} storage devices (skipped {len(all_storage) - len(physical_storage)} virtual)")
+
         catalog_stock_map = {}  # catalog_id -> [{storage_id, storage_name, available_qty}]
 
         def fetch_storage_stock(device):
@@ -2640,7 +2648,9 @@ def job_stock_search():
             if not dev_id:
                 return []
             try:
-                resp = simpro_request("GET", f"/companies/{COMPANY_ID}/storageDevices/{dev_id}/stock/?pageSize=250")
+                token = get_simpro_token()
+                url = f"{SIMPRO_BASE_URL}/companies/{COMPANY_ID}/storageDevices/{dev_id}/stock/?pageSize=250"
+                resp = requests.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=10)
                 if resp.status_code != 200:
                     return []
                 items = resp.json()
@@ -2661,11 +2671,11 @@ def job_stock_search():
                 print(f"[job-stock-search] Error fetching stock for device {dev_id}: {e}")
                 return []
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
-            futures = {executor.submit(fetch_storage_stock, dev): dev for dev in all_storage}
-            for future in concurrent.futures.as_completed(futures):
+        with concurrent.futures.ThreadPoolExecutor(max_workers=30) as executor:
+            futures = {executor.submit(fetch_storage_stock, dev): dev for dev in physical_storage}
+            for future in concurrent.futures.as_completed(futures, timeout=20):
                 try:
-                    results = future.result()
+                    results = future.result(timeout=12)
                     for r in results:
                         cid = r["catalogId"]
                         if cid not in catalog_stock_map:
