@@ -60,15 +60,22 @@ def _build_stock_cache():
                 return []
             try:
                 t = get_simpro_token()
-                url = f"{SIMPRO_BASE_URL}/companies/{COMPANY_ID}/storageDevices/{dev_id}/stock/?pageSize=250"
-                resp = requests.get(url, headers={"Authorization": f"Bearer {t}"}, timeout=10)
-                if resp.status_code != 200:
-                    return []
-                items = resp.json()
-                if not isinstance(items, list):
-                    return []
+                all_items = []
+                page = 1
+                while True:
+                    url = f"{SIMPRO_BASE_URL}/companies/{COMPANY_ID}/storageDevices/{dev_id}/stock/?pageSize=250&page={page}"
+                    resp = requests.get(url, headers={"Authorization": f"Bearer {t}"}, timeout=15)
+                    if resp.status_code != 200:
+                        break
+                    items = resp.json()
+                    if not isinstance(items, list) or not items:
+                        break
+                    all_items.extend(items)
+                    if len(items) < 250:
+                        break
+                    page += 1
                 results = []
-                for s in items:
+                for s in all_items:
                     cat = s.get("Catalog", {})
                     c_id = cat.get("ID")
                     if c_id:
