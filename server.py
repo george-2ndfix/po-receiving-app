@@ -736,95 +736,146 @@ def label_pdf():
         
         from reportlab.lib.pagesizes import mm
         from reportlab.pdfgen import canvas as pdf_canvas
-        from reportlab.lib.utils import simpleSplit
+        from reportlab.pdfbase.pdfmetrics import stringWidth
         
-        # Label dimensions - 38mm tape, 120mm long for more room
-        LABEL_W = 120 * mm
         LABEL_H = 38 * mm
+        ITEM_W = 120 * mm
+        MIN_W = 50 * mm
+        MAX_W = 120 * mm
+        MARGIN = 3 * mm
+        
+        def calc_width(texts_fonts):
+            max_text_w = 0
+            for text, fn, fs in texts_fonts:
+                w = stringWidth(text, fn, fs)
+                if w > max_text_w:
+                    max_text_w = w
+            return min(MAX_W, max(MIN_W, max_text_w + MARGIN * 2 + 2*mm))
+        
+        def wrap_text(text, font_name, font_size, max_w):
+            words = text.split()
+            lines = []
+            current = ""
+            for word in words:
+                test = f"{current} {word}".strip()
+                if stringWidth(test, font_name, font_size) <= max_w:
+                    current = test
+                else:
+                    if current:
+                        lines.append(current)
+                    current = word
+            if current:
+                lines.append(current)
+            return lines if lines else [""]
         
         buf = io.BytesIO()
-        c = pdf_canvas.Canvas(buf, pagesize=(LABEL_W, LABEL_H))
+        c = pdf_canvas.Canvas(buf)
         
         for item in items:
             part_no = item.get('partNo', '')
-            description = item.get('description', '')
-            quantity = item.get('quantity', 0)
+            desc = item.get('description', '')
+            qty = item.get('quantity', 0)
             storage = item.get('storageLocation', '')
             item_job = item.get('jobNumber', job_number)
             item_customer = item.get('customerName', customer_name)
             
-            y = LABEL_H - 4 * mm  # Start near top
-            x = 3 * mm
-            max_w = LABEL_W - 6 * mm
-            
-            # LINE 1: Job number (large, bold)
-            c.setFont("Helvetica-Bold", 14)
-            job_text = f"Job {item_job}" if item_job else ""
-            c.drawString(x, y, job_text)
-            job_w = c.stringWidth(job_text, "Helvetica-Bold", 14)
-            
-            # Customer name next to job (regular, slightly smaller)
-            if item_customer:
-                c.setFont("Helvetica", 11)
-                c.drawString(x + job_w + 3*mm, y, item_customer)
-            
-            # LINE 2: Part code (bold) + description
-            y -= 11 * mm
-            c.setFont("Helvetica-Bold", 12)
-            c.drawString(x, y, part_no)
-            part_w = c.stringWidth(part_no, "Helvetica-Bold", 12)
-            
-            # Description in regular - fit remaining space
-            if description:
-                c.setFont("Helvetica", 9)
-                desc_x = x + part_w + 2*mm
-                avail = max_w - part_w - 2*mm
-                # Truncate if needed
-                desc = description
-                while desc and c.stringWidth(desc, "Helvetica", 9) > avail:
-                    desc = desc[:-1]
-                if desc != description and len(desc) > 3:
-                    desc = desc[:-3] + "..."
-                c.drawString(desc_x, y, desc)
-            
-            # LINE 3: Qty | Storage | Date | PO
-            y -= 9 * mm
-            c.setFont("Helvetica", 10)
-            parts = []
-            parts.append(f"Qty: {quantity}")
+            line1 = f"Job {item_job}  {item_customer}" if item_job else item_customer
+            bottom_parts = [f"Qty: {qty}"]
             if storage:
-                parts.append(storage)
-            parts.append(today)
-            parts.append(f"PO {po_number}")
-            line3 = "    ".join(parts)
-            c.drawString(x, y, line3)
+                bottom_parts.append(storage)
+            bottom_parts.append(today)
+            bottom_parts.append(f"PO {po_number}")
+            line_bottom = "    ".join(bottom_parts)
+            
+            content_w = ITEM_W - MARGIN * 2
+            part_w_px = stringWidth(part_no + "  ", "Helvetica-Bold", 12)
+            desc_avail = content_w - part_w_px
+            
+            desc_inline = desc and stringWidth(desc, "Helvetica", 9) <= desc_avail
+            if desc and not desc_inline:
+                desc_lines = wrap_text(desc, "Helvetica", 9, content_w)
+            else:
+                desc_lines = [desc] if desc else []
+            
+            line1_h = 14 * 0.3528
+            line2_h = 12 * 0.3528
+            line3_h = 10 * 0.3528
+            gap = 3
+            extra_wrap = len(desc_lines) * 4 if not desc_inline and desc_lines else 0
+            total_block_h = line1_h + gap + line2_h + extra_wrap + gap + line3_h
+            
+            label_h = LABEL_H
+            needed = total_block_h + 6
+            if needed > LABEL_H / mm:
+                label_h = needed * mm
+            
+            c.setPageSize((ITEM_W, label_h))
+            top_margin = (label_h / mm - total_block_h) / 2
+            
+            x = MARGIN
+            y = label_h - top_margin * mm
+            
+            c.setFont("Helvetica-Bold", 14)
+            y -= line1_h * mm
+            c.drawString(x, y, line1)
+            
+            y -= gap * mm
+            c.setFont("Helvetica-Bold", 12)
+            y -= line2_h * mm
+            c.drawString(x, y, part_no)
+            
+            if desc_inline and desc_lines:
+                c.setFont("Helvetica", 9)
+                c.drawString(x + part_w_px, y, desc_lines[0])
+            elif desc_lines:
+                c.setFont("Helvetica", 9)
+                for dl in desc_lines:
+                    y -= 4 * mm
+                    c.drawString(x, y, dl)
+            
+            y -= gap * mm
+            c.setFont("Helvetica", 10)
+            y -= line3_h * mm
+            c.drawString(x, y, line_bottom)
             
             c.showPage()
         
-        # Filing label (last page) - compact summary
         if job_number:
-            c.setFont("Helvetica-Bold", 14)
-            y = LABEL_H - 4 * mm
-            x = 3 * mm
-            c.drawString(x, y, f"Job {job_number}")
-            job_w = c.stringWidth(f"Job {job_number}", "Helvetica-Bold", 14)
-            
-            c.setFont("Helvetica-Bold", 11)
-            c.drawString(x + job_w + 3*mm, y, f"PO {po_number}")
-            
-            y -= 11 * mm
-            c.setFont("Helvetica", 11)
-            if customer_name:
-                c.drawString(x, y, customer_name)
-            
-            y -= 9 * mm
-            c.setFont("Helvetica", 10)
+            filing_line1 = f"Job {job_number}  PO {po_number}"
+            filing_line2 = customer_name
             storage_loc = items[0].get('storageLocation', '') if items else ''
-            filing_parts = []
-            if storage_loc:
-                filing_parts.append(f"Storage: {storage_loc}")
-            filing_parts.append(today)
-            c.drawString(x, y, "    ".join(filing_parts))
+            filing_line3 = f"Storage: {storage_loc}  {today}" if storage_loc else today
+            
+            filing_w = calc_width([
+                (filing_line1, "Helvetica-Bold", 14),
+                (filing_line2, "Helvetica", 11),
+                (filing_line3, "Helvetica", 10),
+            ])
+            
+            c.setPageSize((filing_w, LABEL_H))
+            
+            fl1_h = 14 * 0.3528
+            fl2_h = 11 * 0.3528
+            fl3_h = 10 * 0.3528
+            total_f = fl1_h + gap + fl2_h + gap + fl3_h
+            top_f = (LABEL_H / mm - total_f) / 2
+            
+            x = MARGIN
+            y = LABEL_H - top_f * mm
+            
+            c.setFont("Helvetica-Bold", 14)
+            y -= fl1_h * mm
+            c.drawString(x, y, filing_line1)
+            
+            y -= gap * mm
+            c.setFont("Helvetica", 11)
+            y -= fl2_h * mm
+            c.drawString(x, y, filing_line2)
+            
+            y -= gap * mm
+            c.setFont("Helvetica", 10)
+            y -= fl3_h * mm
+            c.drawString(x, y, filing_line3)
             
             c.showPage()
         
