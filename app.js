@@ -2079,14 +2079,14 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             return;
         }
         
-        resultsEl.innerHTML = '<p class="hint">🔍 Looking up job ' + jobNumber + '...</p>';
+        resultsEl.innerHTML = '<p class="hint">\ud83d\udd0d Searching job ' + jobNumber + ' for stock matches...</p>';
+        this._stockSearchMode = 'job_v2';
         
         try {
-            this._stockSearchMode = 'job';
-            const response = await this.authFetch('/api/stock-search', {
+            const response = await this.authFetch('/api/job-stock-search', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ searchType: 'job', searchValue: jobNumber })
+                body: JSON.stringify({ jobId: jobNumber })
             });
             
             const data = await response.json();
@@ -2096,169 +2096,106 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                 return;
             }
             
+            // Store search data for allocation
+            this._jobStockData = data;
+            this.stockSelectedItems = [];
+            
             let html = '';
             
             // Job info banner
             if (data.job) {
                 html += '<div class="job-info-banner">';
-                html += '<div class="job-title">Job ' + (data.job.jobNumber || jobNumber) + '</div>';
-                html += '<div class="job-detail">' + (data.job.customerName || '') + '</div>';
-                html += '<div class="job-detail">' + (data.receivedCount || 0) + ' received | ' + (data.awaitingCount || 0) + ' awaiting</div>';
+                html += '<div class="job-title">Job ' + (data.job.number || jobNumber) + '</div>';
+                html += '<div class="job-detail">' + (data.job.customer || '') + '</div>';
+                html += '<div class="job-detail">' + (data.items ? data.items.length : 0) + ' item(s) in stock</div>';
                 html += '</div>';
             }
             
             if (!data.items || data.items.length === 0) {
-                html += '<p class="hint">No items found for this job</p>';
+                html += '<p class="hint">' + (data.message || 'No items found in stock for this job') + '</p>';
                 resultsEl.innerHTML = html;
+                document.getElementById('stock-action-panel').style.display = 'none';
                 return;
             }
             
-            // Group by storage location
-            const groups = {};
-            data.items.forEach(item => {
-                const key = item.storageId || 'awaiting';
-                if (!groups[key]) {
-                    groups[key] = {
-                        storageName: item.awaitingReceipt ? '\u23f3 Awaiting Receipt' : (item.storageName || 'Unknown'),
-                        items: [],
-                        isAwaiting: item.awaitingReceipt && !item.inStock
-                    };
+            // Render each item
+            data.items.forEach(function(item, idx) {
+                var bestLoc = item.stockLocations[0];
+                var maxQty = bestLoc.availableQty;
+                var defaultQty = Math.min(item.neededQty, maxQty);
+                
+                html += '<div class="item-card" onclick="app.toggleStockItemV2(' + idx + ')" style="cursor:pointer;">';
+                html += '<div style="display:flex;align-items:center;gap:10px;width:100%">';
+                html += '<input type="checkbox" id="stock-cb-' + idx + '" checked style="width:20px;height:20px;flex-shrink:0;" onclick="event.stopPropagation();" onchange="app.toggleStockItemV2(' + idx + ')">';
+                html += '<div class="item-details" style="flex:1">';
+                html += '<div class="item-name">' + (item.name || 'Unknown') + '</div>';
+                html += '<div class="item-meta">';
+                if (item.partNo) {
+                    html += '<span class="item-part">' + item.partNo + '</span>';
                 }
-                groups[key].items.push(item);
-            });
-            
-            // Sort: received first, then awaiting
-            const sortedGroups = Object.values(groups).sort((a, b) => (a.isAwaiting ? 1 : 0) - (b.isAwaiting ? 1 : 0));
-            
-            let globalIdx = 0;
-            
-            sortedGroups.forEach(group => {
-                html += '<div class="location-group">';
-                html += '<div class="location-group-header">';
-                html += '<span class="location-icon">' + (group.isAwaiting ? '\u23f3' : '\ud83d\udccd') + '</span>';
-                html += '<span class="location-name">' + group.storageName + '</span>';
-                html += '<span class="location-count">' + group.items.length + ' item' + (group.items.length > 1 ? 's' : '') + '</span>';
+                html += '<span class="item-qty">Need: ' + item.neededQty + ' (Req: ' + item.requiredQty + ', Assigned: ' + item.assignedQty + ')</span>';
                 html += '</div>';
+                html += '<div style="margin-top:4px;font-size:12px;color:#22d3ee;">\ud83d\udccd ' + bestLoc.storageName + ' \u2014 ' + bestLoc.availableQty + ' available</div>';
                 
-                group.items.forEach(item => {
-                    if (item.awaitingReceipt || item.inStock) {
-                        const isInStock = !!item.inStock;
-                        const borderColor = isInStock ? '#22c55e' : '#f59e0b';
-                        const badgeBg = isInStock ? '#dcfce7' : '#f59e0b22';
-                        const badgeColor = isInStock ? '#16a34a' : '#f59e0b';
-                        const badgeBorder = isInStock ? '#86efac' : '#f59e0b44';
-                        const badgeText = isInStock ? ('📦 In Stock' + (item.storageName ? ' — ' + item.storageName : '')) : '⏳ Awaiting Receipt';
-                        html += '<div class="item-card awaiting-item" data-catalog-id="' + (item.catalogId || '') + '" style="border-left:3px solid ' + borderColor + ';">';
-                        html += '<div class="item-details" style="width:100%">';
-                        html += '<div class="item-name">' + (item.description || 'Unknown') + ' <span style="font-size:11px;background:' + badgeBg + ';color:' + badgeColor + ';border:1px solid ' + badgeBorder + ';border-radius:4px;padding:1px 5px;">' + badgeText + '</span></div>';
-                        html += '<div class="item-meta">';
-                        if (item.partNo) html += '<span class="item-part">' + item.partNo + '</span>';
-                        if (item.quantityOrdered) html += '<span class="item-qty">Ordered: ' + item.quantityOrdered + '</span>';
-                        if (item.poOrderNo) html += '<span class="item-job">PO: ' + item.poOrderNo + '</span>';
-                        if (isInStock && item.quantity) html += '<span class="item-qty">In Stock: ' + item.quantity + '</span>';
-                        html += '</div>';
-                        const awData = JSON.stringify({
-                            partNo: item.partNo || '',
-                            description: item.description || '',
-                            jobId: item.jobId || '',
-                            jobNumber: item.jobNumber || jobNumber || '',
-                            sectionId: item.sectionId || '',
-                            costCentreId: item.costCentreId || '',
-                            catalogId: item.catalogId || '',
-                            quantity: item.quantityOrdered || 1,
-                            storageId: item.storageId || '',
-                            storageName: item.storageName || '',
-                            inStock: isInStock
-                        });
-                        const awDataB64 = btoa(unescape(encodeURIComponent(awData)));
-                        html += '<button onclick="app.showAwaitingAllocModal(\'' + awDataB64 + '\')" style="margin-top:8px;padding:6px 14px;background:#2563eb;color:#fff;border:none;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600;">📦 Allocate from Stock</button>';
-                        html += '</div></div>';
-                    } else {
-                        const itemIdx = globalIdx++;
-                        html += '<div class="item-card" onclick="app.toggleStockItem(' + itemIdx + ')" style="cursor:pointer;">';
-                        html += '<div style="display:flex;align-items:center;gap:10px;width:100%">';
-                        html += '<input type="checkbox" id="stock-cb-' + itemIdx + '" style="width:20px;height:20px;flex-shrink:0;" onclick="event.stopPropagation();" onchange="app.toggleStockItem(' + itemIdx + ')">';
-                        html += '<div class="item-details" style="flex:1">';
-                        html += '<div class="item-name">' + (item.description || 'Unknown') + '</div>';
-                        html += '<div class="item-meta">';
-                        if (item.partNo) html += '<span class="item-part">' + item.partNo + '</span>';
-                        html += '<span class="item-qty">Qty: ' + item.quantity + '</span>';
-                        if (item.poOrderNo) html += '<span class="item-job">PO: ' + item.poOrderNo + '</span>';
-                        html += '</div></div></div></div>';
+                // Show additional locations if any
+                if (item.stockLocations.length > 1) {
+                    var others = [];
+                    for (var li = 1; li < item.stockLocations.length; li++) {
+                        others.push(item.stockLocations[li].storageName + ' (' + item.stockLocations[li].availableQty + ')');
                     }
-                });
+                    html += '<div style="margin-top:2px;font-size:11px;color:#64748b;">also in: ' + others.join(', ') + '</div>';
+                }
                 
+                html += '<div style="font-size:11px;color:#94a3b8;margin-top:2px;">' + (item.costCentreName || '') + '</div>';
                 html += '</div>';
+                html += '<input type="number" id="stock-qty-' + idx + '" value="' + defaultQty + '" min="1" max="' + maxQty + '" class="qty-input" style="width:60px;padding:6px;border:1px solid #334155;border-radius:6px;background:#1e293b;color:#e2e8f0;text-align:center;font-size:14px;" onclick="event.stopPropagation();">';
+                html += '</div></div>';
             });
-            
-            // Show message if all items are awaiting receipt (no clickable items)
-            const allAwaiting = sortedGroups.length > 0 && sortedGroups.every(g => g.isAwaiting);
-            if (allAwaiting) {
-                html += '<p class="hint" style="color:#f59e0b;margin-top:12px;">⚠️ All items for this job are awaiting receipt — receive them via the PO receiving screen first.</p>';
-            }
             
             resultsEl.innerHTML = html;
             
-            // v95: Background check — update "Awaiting Receipt" badges for items that are actually in stock
-            const _awaitingIds = data.items ? data.items.filter(i => i.awaitingReceipt && i.catalogId).map(i => i.catalogId) : [];
-            if (_awaitingIds.length > 0) {
-                this.authFetch('/api/check-stock-for-catalogs', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ catalogIds: _awaitingIds })
-                }).then(r => r.json()).then(stockResult => {
-                    const sm = stockResult.stockMap || {};
-                    Object.keys(sm).forEach(catalogId => {
-                        const card = resultsEl.querySelector('.awaiting-item[data-catalog-id="' + catalogId + '"]');
-                        if (!card) return;
-                        const loc = sm[catalogId];
-                        // Update border color
-                        card.style.borderLeftColor = '#22c55e';
-                        // Update badge
-                        const nameDiv = card.querySelector('.item-name');
-                        if (nameDiv) {
-                            nameDiv.innerHTML = nameDiv.innerHTML
-                                .replace(/<span[^>]*>⏳ Awaiting Receipt<\/span>/, '<span style="font-size:11px;background:#dcfce7;color:#16a34a;border:1px solid #86efac;border-radius:4px;padding:1px 5px;">📦 In Stock — ' + (loc.storageName || '') + '</span>');
-                        }
-                        // Update allocate button data to include storageId/storageName/inStock
-                        const btn = card.querySelector('button[onclick]');
-                        if (btn) {
-                            const onclickStr = btn.getAttribute('onclick');
-                            const b64match = onclickStr.match(/showAwaitingAllocModal\('([^']+)'\)/);
-                            if (b64match) {
-                                try {
-                                    const decoded = JSON.parse(decodeURIComponent(escape(atob(b64match[1]))));
-                                    decoded.storageId = loc.storageId;
-                                    decoded.storageName = loc.storageName;
-                                    decoded.inStock = true;
-                                    const newB64 = btoa(unescape(encodeURIComponent(JSON.stringify(decoded))));
-                                    btn.setAttribute('onclick', "app.showAwaitingAllocModal('" + newB64 + "')");
-                                } catch(e) {}
-                            }
-                        }
-                    });
-                }).catch(() => {});
+            // Select all items by default
+            this.stockSelectedItems = [];
+            for (var i = 0; i < data.items.length; i++) {
+                this.stockSelectedItems.push(i);
             }
             
-            // Store data for selection tracking
-            this.stockSearchData = data;
-            this.stockSelectedItems = [];
-            // Build flat array of received items (matching globalIdx order)
-            this._stockReceivedItems = [];
-            const sortedGroupsCopy = Object.values(groups).sort((a, b) => (a.isAwaiting ? 1 : 0) - (b.isAwaiting ? 1 : 0));
-            sortedGroupsCopy.forEach(g => {
-                if (!g.isAwaiting) {
-                    g.items.forEach(item => this._stockReceivedItems.push(item));
-                }
-            });
-            document.getElementById('stock-action-panel').style.display = 'none';
+            // Show action panel
+            var panel = document.getElementById('stock-action-panel');
+            var countEl = document.getElementById('stock-item-count');
+            var jobGroup = document.getElementById('stock-target-job-group');
+            panel.style.display = 'block';
+            countEl.textContent = this.stockSelectedItems.length;
+            if (jobGroup) jobGroup.style.display = 'none';
             
         } catch (error) {
-            console.error('Stock job lookup error:', error);
+            console.error('Stock job search error:', error);
             resultsEl.innerHTML = '<p class="hint" style="color:#ef4444;">\u274c Search failed: ' + error.message + '</p>';
         }
     },
-    
+
+    toggleStockItemV2(index) {
+        var cb = document.getElementById('stock-cb-' + index);
+        var idx = this.stockSelectedItems.indexOf(index);
+        if (idx >= 0) {
+            this.stockSelectedItems.splice(idx, 1);
+            if (cb) cb.checked = false;
+        } else {
+            this.stockSelectedItems.push(index);
+            if (cb) cb.checked = true;
+        }
+        var panel = document.getElementById('stock-action-panel');
+        var countEl = document.getElementById('stock-item-count');
+        var jobGroup = document.getElementById('stock-target-job-group');
+        if (this.stockSelectedItems.length > 0) {
+            panel.style.display = 'block';
+            countEl.textContent = this.stockSelectedItems.length;
+            if (jobGroup) jobGroup.style.display = 'none';
+        } else {
+            panel.style.display = 'none';
+        }
+    },
+
     async stockPartSearch() {
         const partInput = document.getElementById('part-search');
         const partNumber = partInput ? partInput.value.trim() : '';
@@ -2414,8 +2351,138 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         }
     },
     
+    async allocateFromStockV2() {
+        var destDropdown = document.getElementById('stock-storage-dropdown');
+        var destId = destDropdown ? destDropdown.value : '';
+        var destName = destDropdown && destDropdown.selectedIndex >= 0 ? destDropdown.options[destDropdown.selectedIndex].text : '';
+        
+        if (!destId) {
+            alert('Please select a destination storage location.');
+            return;
+        }
+        
+        if (!this._jobStockData || this.stockSelectedItems.length === 0) {
+            alert('Please select at least one item.');
+            return;
+        }
+        
+        var jobData = this._jobStockData;
+        var jobId = jobData.job.id;
+        var jobNumber = jobData.job.number || jobId;
+        var customerName = jobData.job.customer || '';
+        
+        // Build items array from selected items
+        var allocItems = [];
+        for (var i = 0; i < this.stockSelectedItems.length; i++) {
+            var idx = this.stockSelectedItems[i];
+            var item = jobData.items[idx];
+            var qtyInput = document.getElementById('stock-qty-' + idx);
+            var qty = qtyInput ? parseInt(qtyInput.value, 10) : item.neededQty;
+            if (!qty || qty < 1) qty = 1;
+            
+            var bestLoc = item.stockLocations[0];
+            
+            allocItems.push({
+                catalogId: item.catalogId,
+                sourceStorageId: bestLoc.storageId,
+                sourceStorageName: bestLoc.storageName,
+                quantity: qty,
+                sectionId: item.sectionId,
+                costCentreId: item.costCentreId,
+                name: item.name,
+                partNo: item.partNo
+            });
+        }
+        
+        var btn = document.getElementById('stock-allocate-btn');
+        btn.disabled = true;
+        btn.textContent = '\u23f3 Allocating ' + allocItems.length + ' item(s)...';
+        
+        try {
+            var response = await this.authFetch('/api/allocate-from-stock', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    jobId: jobId,
+                    destinationStorageId: parseInt(destId),
+                    destinationStorageName: destName,
+                    items: allocItems
+                })
+            });
+            
+            var result = await response.json();
+            
+            if (result.error) {
+                alert('Error: ' + result.error);
+                btn.disabled = false;
+                btn.textContent = '\ud83d\udce6 Move & Print Labels';
+                return;
+            }
+            
+            var successCount = result.successCount || 0;
+            var failCount = (result.totalCount || 0) - successCount;
+            
+            // Generate labels for successful items
+            if (successCount > 0) {
+                var labelItems = [];
+                for (var ri = 0; ri < result.results.length; ri++) {
+                    var r = result.results[ri];
+                    if (r.success) {
+                        var origItem = allocItems.find(function(ai) { return String(ai.catalogId) === String(r.catalogId); });
+                        if (origItem) {
+                            labelItems.push({
+                                jobNumber: jobNumber,
+                                customerName: customerName,
+                                partNo: origItem.partNo,
+                                description: origItem.name,
+                                quantity: origItem.quantity,
+                                storageLocation: destName
+                            });
+                        }
+                    }
+                }
+                await this.generateAndShowLabels(labelItems, 'STOCK');
+            }
+            
+            var msg = '\u2705 ' + successCount + ' item(s) allocated to ' + destName + ' for Job ' + jobNumber;
+            if (failCount > 0) {
+                msg += '\n\u26a0\ufe0f ' + failCount + ' item(s) failed:';
+                for (var fi = 0; fi < result.results.length; fi++) {
+                    var fr = result.results[fi];
+                    if (!fr.success) {
+                        msg += '\n  - ' + (fr.partNo || fr.name || 'Unknown') + ': ' + (fr.error || 'Unknown error');
+                    }
+                }
+            }
+            alert(msg);
+            
+            // Reset UI
+            this.stockSelectedItems = [];
+            document.getElementById('stock-action-panel').style.display = 'none';
+            // Re-run search to show updated state
+            this.stockJobLookup();
+            
+        } catch (error) {
+            console.error('Allocation error:', error);
+            alert('Error: ' + error.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '\ud83d\udce6 Move & Print Labels';
+        }
+    },
+
     async allocateFromStock() {
-        const destDropdown = document.getElementById('stock-storage-dropdown');
+        // v2: New allocate from stock flow using /api/allocate-from-stock
+        if (this._stockSearchMode === 'job_v2') {
+            await this.allocateFromStockV2();
+            return;
+        }
+        // Fallback for part search mode - use old flow
+        await this.allocateFromStockPartMode();
+    },
+
+    async allocateFromStockPartMode() {
+const destDropdown = document.getElementById('stock-storage-dropdown');
         const destId = destDropdown.value;
         const destName = destDropdown.options[destDropdown.selectedIndex]?.text || '';
         
@@ -2478,7 +2545,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         // Non-part-search (job mode): items already have jobId/sectionId/costCentreId from search
         await this.doDirectAllocation(destId, destName, items, jobNumber, customerName, '');
     },
-    
+
     async doJobCCLookup(targetJobId, destId, destName, items, jobNumber) {
         const btn = document.getElementById('stock-allocate-btn');
         btn.disabled = true;
