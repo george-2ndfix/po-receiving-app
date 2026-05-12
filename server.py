@@ -10,6 +10,7 @@ import hashlib
 import secrets
 import sqlite3
 import uuid
+import concurrent.futures
 from datetime import datetime, timedelta
 from functools import wraps
 from flask import Flask, request, jsonify, send_from_directory, send_file, session
@@ -2512,6 +2513,313 @@ def resolve_fault_report(report_id):
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+# ============================================
+# Job Stock Search & Allocate from Stock (v2)
+# ============================================
+
+@app.route('/api/job-stock-search', methods=['POST'])
+@login_required
+def job_stock_search():
+    """Search for job materials that are available in stock"""
+    try:
+        data = request.get_json()
+        job_id = str(data.get("jobId", "")).strip()
+        if not job_id:
+            return jsonify({"error": "jobId is required"}), 400
+
+        print(f"[job-stock-search] Searching job {job_id}")
+
+        # 1. Get job info (use list endpoint with ID filter - direct lookup returns 404)
+        job_resp = simpro_request("GET", f"/companies/{COMPANY_ID}/jobs/?ID={job_id}&columns=ID,Name,Customer")
+        if job_resp.status_code != 200:
+            return jsonify({"error": f"Job {job_id} not found (HTTP {job_resp.status_code})"}), 404
+        job_list = job_resp.json()
+        if not isinstance(job_list, list) or len(job_list) == 0:
+            return jsonify({"error": f"Job {job_id} not found"}), 404
+        job_data = job_list[0]
+        job_info = {
+            "id": str(job_data.get("ID", job_id)),
+            "number": job_data.get("Name", f"J{job_id}"),
+            "customer": ""
+        }
+        cust = job_data.get("Customer")
+        if cust:
+            job_info["customer"] = cust.get("CompanyName", "") or cust.get("Name", "")
+
+        # 2. Get sections
+        sections_resp = simpro_request("GET", f"/companies/{COMPANY_ID}/jobs/{job_id}/sections/")
+        if sections_resp.status_code != 200:
+            return jsonify({"error": "Failed to get job sections"}), 500
+        sections = sections_resp.json()
+        if not isinstance(sections, list):
+            sections = []
+
+        # 3. For each section, get cost centres and their stock/materials
+        job_materials = []
+        for section in sections:
+            sec_id = section.get("ID")
+            if not sec_id:
+                continue
+            sec_name = section.get("Name", "")
+
+            cc_resp = simpro_request("GET", f"/companies/{COMPANY_ID}/jobs/{job_id}/sections/{sec_id}/costCenters/")
+            if cc_resp.status_code != 200:
+                continue
+            cost_centres = cc_resp.json()
+            if not isinstance(cost_centres, list):
+                continue
+
+            for cc in cost_centres:
+                cc_id = cc.get("ID")
+                if not cc_id:
+                    continue
+                cc_name = cc.get("Name", "")
+
+                stock_resp = simpro_request("GET", f"/companies/{COMPANY_ID}/jobs/{job_id}/sections/{sec_id}/costCenters/{cc_id}/stock/")
+                if stock_resp.status_code != 200:
+                    continue
+                stock_items = stock_resp.json()
+                if not isinstance(stock_items, list):
+                    continue
+
+                for item in stock_items:
+                    catalog = item.get("Catalog", {})
+                    cat_id = catalog.get("ID")
+                    if not cat_id:
+                        continue
+
+                    qty_data = item.get("Quantity", {})
+                    if isinstance(qty_data, dict):
+                        required_qty = qty_data.get("Required", 0) or 0
+                        assigned_qty = qty_data.get("Assigned", 0) or 0
+                    else:
+                        required_qty = qty_data if qty_data else 0
+                        assigned_qty = 0
+
+                    needed = required_qty - assigned_qty
+                    if needed <= 0:
+                        continue
+
+                    job_materials.append({
+                        "catalogId": cat_id,
+                        "name": catalog.get("Name", ""),
+                        "partNo": catalog.get("PartNo", "") or catalog.get("Sku", ""),
+                        "requiredQty": required_qty,
+                        "assignedQty": assigned_qty,
+                        "neededQty": needed,
+                        "sectionId": sec_id,
+                        "sectionName": sec_name,
+                        "costCentreId": cc_id,
+                        "costCentreName": cc_name
+                    })
+
+        if not job_materials:
+            return jsonify({"job": job_info, "items": [], "message": "No unassigned materials found on this job"})
+
+        print(f"[job-stock-search] Found {len(job_materials)} needed materials, scanning storage devices...")
+
+        # 4. Get all storage devices
+        storage_resp = simpro_request("GET", f"/companies/{COMPANY_ID}/storageDevices/?pageSize=250")
+        if storage_resp.status_code != 200:
+            return jsonify({"error": "Failed to get storage devices"}), 500
+        all_storage = storage_resp.json()
+        if not isinstance(all_storage, list):
+            all_storage = []
+
+        # Build catalog IDs we need to find
+        needed_catalog_ids = set(m["catalogId"] for m in job_materials)
+
+        # 5. Query ALL storage devices in parallel for stock
+        catalog_stock_map = {}  # catalog_id -> [{storage_id, storage_name, available_qty}]
+
+        def fetch_storage_stock(device):
+            dev_id = device.get("ID")
+            dev_name = device.get("Name", f"Storage {dev_id}")
+            if not dev_id:
+                return []
+            try:
+                resp = simpro_request("GET", f"/companies/{COMPANY_ID}/storageDevices/{dev_id}/stock/?pageSize=250")
+                if resp.status_code != 200:
+                    return []
+                items = resp.json()
+                if not isinstance(items, list):
+                    return []
+                results = []
+                for s in items:
+                    cat = s.get("Catalog", {})
+                    c_id = cat.get("ID")
+                    if c_id in needed_catalog_ids:
+                        qty = s.get("Quantity", 0)
+                        if isinstance(qty, dict):
+                            qty = qty.get("Available", 0) or qty.get("Quantity", 0) or 0
+                        if qty and qty > 0:
+                            results.append({"catalogId": c_id, "storageId": dev_id, "storageName": dev_name, "availableQty": qty})
+                return results
+            except Exception as e:
+                print(f"[job-stock-search] Error fetching stock for device {dev_id}: {e}")
+                return []
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
+            futures = {executor.submit(fetch_storage_stock, dev): dev for dev in all_storage}
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    results = future.result()
+                    for r in results:
+                        cid = r["catalogId"]
+                        if cid not in catalog_stock_map:
+                            catalog_stock_map[cid] = []
+                        catalog_stock_map[cid].append({
+                            "storageId": r["storageId"],
+                            "storageName": r["storageName"],
+                            "availableQty": r["availableQty"]
+                        })
+                except Exception as e:
+                    print(f"[job-stock-search] Future error: {e}")
+
+        # 6. Match job materials with available stock
+        matched_items = []
+        for mat in job_materials:
+            cat_id = mat["catalogId"]
+            if cat_id in catalog_stock_map:
+                locations = catalog_stock_map[cat_id]
+                # Sort by available qty descending
+                locations.sort(key=lambda x: x["availableQty"], reverse=True)
+                mat["stockLocations"] = locations
+                matched_items.append(mat)
+
+        print(f"[job-stock-search] {len(matched_items)} items have stock available")
+
+        return jsonify({
+            "job": job_info,
+            "items": matched_items
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/allocate-from-stock', methods=['POST'])
+@login_required
+def allocate_from_stock_v2():
+    """Transfer stock and assign to job cost centre"""
+    try:
+        data = request.get_json()
+        job_id = str(data.get("jobId", "")).strip()
+        dest_storage_id = data.get("destinationStorageId")
+        dest_storage_name = data.get("destinationStorageName", "")
+        items = data.get("items", [])
+
+        if not job_id:
+            return jsonify({"error": "jobId is required"}), 400
+        if not dest_storage_id:
+            return jsonify({"error": "destinationStorageId is required"}), 400
+        if not items:
+            return jsonify({"error": "No items provided"}), 400
+
+        print(f"[allocate-from-stock] Job {job_id}, destination {dest_storage_name} (ID {dest_storage_id}), {len(items)} items")
+
+        results = []
+        for item in items:
+            cat_id = item.get("catalogId")
+            src_id = item.get("sourceStorageId")
+            src_name = item.get("sourceStorageName", "")
+            quantity = item.get("quantity", 1)
+            section_id = item.get("sectionId")
+            cc_id = item.get("costCentreId")
+            item_name = item.get("name", "")
+            part_no = item.get("partNo", "")
+
+            result_entry = {"catalogId": cat_id, "name": item_name, "partNo": part_no, "success": False}
+
+            try:
+                # Step 1: Stock transfer (if source != destination)
+                if str(src_id) != str(dest_storage_id):
+                    transfer_payload = {
+                        "Catalog": {"ID": cat_id},
+                        "FromStorage": {"ID": src_id},
+                        "ToStorage": {"ID": dest_storage_id},
+                        "Quantity": quantity
+                    }
+                    print(f"  Transferring {quantity}x {part_no} from {src_name} ({src_id}) to {dest_storage_name} ({dest_storage_id})")
+                    transfer_resp = simpro_request("POST", f"/companies/{COMPANY_ID}/stockTransfer/", json=transfer_payload)
+                    if transfer_resp.status_code not in (200, 201, 204):
+                        error_text = transfer_resp.text[:300]
+                        print(f"  Transfer FAILED: {transfer_resp.status_code} {error_text}")
+                        result_entry["success"] = False
+                        result_entry["error"] = f"Stock transfer failed: HTTP {transfer_resp.status_code} - {error_text}"
+                        result_entry["method"] = "transfer_failed"
+                        results.append(result_entry)
+                        continue
+                    result_entry["method"] = "stock_transfer"
+                else:
+                    result_entry["method"] = "same_storage"
+                    print(f"  Source == destination for {part_no}, skipping transfer")
+
+                # Step 2: Assign to job cost centre
+                if section_id and cc_id:
+                    assign_payload = {
+                        "Catalog": {"ID": cat_id},
+                        "AssignedBreakdown": [{
+                            "Storage": {"ID": int(dest_storage_id)},
+                            "Quantity": quantity
+                        }]
+                    }
+                    assign_url = f"/companies/{COMPANY_ID}/jobs/{job_id}/sections/{section_id}/costCenters/{cc_id}/stock/"
+                    print(f"  Assigning {quantity}x {part_no} to CC {cc_id}")
+                    assign_resp = simpro_request("POST", assign_url, json=assign_payload)
+
+                    if assign_resp.status_code in (400, 409):
+                        # Item may already exist on CC - try PATCH
+                        print(f"  POST assign returned {assign_resp.status_code}, trying PATCH...")
+                        patch_resp = simpro_request("PATCH", assign_url, json=assign_payload)
+                        if patch_resp.status_code not in (200, 201, 204):
+                            print(f"  PATCH assign also failed: {patch_resp.status_code} {patch_resp.text[:200]}")
+                        else:
+                            print(f"  PATCH assign succeeded")
+                    elif assign_resp.status_code not in (200, 201, 204):
+                        print(f"  POST assign failed: {assign_resp.status_code} {assign_resp.text[:200]}")
+                    else:
+                        print(f"  POST assign succeeded")
+
+                result_entry["success"] = True
+                result_entry["message"] = f"Moved {quantity} from {src_name} to {dest_storage_name}"
+
+                # Log to allocation_log if table exists
+                try:
+                    db = get_db()
+                    db.execute(
+                        "INSERT INTO allocation_log (timestamp, job_id, catalog_id, part_no, description, quantity, source_storage, dest_storage, staff_id, method) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (datetime.now().isoformat(), job_id, cat_id, part_no, item_name, quantity, src_name, dest_storage_name, session.get("staff_id", ""), "stock_allocation_v2")
+                    )
+                    db.commit()
+                except Exception:
+                    pass  # Table may not exist
+
+            except Exception as e:
+                print(f"  Error processing {part_no}: {e}")
+                result_entry["success"] = False
+                result_entry["error"] = str(e)
+
+            results.append(result_entry)
+
+        success_count = sum(1 for r in results if r.get("success"))
+        print(f"[allocate-from-stock] Done: {success_count}/{len(results)} succeeded")
+
+        return jsonify({
+            "results": results,
+            "successCount": success_count,
+            "totalCount": len(results)
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
 
 # ============================================
 # Initialize and Run
