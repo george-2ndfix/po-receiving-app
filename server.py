@@ -189,8 +189,8 @@ def init_db():
         ('cherie', 'Cherie', 'manager', '2ndFix5082', None),
         ('tom', 'Tom', 'manager', '2ndFix5082', 'tom@2ndfix.com.au'),
         ('tyrese', 'Tyrese', 'staff', 'Tyrese123', None),
-        ('mik', 'Mik', 'staff', '2ndFix5082$', None),
-        ('ryan', 'Ryan', 'staff', '2ndFix5082$', None),
+        ('mik', 'Mik', 'staff', '2ndFix5082', None),
+        ('ryan', 'Ryan', 'staff', '2ndFix5082', None),
         ('kelly', 'Kelly', 'admin', '2ndFix5082', 'info@kpro.net.au'),
     ]
     
@@ -202,12 +202,16 @@ def init_db():
                 VALUES (?, ?, ?, ?, ?, ?)
             ''', (username, display_name, hash_password(password), role, 1, email))
             print(f"Created staff account: {username} ({role})")
-        elif email:
-            # Update email for existing staff
-            cursor.execute('UPDATE staff SET email = ? WHERE username = ? AND (email IS NULL OR email != ?)', 
-                          (email, username, email))
-            if cursor.rowcount > 0:
-                print(f"Updated email for {username}: {email}")
+        else:
+            # Update password and email for existing staff
+            cursor.execute('UPDATE staff SET password_hash = ? WHERE username = ?',
+                          (hash_password(password), username))
+            print(f"Reset password for {username}")
+            if email:
+                cursor.execute('UPDATE staff SET email = ? WHERE username = ? AND (email IS NULL OR email != ?)', 
+                              (email, username, email))
+                if cursor.rowcount > 0:
+                    print(f"Updated email for {username}: {email}")
     
     conn.commit()
     conn.close()
