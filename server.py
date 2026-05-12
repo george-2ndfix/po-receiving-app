@@ -7,20 +7,12 @@ With Staff Management System
 import os
 import json
 import hashlib
-import time
 import secrets
 import sqlite3
-
-DATABASE_URL = os.environ.get('DATABASE_URL')
-USE_PG = bool(DATABASE_URL)
-
-if USE_PG:
-    import psycopg2
-    import psycopg2.extras
 import uuid
 from datetime import datetime, timedelta
 from functools import wraps
-from flask import Flask, request, jsonify, send_from_directory, session, send_file
+from flask import Flask, request, jsonify, send_from_directory, session
 import requests
 import io
 import base64
@@ -28,11 +20,6 @@ from PIL import Image, ImageDraw, ImageFont
 
 app = Flask(__name__, static_folder='.')
 app.secret_key = os.environ.get('SECRET_KEY', '2ndfix-po-app-secret-key-2026-persistent')
-app.config['SESSION_PERMANENT'] = True
-app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)
-app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-app.config['SESSION_COOKIE_HTTPONLY'] = True
-app.config['SESSION_COOKIE_SECURE'] = True
 
 @app.after_request
 def add_cache_headers(response):
@@ -62,415 +49,149 @@ token_cache = {
     'expires_at': None
 }
 
-# Storage devices cache (for stock_part_search)
-_storage_devices_cache = None
-_storage_devices_cache_time = 0
-
 # ============================================
 # Database Setup
 # ============================================
-class DictRow(dict):
-    """Dict that also supports integer index access like sqlite3.Row"""
-    def __init__(self, cols, values):
-        super().__init__(zip(cols, values))
-        self._values = list(values)
-    
-    def __getitem__(self, key):
-        if isinstance(key, int):
-            return self._values[key]
-        return super().__getitem__(key)
-
-class PgCursorWrapper:
-    """Wraps a psycopg2 cursor to auto-convert ? to %s and return dict rows"""
-    def __init__(self, cursor):
-        self._cursor = cursor
-    
-    def execute(self, sql, params=None):
-        sql = sql.replace("?", "%s")
-        if params:
-            self._cursor.execute(sql, params)
-        else:
-            self._cursor.execute(sql)
-        return self._cursor
-    
-    def fetchone(self):
-        if not self._cursor.description:
-            return None
-        cols = [desc[0] for desc in self._cursor.description]
-        row = self._cursor.fetchone()
-        if row is None:
-            return None
-        return DictRow(cols, row)
-    
-    def fetchall(self):
-        if not self._cursor.description:
-            return []
-        cols = [desc[0] for desc in self._cursor.description]
-        return [DictRow(cols, row) for row in self._cursor.fetchall()]
-    
-    @property
-    def lastrowid(self):
-        return self._cursor.fetchone()[0] if self._cursor.description else None
-    
-    @property
-    def rowcount(self):
-        return self._cursor.rowcount
-    
-    @property
-    def description(self):
-        return self._cursor.description
-
-class PgConnectionWrapper:
-    """Wraps a psycopg2 connection to return wrapped cursors"""
-    def __init__(self, conn):
-        self._conn = conn
-    
-    def cursor(self):
-        return PgCursorWrapper(self._conn.cursor())
-    
-    def execute(self, sql, params=None):
-        """Allow connection-level execute like SQLite"""
-        cur = self.cursor()
-        cur.execute(sql, params)
-        return cur
-    
-    def commit(self):
-        self._conn.commit()
-    
-    def rollback(self):
-        self._conn.rollback()
-    
-    def close(self):
-        self._conn.close()
-
 def get_db():
-    """Get database connection - PostgreSQL if DATABASE_URL is set, else SQLite"""
-    if USE_PG:
-        conn = psycopg2.connect(DATABASE_URL)
-        return PgConnectionWrapper(conn)
-    else:
-        conn = sqlite3.connect(DB_FILE)
-        conn.row_factory = sqlite3.Row
-        return conn
+    """Get database connection"""
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 def init_db():
     """Initialize database tables"""
     conn = get_db()
     cursor = conn.cursor()
     
-    if USE_PG:
-        # PostgreSQL DDL
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS staff (
-                id SERIAL PRIMARY KEY,
-                username TEXT UNIQUE NOT NULL,
-                display_name TEXT NOT NULL,
-                password_hash TEXT NOT NULL,
-                role TEXT NOT NULL DEFAULT 'staff' CHECK(role IN ('admin', 'manager', 'staff')),
-                email TEXT,
-                active INTEGER NOT NULL DEFAULT 1,
-                created_at TIMESTAMP DEFAULT NOW(),
-                updated_at TIMESTAMP DEFAULT NOW()
-            )
-        """)
-        
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS allocation_logs (
-                id SERIAL PRIMARY KEY,
-                staff_id INTEGER NOT NULL REFERENCES staff(id),
-                staff_name TEXT NOT NULL,
-                po_number TEXT,
-                job_number TEXT,
-                vendor_name TEXT,
-                items_allocated INTEGER,
-                storage_location TEXT,
-                allocation_type TEXT,
-                verified INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT NOW()
-            )
-        """)
-        
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS backorder_items (
-                id SERIAL PRIMARY KEY,
-                po_id TEXT NOT NULL,
-                po_number TEXT NOT NULL,
-                catalog_id INTEGER NOT NULL,
-                description TEXT,
-                part_no TEXT,
-                quantity_backordered INTEGER NOT NULL,
-                job_number TEXT,
-                customer_name TEXT,
-                vendor_name TEXT,
-                vendor_email TEXT,
-                staff_id INTEGER,
-                staff_name TEXT,
-                status TEXT DEFAULT 'pending',
-                created_at TIMESTAMP DEFAULT NOW(),
-                resolved_at TIMESTAMP
-            )
-        """)
-        
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS docket_data (
-                id SERIAL PRIMARY KEY,
-                po_id TEXT,
-                po_number TEXT,
-                supplier_name TEXT,
-                packing_slip_number TEXT,
-                tracking_number TEXT,
-                delivery_date TEXT,
-                raw_ocr_text TEXT,
-                staff_id INTEGER,
-                staff_name TEXT,
-                created_at TIMESTAMP DEFAULT NOW()
-            )
-        """)
-        
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS error_logs (
-                id SERIAL PRIMARY KEY,
-                error_type TEXT NOT NULL,
-                po_number TEXT,
-                catalog_id TEXT,
-                staff_user TEXT,
-                error_code INTEGER,
-                error_message TEXT,
-                request_payload TEXT,
-                response_body TEXT,
-                endpoint TEXT,
-                created_at TIMESTAMP DEFAULT NOW()
-            )
-        """)
-        
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS fault_reports (
-                id TEXT PRIMARY KEY,
-                reporter_name TEXT NOT NULL,
-                reporter_email TEXT NOT NULL,
-                description TEXT NOT NULL,
-                po_number TEXT,
-                job_number TEXT,
-                current_screen TEXT,
-                error_message TEXT,
-                photo_count INTEGER DEFAULT 0,
-                photos_base64 TEXT,
-                staff_user TEXT,
-                status TEXT DEFAULT 'new',
-                resolution TEXT,
-                created_at TIMESTAMP DEFAULT NOW(),
-                resolved_at TIMESTAMP
-            )
-        """)
-        
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS damage_reports (
-                id TEXT PRIMARY KEY,
-                po_number TEXT,
-                po_id TEXT,
-                catalog_id TEXT,
-                item_description TEXT,
-                part_number TEXT,
-                quantity_damaged INTEGER DEFAULT 1,
-                notes TEXT,
-                photo_count INTEGER DEFAULT 0,
-                photos_base64 TEXT,
-                vendor_name TEXT,
-                vendor_id TEXT,
-                job_number TEXT,
-                customer_name TEXT,
-                staff_user TEXT,
-                staff_name TEXT,
-                status TEXT DEFAULT 'new',
-                created_at TIMESTAMP DEFAULT NOW(),
-                resolved_at TIMESTAMP
-            )
-        """)
-        
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS damage_reports (
-                id TEXT PRIMARY KEY, po_number TEXT, po_id TEXT, catalog_id TEXT,
-                item_description TEXT, part_number TEXT,
-                quantity_damaged INTEGER DEFAULT 1, notes TEXT,
-                photo_count INTEGER DEFAULT 0, photos_base64 TEXT,
-                vendor_name TEXT, vendor_id TEXT,
-                job_number TEXT, customer_name TEXT,
-                staff_user TEXT, staff_name TEXT,
-                status TEXT DEFAULT 'new',
-                created_at TIMESTAMP DEFAULT NOW(), resolved_at TIMESTAMP
-            )
-        """)
-        
-        conn.commit()
-    else:
-        # SQLite DDL
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS staff (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT UNIQUE NOT NULL,
-                display_name TEXT NOT NULL,
-                password_hash TEXT NOT NULL,
-                role TEXT NOT NULL DEFAULT 'staff' CHECK(role IN ('admin', 'manager', 'staff')),
-                email TEXT,
-                active INTEGER NOT NULL DEFAULT 1,
-                created_at TEXT DEFAULT (datetime('now')),
-                updated_at TEXT DEFAULT (datetime('now'))
-            )
-        """)
-        
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS allocation_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                staff_id INTEGER NOT NULL,
-                staff_name TEXT NOT NULL,
-                po_number TEXT,
-                job_number TEXT,
-                vendor_name TEXT,
-                items_allocated INTEGER,
-                storage_location TEXT,
-                allocation_type TEXT,
-                verified INTEGER DEFAULT 0,
-                created_at TEXT DEFAULT (datetime('now')),
-                FOREIGN KEY (staff_id) REFERENCES staff(id)
-            )
-        """)
-        
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS backorder_items (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                po_id TEXT NOT NULL,
-                po_number TEXT NOT NULL,
-                catalog_id INTEGER NOT NULL,
-                description TEXT,
-                part_no TEXT,
-                quantity_backordered INTEGER NOT NULL,
-                job_number TEXT,
-                customer_name TEXT,
-                vendor_name TEXT,
-                vendor_email TEXT,
-                staff_id INTEGER,
-                staff_name TEXT,
-                status TEXT DEFAULT 'pending',
-                created_at TEXT DEFAULT (datetime('now')),
-                resolved_at TEXT
-            )
-        """)
-        
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS docket_data (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                po_id TEXT,
-                po_number TEXT,
-                supplier_name TEXT,
-                packing_slip_number TEXT,
-                tracking_number TEXT,
-                delivery_date TEXT,
-                raw_ocr_text TEXT,
-                staff_id INTEGER,
-                staff_name TEXT,
-                created_at TEXT DEFAULT (datetime('now'))
-            )
-        """)
-        
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS error_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                error_type TEXT NOT NULL,
-                po_number TEXT,
-                catalog_id TEXT,
-                staff_user TEXT,
-                error_code INTEGER,
-                error_message TEXT,
-                request_payload TEXT,
-                response_body TEXT,
-                endpoint TEXT,
-                created_at TEXT DEFAULT (datetime('now'))
-            )
-        """)
-        
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS fault_reports (
-                id TEXT PRIMARY KEY,
-                reporter_name TEXT NOT NULL,
-                reporter_email TEXT NOT NULL,
-                description TEXT NOT NULL,
-                po_number TEXT,
-                job_number TEXT,
-                current_screen TEXT,
-                error_message TEXT,
-                photo_count INTEGER DEFAULT 0,
-                photos_base64 TEXT,
-                staff_user TEXT,
-                status TEXT DEFAULT 'new',
-                resolution TEXT,
-                created_at TEXT DEFAULT (datetime('now')),
-                resolved_at TEXT
-            )
-        """)
-        
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS damage_reports (
-                id TEXT PRIMARY KEY,
-                po_number TEXT,
-                po_id TEXT,
-                catalog_id TEXT,
-                item_description TEXT,
-                part_number TEXT,
-                quantity_damaged INTEGER DEFAULT 1,
-                notes TEXT,
-                photo_count INTEGER DEFAULT 0,
-                photos_base64 TEXT,
-                vendor_name TEXT,
-                vendor_id TEXT,
-                job_number TEXT,
-                customer_name TEXT,
-                staff_user TEXT,
-                staff_name TEXT,
-                status TEXT DEFAULT 'new',
-                created_at TEXT DEFAULT (datetime('now')),
-                resolved_at TEXT
-            )
-        """)
-        
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS damage_reports (
-                id TEXT PRIMARY KEY, po_number TEXT, po_id TEXT, catalog_id TEXT,
-                item_description TEXT, part_number TEXT,
-                quantity_damaged INTEGER DEFAULT 1, notes TEXT,
-                photo_count INTEGER DEFAULT 0, photos_base64 TEXT,
-                vendor_name TEXT, vendor_id TEXT,
-                job_number TEXT, customer_name TEXT,
-                staff_user TEXT, staff_name TEXT,
-                status TEXT DEFAULT 'new',
-                created_at TEXT DEFAULT (datetime('now')), resolved_at TEXT
-            )
-        """)
-        
-        conn.commit()
+    # Staff table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS staff (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            display_name TEXT NOT NULL,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'staff' CHECK(role IN ('admin', 'manager', 'staff')),
+            email TEXT,
+            active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now'))
+        )
+    ''')
+    
+    # Allocation logs table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS allocation_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            staff_id INTEGER NOT NULL,
+            staff_name TEXT NOT NULL,
+            po_number TEXT,
+            job_number TEXT,
+            vendor_name TEXT,
+            items_allocated INTEGER,
+            storage_location TEXT,
+            allocation_type TEXT,
+            verified INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (staff_id) REFERENCES staff(id)
+        )
+    ''')
+    
+    # Backorder items table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS backorder_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            po_id TEXT NOT NULL,
+            po_number TEXT NOT NULL,
+            catalog_id INTEGER NOT NULL,
+            description TEXT,
+            part_no TEXT,
+            quantity_backordered INTEGER NOT NULL,
+            job_number TEXT,
+            customer_name TEXT,
+            vendor_name TEXT,
+            vendor_email TEXT,
+            staff_id INTEGER,
+            staff_name TEXT,
+            status TEXT DEFAULT 'pending',
+            created_at TEXT DEFAULT (datetime('now')),
+            resolved_at TEXT
+        )
+    ''')
+    
+    # Docket OCR data table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS docket_data (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            po_id TEXT,
+            po_number TEXT,
+            supplier_name TEXT,
+            packing_slip_number TEXT,
+            tracking_number TEXT,
+            delivery_date TEXT,
+            raw_ocr_text TEXT,
+            staff_id INTEGER,
+            staff_name TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        )
+    ''')
+    
+    # Fault reports table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS error_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            error_type TEXT NOT NULL,
+            po_number TEXT,
+            catalog_id TEXT,
+            staff_user TEXT,
+            error_code INTEGER,
+            error_message TEXT,
+            request_payload TEXT,
+            response_body TEXT,
+            endpoint TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        )
+    ''')
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS fault_reports (
+            id TEXT PRIMARY KEY,
+            reporter_name TEXT NOT NULL,
+            reporter_email TEXT NOT NULL,
+            description TEXT NOT NULL,
+            po_number TEXT,
+            job_number TEXT,
+            current_screen TEXT,
+            error_message TEXT,
+            photo_count INTEGER DEFAULT 0,
+            photos_base64 TEXT,
+            staff_user TEXT,
+            status TEXT DEFAULT 'new',
+            resolution TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            resolved_at TEXT
+        )
+    ''')
+    
+    conn.commit()
     
     # Add email column if it doesn't exist (migration for existing DBs)
     try:
-        if USE_PG:
-            cursor.execute("ALTER TABLE staff ADD COLUMN IF NOT EXISTS email TEXT")
-            conn.commit()
-        else:
-            cursor.execute("ALTER TABLE staff ADD COLUMN email TEXT")
-            conn.commit()
+        cursor.execute("ALTER TABLE staff ADD COLUMN email TEXT")
         print("Added email column to staff table")
-    except Exception:
-        if USE_PG:
-            conn.rollback()
+    except:
+        pass  # Column already exists
     
     # Seed all staff accounts (survives Render restarts)
     # Each staff member is created if they don't already exist
     staff_seed = [
         ('george', 'George', 'admin', '2ndFix5082', 'george@2ndfix.com.au'),
         ('jim', 'Jim', 'manager', '2ndFix5082', 'jim@2ndfix.com.au'),
-        ('cherie', 'Cherie', 'manager', '2ndFix5082', 'accounts@2ndfix.com.au'),
+        ('cherie', 'Cherie', 'manager', '2ndFix5082', None),
         ('tom', 'Tom', 'manager', '2ndFix5082', 'tom@2ndfix.com.au'),
-        ('tyrese', 'Tyrese', 'staff', 'Tyrese123', 'info@2ndfix.com.au'),
+        ('tyrese', 'Tyrese', 'staff', 'Tyrese123', None),
         ('mik', 'Mik', 'staff', '2ndFix5082$', None),
         ('ryan', 'Ryan', 'staff', '2ndFix5082$', None),
+        ('kelly', 'Kelly', 'admin', '2ndFix5082', 'info@kpro.net.au'),
     ]
     
     for username, display_name, role, password, email in staff_seed:
@@ -487,11 +208,6 @@ def init_db():
                           (email, username, email))
             if cursor.rowcount > 0:
                 print(f"Updated email for {username}: {email}")
-    
-    # Update staff emails that were missing
-    cursor.execute("UPDATE staff SET email = 'accounts@2ndfix.com.au' WHERE username = 'cherie' AND (email IS NULL OR email = '')")
-    cursor.execute("UPDATE staff SET email = 'info@2ndfix.com.au' WHERE username = 'tyrese' AND (email IS NULL OR email = '')")
-    conn.commit()
     
     conn.commit()
     conn.close()
@@ -568,7 +284,6 @@ def staff_login():
         return jsonify({'error': 'Invalid username or password'}), 401
     
     # Set session
-    session.permanent = True
     session['staff_id'] = staff['id']
     session['username'] = staff['username']
     session['display_name'] = staff['display_name']
@@ -734,13 +449,8 @@ def update_staff(staff_id):
         updates.append('active = ?')
         params.append(1 if data['active'] else 0)
     
-    if 'email' in data:
-        email_val = data['email'].strip() if data['email'] else None
-        updates.append('email = ?')
-        params.append(email_val)
-    
     if updates:
-        updates.append('updated_at = CURRENT_TIMESTAMP')
+        updates.append('updated_at = datetime("now")')
         params.append(staff_id)
         cursor.execute(f'UPDATE staff SET {", ".join(updates)} WHERE id = ?', params)
         conn.commit()
@@ -1032,23 +742,17 @@ def get_storage_locations():
 def get_po_details(po_number):
     """Get PO details from Simpro"""
     try:
-        # Direct lookup by ID first
-        response = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_number}')
-        if response.status_code == 200:
-            po_id = po_number
-        elif response.status_code == 404:
-            # Maybe user entered OrderNo instead of ID - try OrderNo search
-            search_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/?OrderNo={po_number}')
-            if search_resp.status_code == 200:
-                orders = search_resp.json()
-                if orders:
-                    po_id = orders[0].get('ID')
-                else:
-                    return jsonify({'error': f'PO #{po_number} not found'}), 404
-            else:
-                return jsonify({'error': f'PO #{po_number} not found'}), 404
-        else:
+        # Search for PO by ID
+        response = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/?ID={po_number}')
+        
+        if response.status_code != 200:
             return jsonify({'error': f'Simpro API error: {response.status_code}'}), 500
+        
+        orders = response.json()
+        if not orders:
+            return jsonify({'error': f'PO #{po_number} not found'}), 404
+        
+        po_id = orders[0].get('ID')
         
         # Get full PO record (search returns minimal data)
         full_po_response = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}')
@@ -1067,7 +771,7 @@ def get_po_details(po_number):
         po_reference = po.get('Reference', '')
         
         if job_number:
-            job_response = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_number}?columns=ID,Name,Customer')
+            job_response = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_number}/?columns=ID,Name,Customer')
             if job_response.status_code == 200:
                 job_data = job_response.json()
                 customer = job_data.get('Customer', {})
@@ -1088,19 +792,6 @@ def get_po_details(po_number):
                 job_number = 'Stock'
             # Leave customer_name empty - never use vendor/supplier name as customer
             customer_name = ''
-        
-        # Pre-fetch all cost centres for this job to get custom CC names
-        cc_name_map = {}
-        if job_number and isinstance(job_number, int):
-            po_section_id = assigned_to.get('Section')
-            if po_section_id:
-                try:
-                    cc_list_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_number}/sections/{po_section_id}/costCenters/')
-                    if cc_list_resp.status_code == 200:
-                        for cc_item in cc_list_resp.json():
-                            cc_name_map[cc_item["ID"]] = cc_item.get("Name", cc_item.get("CostCenter", {}).get("Name", "Unknown"))
-                except Exception as cc_err:
-                    print(f"Error fetching CC names for job {job_number}: {cc_err}")
         
         # Get PO line items (catalogs)
         items_response = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/catalogs/')
@@ -1146,113 +837,69 @@ def get_po_details(po_number):
             part_no = catalog.get('Catalog', {}).get('PartNo', '')
             description = catalog.get('Catalog', {}).get('Name', catalog.get('Description', 'Unknown Item'))
             
-            # v73: Create one item per ALLOCATION (not per catalog)
-            # This splits merged POs into separate lines (e.g. "9 stock + 1 job" → 2 lines)
+            # Get quantity from allocations endpoint (quantity is not in catalog response)
+            quantity_ordered = 0
+            quantity_received = 0
+            item_job_number = None
+            item_customer_name = None
+            item_storage_location = None
+            
             if catalog_id:
                 try:
                     alloc_response = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/catalogs/{catalog_id}/allocations/')
                     if alloc_response.status_code == 200:
                         allocations = alloc_response.json()
-                        if allocations:
-                            for alloc in allocations:
-                                qty_obj = alloc.get('Quantity', {})
-                                alloc_total = qty_obj.get('Total', 0)
-                                alloc_received = qty_obj.get('Received', 0)
-                                
-                                if alloc_total <= 0:
-                                    continue  # Skip zero-qty allocations
-                                
-                                alloc_assigned = alloc.get('AssignedTo', {})
-                                alloc_job = alloc_assigned.get('Job') if isinstance(alloc_assigned, dict) else None
-                                alloc_assigned_id = alloc_assigned.get('ID') if isinstance(alloc_assigned, dict) else None
-                                
-                                # Determine receipt status for THIS allocation
-                                if alloc_total > 0 and alloc_received >= alloc_total:
-                                    alloc_receipt_status = 'fully_receipted'
-                                elif alloc_received > 0:
-                                    alloc_receipt_status = 'partially_receipted'
-                                else:
-                                    alloc_receipt_status = 'not_receipted'
-                                
-                                item_entry = {
-                                    'catalogId': catalog_id,
-                                    'partNo': part_no,
-                                    'description': description,
-                                    'quantityOrdered': alloc_total,
-                                    'quantityReceived': alloc_received,
-                                    'receiptStatus': alloc_receipt_status,
-                                    'allocationType': 'job' if alloc_job else 'stock',
-                                    'allocationAssignedToId': alloc_assigned_id,
-                                    'storageLocation': None,
-                                    'costCentreId': None,
-                                    'costCentreName': None,
-                                    'jobNumber': None,
-                                    'customerName': None,
-                                    'jobId': None,
-                                    'sectionId': None,
-                                }
-                                
-                                # Extract storage device
-                                storage_dev = alloc.get('StorageDevice', {})
-                                if isinstance(storage_dev, dict) and storage_dev.get('Name'):
-                                    item_entry['storageLocation'] = storage_dev.get('Name')
-                                elif isinstance(storage_dev, dict) and storage_dev.get('ID'):
-                                    sd_id = storage_dev['ID']
-                                    for dev in get_storage_devices():
-                                        if dev['ID'] == sd_id:
-                                            item_entry['storageLocation'] = dev['Name']
-                                            break
-                                
-                                if alloc_job:
-                                    # Job allocation - get job/customer details
-                                    job_info = get_job_customer(alloc_job)
-                                    item_entry['jobNumber'] = job_info['jobNumber']
-                                    item_entry['customerName'] = job_info['customerName']
-                                    item_entry['jobId'] = alloc_job
-                                    item_entry['sectionId'] = alloc_assigned.get('Section')
-                                    cc_obj = alloc_assigned.get('CostCenter', {})
-                                    item_entry['costCentreId'] = alloc_assigned_id
-                                    item_entry['costCentreName'] = cc_name_map.get(alloc_assigned_id, cc_obj.get('Name', ''))
-                                
-                                items.append(item_entry)
-                        else:
-                            # No allocations - add as unknown
-                            items.append({
-                                'catalogId': catalog_id,
-                                'partNo': part_no,
-                                'description': description,
-                                'quantityOrdered': 0,
-                                'quantityReceived': 0,
-                                'receiptStatus': 'not_receipted',
-                                'allocationType': 'unknown',
-                                'allocationAssignedToId': None,
-                                'jobNumber': str(job_number) if job_number else None,
-                                'customerName': customer_name,
-                                'storageLocation': None,
-                                'costCentreId': None,
-                                'costCentreName': None,
-                                'jobId': None,
-                                'sectionId': None,
-                            })
+                        for alloc in allocations:
+                            qty_obj = alloc.get('Quantity', {})
+                            quantity_ordered += qty_obj.get('Total', 0)
+                            quantity_received += qty_obj.get('Received', 0)
+                            
+                            # Extract per-item job from allocation's AssignedTo
+                            alloc_assigned = alloc.get('AssignedTo', {})
+                            alloc_job = alloc_assigned.get('Job')
+                            if alloc_job and not item_job_number:
+                                job_info = get_job_customer(alloc_job)
+                                item_job_number = job_info['jobNumber']
+                                item_customer_name = job_info['customerName']
+                            
+                            # Extract current storage device
+                            storage_dev = alloc.get('StorageDevice', {})
+                            if isinstance(storage_dev, dict) and storage_dev.get('Name'):
+                                item_storage_location = storage_dev.get('Name')
+                            elif isinstance(storage_dev, dict) and storage_dev.get('ID'):
+                                # Look up name from our devices list
+                                sd_id = storage_dev['ID']
+                                for dev in get_storage_devices():
+                                    if dev['ID'] == sd_id:
+                                        item_storage_location = dev['Name']
+                                        break
                 except Exception as e:
                     print(f"Error getting allocations for catalog {catalog_id}: {e}")
-                    items.append({
-                        'catalogId': catalog_id,
-                        'partNo': part_no,
-                        'description': description,
-                        'quantityOrdered': 0,
-                        'quantityReceived': 0,
-                        'receiptStatus': 'not_receipted',
-                        'allocationType': 'unknown',
-                        'allocationAssignedToId': None,
-                        'jobNumber': str(job_number) if job_number else None,
-                        'customerName': customer_name,
-                        'storageLocation': None,
-                        'costCentreId': None,
-                        'costCentreName': None,
-                        'jobId': None,
-                        'sectionId': None,
-                    })
+            
+            # Fall back to PO-level job/customer if no per-item assignment
+            if not item_job_number:
+                item_job_number = str(job_number) if job_number else None
+                item_customer_name = customer_name
+            
+            # Determine receipt status
+            if quantity_ordered > 0 and quantity_received >= quantity_ordered:
+                receipt_status = 'fully_receipted'
+            elif quantity_received > 0:
+                receipt_status = 'partially_receipted'
+            else:
+                receipt_status = 'not_receipted'
+            
+            items.append({
+                'catalogId': catalog_id,
+                'partNo': part_no,
+                'description': description,
+                'quantityOrdered': quantity_ordered,
+                'quantityReceived': quantity_received,
+                'receiptStatus': receipt_status,
+                'jobNumber': item_job_number,
+                'customerName': item_customer_name,
+                'storageLocation': item_storage_location
+            })
         
         return jsonify({
             'poNumber': po_number,
@@ -1287,7 +934,6 @@ def allocate_items():
         print(f"Data received: {data}")
         
         po_id = data.get('poId')
-        po_number = data.get('poNumber', po_id)  # Define early - used in error logging
         items = data.get('items', [])
         storage_device_id = data.get('storageDeviceId')
         print(f"PO ID: {po_id}, Storage: {storage_device_id}, Items count: {len(items)}")
@@ -1305,11 +951,9 @@ def allocate_items():
         # ============================================
         # Server-side receipt check (don't trust front-end status alone)
         # ============================================
-        receipt_allocations = {}  # catalog_id -> {storage_device_id, storage_name, quantity, cc_id, job_id, section_id}
-        receipt_alloc_all = {}  # catalog_id -> [list of all allocations with CC info] (v69)
+        receipt_allocations = {}  # catalog_id -> {storage_device_id, storage_name, quantity}
         catalog_items_received = {}  # catalog_id -> True/False (per-catalog ItemsReceived)
         catalog_receipt_id = {}  # catalog_id -> receipt_id (for PATCH ItemsReceived)
-        receipted_catalog_ids = set()  # Track which catalogs actually appear in a receipt
         po_is_receipted = False
         items_received_flag = False
         
@@ -1323,10 +967,6 @@ def allocate_items():
                     po_is_receipted = True
                     print(f"Receipt(s) found for PO {po_id}: {len(receipts)} receipt(s)")
                     
-                    # Store all receipt IDs for fallback PATCH (even if detail fails)
-                    all_receipt_ids = [r.get('ID') for r in receipts if r.get('ID')]
-                    first_receipt_id = all_receipt_ids[0] if all_receipt_ids else None
-                    
                     for receipt in receipts:
                         receipt_id = receipt.get('ID')
                         detail_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/receipts/{receipt_id}')
@@ -1338,41 +978,20 @@ def allocate_items():
                             # Map each catalog's current allocation, ItemsReceived status, and receipt ID
                             for cat in detail.get('Catalogs', []):
                                 cat_id = cat.get('Catalog', {}).get('ID')
-                                if cat_id:
-                                    receipted_catalog_ids.add(cat_id)
                                 catalog_items_received[cat_id] = receipt_items_received
                                 catalog_receipt_id[cat_id] = receipt_id
                                 for alloc in cat.get('Allocations', []):
                                     sd = alloc.get('StorageDevice', {})
                                     sd_id = sd.get('ID') if isinstance(sd, dict) else sd
                                     sd_name = sd.get('Name', 'Unknown') if isinstance(sd, dict) else 'Unknown'
-                                    # Extract CC assignment info for 3-step stock move (v69)
-                                    assigned_to = alloc.get('AssignedTo', {})
-                                    cc_id_val = None
-                                    job_id_val = None
-                                    section_id_val = None
-                                    if isinstance(assigned_to, dict):
-                                        cc_id_val = assigned_to.get('ID')
-                                        job_ref = assigned_to.get('Job', {})
-                                        section_ref = assigned_to.get('Section', {})
-                                        job_id_val = job_ref.get('ID') if isinstance(job_ref, dict) else job_ref
-                                        section_id_val = section_ref.get('ID') if isinstance(section_ref, dict) else section_ref
-                                    alloc_entry = {
+                                    receipt_allocations[cat_id] = {
                                         'storage_id': sd_id,
                                         'storage_name': sd_name,
-                                        'quantity': alloc.get('Quantity', 0),
-                                        'cc_id': cc_id_val,
-                                        'job_id': job_id_val,
-                                        'section_id': section_id_val
+                                        'quantity': alloc.get('Quantity', 0)
                                     }
-                                    if cat_id not in receipt_allocations:
-                                        receipt_allocations[cat_id] = alloc_entry
-                                    if cat_id not in receipt_alloc_all:
-                                        receipt_alloc_all[cat_id] = []
-                                    receipt_alloc_all[cat_id].append(alloc_entry)
                 else:
                     print(f"No receipts found for PO {po_id} - truly not receipted")
-            print(f"Server-side receipt check: po_is_receipted={po_is_receipted}, ItemsReceived={items_received_flag}, receipted_catalogs={receipted_catalog_ids}, allocations={receipt_allocations}")
+            print(f"Server-side receipt check: po_is_receipted={po_is_receipted}, ItemsReceived={items_received_flag}, allocations={receipt_allocations}")
         except Exception as e:
             print(f"Receipt check error: {e}")
         
@@ -1402,11 +1021,8 @@ def allocate_items():
                     item['quantity'] = 1
                     print(f"Fixed quantity for catalog {catalog_id}: defaulting to 1 (no quantityOrdered available)")
             
-            # Server-side receipt detection — per-ITEM, not per-PO
-            # A PO can be partially receipted (some items in receipt, some not)
-            # Only treat an item as receipted if THIS catalog appears in a receipt
-            item_in_receipt = catalog_id and (int(catalog_id) in receipted_catalog_ids)
-            is_receipted = item_in_receipt or receipt_status == 'fully_receipted'
+            # Server-side receipt detection (overrides front-end if we have data)
+            is_receipted = po_is_receipted or receipt_status == 'fully_receipted'
             
             if is_receipted and catalog_id in receipt_allocations:
                 current_alloc = receipt_allocations[catalog_id]
@@ -1437,7 +1053,7 @@ def allocate_items():
                     # Receipt EXISTS but ItemsReceived NOT ticked = "In Transit"
                     # CRITICAL: Do NOT use pre-receipt PUT - it doubles cost centre entries!
                     # Instead: tick ItemsReceived on the receipt first, then stock transfer
-                    r_id = catalog_receipt_id.get(catalog_id) or first_receipt_id
+                    r_id = catalog_receipt_id.get(catalog_id)
                     if r_id:
                         try:
                             print(f"Catalog {catalog_id}: In Transit - ticking ItemsReceived on receipt {r_id}...")
@@ -1445,9 +1061,6 @@ def allocate_items():
                             print(f"ItemsReceived PATCH response: {patch_resp.status_code} - {patch_resp.text}")
                             if patch_resp.status_code in (200, 204):
                                 print(f"✅ ItemsReceived set to true for receipt {r_id}")
-                                # Give Simpro a moment to process and move stock into Stock Holding
-                                print("Waiting 3 seconds for Simpro to process ItemsReceived...")
-                                time.sleep(3)
                             else:
                                 print(f"⚠️ ItemsReceived PATCH returned {patch_resp.status_code}")
                         except Exception as ir_err:
@@ -1459,33 +1072,22 @@ def allocate_items():
                         item['source_storage_name'] = current_storage_name
                     post_receipt_items.append(item)
                     print(f"Catalog {catalog_id}: Receipted, ItemsReceived now set, using stock transfer from {current_storage_name} to {storage_device_id}")
-            elif is_receipted and item_in_receipt:
-                # Receipted AND this specific catalog is in a receipt, but no allocation data found
+            elif is_receipted:
+                # Receipted but no allocation data found
                 # CRITICAL: NEVER use pre-receipt PUT when receipt exists - it doubles cost centre entries!
                 # Always tick ItemsReceived (if needed) then stock transfer
                 if not items_received_flag:
-                    # Try to tick ItemsReceived - use catalog-specific receipt ID, or fall back to first receipt
-                    r_id = catalog_receipt_id.get(catalog_id) or first_receipt_id
+                    # Try to tick ItemsReceived on the first receipt
+                    r_id = catalog_receipt_id.get(catalog_id)
                     if r_id:
                         try:
                             print(f"Catalog {catalog_id}: No alloc data, ticking ItemsReceived on receipt {r_id}...")
                             patch_resp = simpro_request('PATCH', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/receipts/{r_id}', json={'ItemsReceived': True})
                             print(f"ItemsReceived PATCH response: {patch_resp.status_code}")
-                            if patch_resp.status_code in (200, 204):
-                                print(f"✅ ItemsReceived set to true for receipt {r_id}")
-                                # Give Simpro a moment to process and move stock into Stock Holding
-                                print("Waiting 3 seconds for Simpro to process ItemsReceived...")
-                                time.sleep(3)
                         except Exception as ir_err:
                             print(f"⚠️ Failed to set ItemsReceived: {ir_err}")
                 post_receipt_items.append(item)
                 print(f"Catalog {catalog_id}: Receipted (no alloc data), routing to stock transfer")
-            elif is_receipted and not item_in_receipt:
-                # PO has receipts but THIS specific catalog item is NOT in any receipt
-                # This happens with partially-supplied POs (e.g. back-ordered items arriving later)
-                # Use pre-receipt allocation since this item has no stock yet
-                pre_receipt_items.append(item)
-                print(f"Catalog {catalog_id}: PO partially receipted but THIS item not in any receipt - using pre-receipt allocation")
             else:
                 pre_receipt_items.append(item)
                 print(f"Catalog {catalog_id}: Not yet receipted, using pre-receipt allocation")
@@ -1494,146 +1096,49 @@ def allocate_items():
         print(f"Post-receipt items (stock transfer): {len(post_receipt_items)}")
         print(f"Already allocated items: {len(already_allocated_items)}")
         
-        # Track partial vs full receipt for status determination
-        partial_receipt_detected = False
-        
         # ============================================
         # Path 1: Pre-receipt allocation (set storage before Ezybills receipts)
-        # CRITICAL v73: Per-allocation matching — knows exactly which allocation to receive
-        # The PUT replaces ALL allocations, so must include untouched ones too.
+        # CRITICAL: Must preserve AssignedTo/CostCenter from existing allocations!
+        # The PUT replaces ALL allocations, so we must include AssignedTo.
         # ============================================
-        
-        # v73: Group pre-receipt items by catalogId (same catalog may appear multiple times for merged POs)
-        from collections import defaultdict
-        catalog_groups = defaultdict(list)
         for item in pre_receipt_items:
-            catalog_groups[item.get('catalogId')].append(item)
-        
-        for catalog_id, group_items in catalog_groups.items():
-            # Use first item for metadata
-            first_item = group_items[0]
-            quantity = sum(gi.get('quantity', 0) for gi in group_items)
+            catalog_id = item.get('catalogId')
+            quantity = item.get('quantity', 1)
+            
+            # Use the quantity from the request, but also validate against ordered qty
+            qty_ordered = item.get('quantityOrdered', 0)
+            if qty_ordered > 0 and quantity <= 0:
+                quantity = qty_ordered
             
             allocation_url = f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/catalogs/{catalog_id}/allocations/'
             
-            # Fetch existing allocations
-            existing_allocs = []
+            # Fetch existing allocations to get quantity if needed
             try:
                 existing_resp = simpro_request('GET', allocation_url)
                 if existing_resp.status_code == 200:
                     existing_allocs = existing_resp.json()
-                    print(f"[PRE-RECEIPT v73] Existing allocations for catalog {catalog_id}: {existing_allocs}")
+                    print(f"[PRE-RECEIPT] Existing allocations for catalog {catalog_id}: {existing_allocs}")
+                    if existing_allocs and len(existing_allocs) > 0:
+                        # Use the existing quantity if ours seems wrong
+                        if quantity <= 0:
+                            for existing_alloc in existing_allocs:
+                                eq = existing_alloc.get('Quantity', 0)
+                                if eq > 0:
+                                    quantity = eq
+                                    print(f"[PRE-RECEIPT] Using existing quantity: {quantity}")
+                                    break
             except Exception as ae:
-                print(f"[PRE-RECEIPT v73] Error fetching existing allocations: {ae}")
+                print(f"[PRE-RECEIPT] Error fetching existing allocations: {ae}")
             
-            total_existing = sum(
-                a.get('Quantity', {}).get('Total', 0) if isinstance(a.get('Quantity'), dict)
-                else a.get('Quantity', 0)
-                for a in existing_allocs
-            ) if existing_allocs else 0
+            # Build payload - Simpro API requires an ARRAY of allocations
+            # NOTE: Do NOT include AssignedTo - it's read-only and causes 422 errors
+            # Simpro preserves existing AssignedTo/CostCenter when only StorageDevice is changed
+            alloc_entry = {
+                'StorageDevice': int(storage_device_id),
+                'Quantity': int(quantity)
+            }
             
-            # Check if frontend sent per-allocation info (v73+)
-            has_allocation_info = any(gi.get('allocationType') for gi in group_items)
-            
-            if has_allocation_info and existing_allocs:
-                # v73 per-allocation logic
-                # Separate received items into job allocations and stock pool
-                job_received = {}  # allocationAssignedToId -> qty
-                stock_received_total = 0
-                
-                for gi in group_items:
-                    aid = gi.get('allocationAssignedToId')
-                    qty = gi.get('quantity', 0)
-                    atype = gi.get('allocationType', 'stock')
-                    if aid and atype == 'job':
-                        job_received[aid] = job_received.get(aid, 0) + qty
-                    else:
-                        stock_received_total += qty
-                
-                payload = []
-                remaining_stock_to_deduct = stock_received_total
-                
-                for ea in existing_allocs:
-                    ea_qty_obj = ea.get('Quantity', {})
-                    ea_qty = float(ea_qty_obj.get('Total', 0) if isinstance(ea_qty_obj, dict) else ea_qty_obj)
-                    ea_storage = ea.get('StorageDevice', {}).get('ID', 3) if isinstance(ea.get('StorageDevice'), dict) else ea.get('StorageDevice', 3)
-                    ea_assigned = ea.get('AssignedTo', {})
-                    ea_assigned_id = ea_assigned.get('ID') if isinstance(ea_assigned, dict) else None
-                    
-                    if ea_assigned_id and ea_assigned_id in job_received:
-                        # Job allocation being received
-                        recv_qty = job_received.pop(ea_assigned_id)
-                        remaining = ea_qty - recv_qty
-                        
-                        if recv_qty > 0:
-                            entry = {'StorageDevice': int(storage_device_id), 'Quantity': float(recv_qty), 'AssignedTo': ea_assigned_id}
-                            payload.append(entry)
-                        if remaining > 0:
-                            entry = {'StorageDevice': int(ea_storage), 'Quantity': float(remaining), 'AssignedTo': ea_assigned_id}
-                            payload.append(entry)
-                            partial_receipt_detected = True
-                    elif not ea_assigned_id and remaining_stock_to_deduct > 0:
-                        # Stock allocation — deduct from stock pool
-                        deduct = min(remaining_stock_to_deduct, ea_qty)
-                        remaining_stock_to_deduct -= deduct
-                        remaining = ea_qty - deduct
-                        
-                        if deduct > 0:
-                            payload.append({'StorageDevice': int(storage_device_id), 'Quantity': float(deduct)})
-                        if remaining > 0:
-                            payload.append({'StorageDevice': int(ea_storage), 'Quantity': float(remaining)})
-                            partial_receipt_detected = True
-                    else:
-                        # Not being received — keep as-is
-                        entry = {'StorageDevice': int(ea_storage), 'Quantity': float(ea_qty)}
-                        if ea_assigned_id:
-                            entry['AssignedTo'] = ea_assigned_id
-                        payload.append(entry)
-                        if ea_qty > 0:
-                            partial_receipt_detected = True
-                
-                total_payload = sum(e['Quantity'] for e in payload)
-                print(f"[PRE-RECEIPT v73] Per-allocation: job_received={job_received}, stock_deducted={stock_received_total - remaining_stock_to_deduct}")
-                print(f"[PRE-RECEIPT v73] Payload total={total_payload}, existing total={total_existing}")
-                if abs(total_payload - total_existing) > 0.01:
-                    print(f"WARNING: Total mismatch! Existing={total_existing}, Payload={total_payload}")
-            
-            elif not existing_allocs or quantity >= total_existing:
-                # Simple case: receiving ALL items or no existing data
-                payload = [{'StorageDevice': int(storage_device_id), 'Quantity': float(quantity if quantity > 0 else total_existing)}]
-                print(f"[PRE-RECEIPT] Full receipt: {quantity} of {total_existing} items")
-            else:
-                # v72 fallback: deduct from stock first, preserve job allocations
-                partial_receipt_detected = True
-                payload = [{'StorageDevice': int(storage_device_id), 'Quantity': float(quantity)}]
-                
-                stock_allocs_list = [a for a in existing_allocs if not a.get('AssignedTo') or not a.get('AssignedTo', {}).get('ID')]
-                job_allocs_list = [a for a in existing_allocs if a.get('AssignedTo') and a.get('AssignedTo', {}).get('ID')]
-                
-                qty_to_deduct = float(quantity)
-                for ea in stock_allocs_list + job_allocs_list:
-                    ea_qty_obj = ea.get('Quantity', {})
-                    ea_qty = ea_qty_obj.get('Total', 0) if isinstance(ea_qty_obj, dict) else ea_qty_obj
-                    ea_storage = ea.get('StorageDevice', {}).get('ID', 3) if isinstance(ea.get('StorageDevice'), dict) else ea.get('StorageDevice', 3)
-                    ea_assigned_id = ea.get('AssignedTo', {}).get('ID') if isinstance(ea.get('AssignedTo'), dict) else None
-                    
-                    deduct = min(qty_to_deduct, float(ea_qty))
-                    leftover = float(ea_qty) - deduct
-                    qty_to_deduct -= deduct
-                    
-                    if leftover > 0:
-                        entry = {'StorageDevice': int(ea_storage), 'Quantity': leftover}
-                        if ea_assigned_id:
-                            entry['AssignedTo'] = ea_assigned_id
-                        payload.append(entry)
-                    elif deduct == 0 and float(ea_qty) > 0:
-                        entry = {'StorageDevice': int(ea_storage), 'Quantity': float(ea_qty)}
-                        if ea_assigned_id:
-                            entry['AssignedTo'] = ea_assigned_id
-                        payload.append(entry)
-                
-                total_in_payload = sum(a['Quantity'] for a in payload)
-                print(f"[PRE-RECEIPT v72 fallback] Partial: {quantity} of {total_existing}. Payload total={total_in_payload}")
+            payload = [alloc_entry]
             
             print(f"[PRE-RECEIPT] PUT {allocation_url} with payload: {payload}")
             response = simpro_request('PUT', allocation_url, json=payload)
@@ -1662,45 +1167,40 @@ def allocate_items():
                     'success': True,
                     'quantity': quantity,
                     'verified': verified,
-                    'method': 'pre_receipt_allocation',
-                    'message': f'Allocated to storage ({"verified" if verified else "pending verification"})'
-                })
-                success_count += 1
-            else:
-                error_msg = f'Simpro API error: {response.status_code}'
-                try:
-                    error_data = response.json()
-                    error_msg = str(error_data)
-                except:
-                    error_msg = response.text[:200]
-                
-                results.append({
-                    'catalogId': catalog_id,
-                    'success': False,
-                    'error': error_msg,
                     'method': 'pre_receipt_allocation'
                 })
+                success_count += 1
+                if not verified:
+                    print(f"WARNING: Allocation for catalog {catalog_id} could not be verified!")
+            else:
+                error_detail = response.text[:500] if response.text else 'No response body'
+                print(f"❌ PRE-RECEIPT PUT FAILED: PO {po_number}, Catalog {catalog_id}, Status {response.status_code}, Response: {error_detail}")
                 
-                # Log error
+                # Log error to DB for debugging
                 try:
+                    import json as json_mod
                     err_conn = get_db()
                     err_cursor = err_conn.cursor()
-                    err_cursor.execute(
-                        '''INSERT INTO error_logs (error_type, po_number, catalog_id, staff_user, error_code, error_message, request_payload, response_body, endpoint)
+                    err_cursor.execute('''INSERT INTO error_logs (error_type, po_number, catalog_id, staff_user, error_code, error_message, request_payload, response_body, endpoint)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                        ('allocation', str(po_number), str(catalog_id), session.get('display_name', 'Unknown'),
-                         response.status_code, error_msg,
-                         json.dumps(payload), response.text[:500],
-                         allocation_url))
+                        ('pre_receipt_allocation', str(po_number), str(catalog_id), staff_name, 
+                         response.status_code, f'API returned {response.status_code}',
+                         json_mod.dumps(payload), error_detail, allocation_url))
                     err_conn.commit()
                     err_conn.close()
                 except Exception as log_err:
                     print(f"Error logging failed: {log_err}")
-
+                
+                results.append({
+                    'catalogId': catalog_id,
+                    'success': False,
+                    'error': f'API returned {response.status_code}',
+                    'detail': error_detail,
+                    'method': 'pre_receipt_allocation'
+                })
+        
         # ============================================
         # Path 2: Post-receipt stock transfer (move from current location to destination)
-        # Uses POST /stockTransfers/ endpoint — ONE item per request to avoid Simpro batch bug
-        # (Simpro validates qty of item 1 against stock of item 2 when batched — API Forum #2409)
         # ============================================
         if post_receipt_items:
             # Skip service/non-physical items (delivery charges, freight, etc.)
@@ -1711,7 +1211,7 @@ def allocate_items():
                 desc = str(item.get('description', '') or '').upper().strip()
                 is_service = any(p in part_no or p in desc for p in SERVICE_PATTERNS)
                 if is_service:
-                    print(f"Skipping service item: {part_no} - {desc}")
+                    print(f"⏭️ Skipping service item: {part_no} - {desc}")
                     results.append({
                         'catalogId': item.get('catalogId'),
                         'success': True,
@@ -1726,315 +1226,167 @@ def allocate_items():
             
             post_receipt_items = physical_items
             
-            # ============================================
-            # v69: 3-step CC stock move for post-receipt items
-            # CC-allocated stock does NOT appear in storage device InventoryCount.
-            # Instead of checking InventoryCount (which returns 0), we use receipt
-            # allocation data + 3-step CC stock move:
-            #   1. Un-assign from CC at source storage
-            #   2. Stock transfer from source to destination
-            #   3. Re-assign to CC at destination storage
-            # ============================================
-            
-            print(f"[v69] Receipt alloc_all keys: {list(receipt_alloc_all.keys())}")
-            print(f"[v69] Receipt allocations: {receipt_allocations}")
-            
+            # Group items by source storage device (most will be Stock Holding, but some may be elsewhere)
+            by_source = {}
             for item in post_receipt_items:
-                catalog_id = item.get('catalogId')
-                part_no = item.get('partNo', '')
-                desc = item.get('description', '')
-                quantity = item.get('quantity', 1)
-                dest_storage_id = int(storage_device_id)
+                source_id = item.get('source_storage_id', STOCK_HOLDING_ID)
+                source_name = item.get('source_storage_name', 'Stock Holding')
+                if source_id not in by_source:
+                    by_source[source_id] = {'name': source_name, 'items': []}
+                by_source[source_id]['items'].append(item)
+            
+            for source_id, group in by_source.items():
+                source_name = group['name']
+                group_items = group['items']
                 
-                if quantity <= 0:
-                    quantity = 1
-                
-                # Get receipt allocation(s) for this catalog
-                allocs = receipt_alloc_all.get(catalog_id) or receipt_alloc_all.get(int(catalog_id)) if catalog_id else None
-                if not allocs:
-                    allocs = receipt_alloc_all.get(str(catalog_id))
-                
-                # Also try single allocation from receipt_allocations
-                if not allocs:
-                    single_alloc = receipt_allocations.get(catalog_id) or receipt_allocations.get(int(catalog_id)) if catalog_id else None
-                    if not single_alloc:
-                        single_alloc = receipt_allocations.get(str(catalog_id))
-                    if single_alloc:
-                        allocs = [single_alloc]
-                
-                if not allocs:
-                    # No allocation data found - fetch receipt detail fresh
-                    print(f"[v69] No allocation data for catalog {catalog_id}, fetching receipt detail...")
-                    r_id = catalog_receipt_id.get(catalog_id) or catalog_receipt_id.get(int(catalog_id) if catalog_id else None)
-                    if not r_id:
-                        r_id = first_receipt_id if 'first_receipt_id' in dir() else None
-                    if r_id:
-                        try:
-                            rd_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/receipts/{r_id}')
-                            if rd_resp.status_code == 200:
-                                rd = rd_resp.json()
-                                for cat_item in rd.get('Catalogs', []):
-                                    cid = cat_item.get('Catalog', {}).get('ID')
-                                    if cid and int(cid) == int(catalog_id):
-                                        allocs = []
-                                        for al in cat_item.get('Allocations', []):
-                                            sd = al.get('StorageDevice', {})
-                                            sd_id = sd.get('ID') if isinstance(sd, dict) else sd
-                                            sd_nm = sd.get('Name', 'Unknown') if isinstance(sd, dict) else 'Unknown'
-                                            at = al.get('AssignedTo', {})
-                                            cc_v = None
-                                            job_v = None
-                                            sec_v = None
-                                            if isinstance(at, dict):
-                                                cc_v = at.get('ID')
-                                                jr = at.get('Job', {})
-                                                sr = at.get('Section', {})
-                                                job_v = jr.get('ID') if isinstance(jr, dict) else jr
-                                                sec_v = sr.get('ID') if isinstance(sr, dict) else sr
-                                            allocs.append({
-                                                'storage_id': sd_id,
-                                                'storage_name': sd_nm,
-                                                'quantity': al.get('Quantity', 0),
-                                                'cc_id': cc_v,
-                                                'job_id': job_v,
-                                                'section_id': sec_v
-                                            })
-                                        break
-                        except Exception as fetch_err:
-                            print(f"[v69] Error fetching receipt detail: {fetch_err}")
-                
-                if not allocs:
-                    print(f"[v69] WARN: No receipt allocation data for catalog {catalog_id} ({part_no}) - cannot process")
-                    results.append({
-                        'catalogId': catalog_id,
-                        'success': False,
-                        'quantity': quantity,
-                        'method': 'cc_stock_move_no_alloc',
-                        'error': 'No receipt allocation data found for this item. Cannot determine CC assignment.'
-                    })
-                    continue
-                
-                print(f"[v69] Processing {part_no} (catalog {catalog_id}) x{quantity}, dest={dest_storage_id}, allocs={allocs}")
-                
-                item_success = True
-                item_messages = []
-                remaining_qty = float(quantity)
-                
-                for alloc_info in allocs:
-                    if remaining_qty <= 0:
-                        break
-                    
-                    source_storage_id = alloc_info.get('storage_id')
-                    source_storage_name = alloc_info.get('storage_name', 'Unknown')
-                    alloc_qty = float(alloc_info.get('quantity', 0))
-                    cc_id = alloc_info.get('cc_id')
-                    job_id = alloc_info.get('job_id')
-                    section_id = alloc_info.get('section_id')
-                    
-                    # v71: Cross-reference with ACTUAL CC stock to get TRUE current storage location
-                    # Receipt allocations are STALE - they never update after stock moves (Simpro conflict #2)
-                    # Retry loop: Simpro can take >3s to populate AssignedBreakdown after ItemsReceived
-                    if cc_id and job_id and section_id:
-                        cc_stock_url = f"/companies/{COMPANY_ID}/jobs/{job_id}/sections/{section_id}/costCenters/{cc_id}/stock/{catalog_id}"
-                        cc_stock_found = False
-                        max_cc_retries = 5
-                        for cc_retry in range(max_cc_retries):
-                            try:
-                                print(f"[v71] Checking TRUE location via CC stock (attempt {cc_retry+1}/{max_cc_retries}): {cc_stock_url}")
-                                cc_stock_resp = simpro_request('GET', cc_stock_url)
-                                if cc_stock_resp.status_code == 200:
-                                    cc_stock_data = cc_stock_resp.json()
-                                    true_breakdown = cc_stock_data.get('AssignedBreakdown', [])
-                                    # Check if any entry has Quantity > 0
-                                    has_stock = False
-                                    if true_breakdown:
-                                        for tb in true_breakdown:
-                                            ts = tb.get('Storage', {})
-                                            ts_id = ts.get('ID') if isinstance(ts, dict) else ts
-                                            ts_name = ts.get('Name', 'Unknown') if isinstance(ts, dict) else 'Unknown'
-                                            ts_qty = float(tb.get('Quantity', 0))
-                                            if ts_qty > 0:
-                                                if ts_id != source_storage_id:
-                                                    print(f"[v71] CORRECTED source: {source_storage_name}({source_storage_id}) -> {ts_name}({ts_id})")
-                                                source_storage_id = ts_id
-                                                source_storage_name = ts_name
-                                                alloc_qty = ts_qty
-                                                has_stock = True
-                                                break
-                                    if has_stock:
-                                        if cc_retry > 0:
-                                            print(f"[v71] CC stock appeared after {cc_retry} retries for catalog {catalog_id}")
-                                        cc_stock_found = True
-                                        break
-                                    else:
-                                        # AssignedBreakdown empty or all quantities 0
-                                        if cc_retry < max_cc_retries - 1:
-                                            print(f"[v71] CC stock retry {cc_retry+1}/{max_cc_retries} for catalog {catalog_id} — AssignedBreakdown empty, waiting 3s...")
-                                            time.sleep(3)
-                                        else:
-                                            print(f"[v71] CC stock still empty after {max_cc_retries} retries for catalog {catalog_id} — using receipt allocs")
-                                else:
-                                    print(f"[v71] CC stock lookup returned {cc_stock_resp.status_code} - keeping receipt allocs")
-                                    break  # Non-200 status, no point retrying
-                            except Exception as cc_err:
-                                print(f"[v71] CC stock lookup error: {cc_err} - using receipt allocation")
-                                break  # Exception, no point retrying
-                    
-                    move_qty = min(remaining_qty, alloc_qty) if alloc_qty > 0 else remaining_qty
-                    if move_qty <= 0:
-                        move_qty = remaining_qty
-                    
-                    # SPECIAL CASE: destination == source storage - no move needed!
-                    if source_storage_id and int(source_storage_id) == dest_storage_id:
-                        print(f"[v69] {part_no}: dest == source ({dest_storage_id}), no move needed")
-                        item_messages.append(f'Stock already at {source_storage_name} (no move needed)')
-                        remaining_qty -= move_qty
-                        continue
-                    
-                    if not source_storage_id:
-                        source_storage_id = STOCK_HOLDING_ID
-                        source_storage_name = 'Stock Holding'
-                    
-                    print(f"[v69] 3-step CC move for {part_no} x{move_qty}: {source_storage_name}({source_storage_id}) -> {storage_name}({dest_storage_id})")
-                    print(f"[v69] CC info: job={job_id}, section={section_id}, cc={cc_id}")
-                    
-                    step_failed = False
-                    
-                    # STEP 1: Un-assign from CC at source (frees stock into InventoryCount)
-                    if cc_id and job_id and section_id:
-                        try:
-                            print(f"[v69] Step 1: Un-assign catalog {catalog_id} from CC {cc_id} at storage {source_storage_id}")
-                            unassign_resp = simpro_request(
-                                'PATCH',
-                                f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{section_id}/costCenters/{cc_id}/stock/{catalog_id}',
-                                json={'AssignedBreakdown': [{'Storage': int(source_storage_id), 'Quantity': 0}]}
-                            )
-                            print(f"[v69] Step 1 response: {unassign_resp.status_code} - {unassign_resp.text[:200] if unassign_resp.text else ''}")
-                            if unassign_resp.status_code not in (200, 204):
-                                print(f"[v69] Step 1 FAILED: {unassign_resp.status_code}")
-                                step_failed = True
-                                item_messages.append(f'Step 1 failed (un-assign): HTTP {unassign_resp.status_code}')
-                        except Exception as step1_err:
-                            print(f"[v69] Step 1 ERROR: {step1_err}")
-                            step_failed = True
-                            item_messages.append(f'Step 1 error: {str(step1_err)}')
-                    else:
-                        print(f"[v69] No CC info - skipping step 1, will attempt direct transfer")
-                    
-                    # STEP 2: Stock transfer from source to destination
-                    if not step_failed:
-                        try:
-                            transfer_payload = {
-                                'SourceStorageDeviceID': int(source_storage_id),
-                                'Items': [{
-                                    'CatalogID': int(catalog_id),
-                                    'DestinationStorageDeviceID': int(dest_storage_id),
-                                    'Quantity': move_qty
-                                }]
-                            }
-                            print(f"[v69] Step 2: Stock transfer {json.dumps(transfer_payload)}")
-                            transfer_resp = simpro_request('POST', f'/companies/{COMPANY_ID}/stockTransfer/', json=transfer_payload)
-                            print(f"[v69] Step 2 response: {transfer_resp.status_code} - {transfer_resp.text[:200] if transfer_resp.text else ''}")
-                            if transfer_resp.status_code not in (200, 201, 204):
-                                print(f"[v69] Step 2 FAILED: {transfer_resp.status_code}")
-                                step_failed = True
-                                err_detail = ''
-                                try:
-                                    ed = transfer_resp.json()
-                                    if isinstance(ed, dict) and 'Message' in ed:
-                                        err_detail = ed['Message']
-                                except:
-                                    err_detail = transfer_resp.text[:200] if transfer_resp.text else ''
-                                item_messages.append(f'Step 2 failed (transfer): HTTP {transfer_resp.status_code} {err_detail}')
-                                
-                                # Rollback step 1 if we un-assigned
-                                if cc_id and job_id and section_id:
-                                    try:
-                                        print(f"[v69] Rolling back step 1: re-assigning to CC at source")
-                                        rb_resp = simpro_request(
-                                            'POST',
-                                            f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{section_id}/costCenters/{cc_id}/stock/',
-                                            json={'Catalog': int(catalog_id), 'AssignedBreakdown': [{'Storage': int(source_storage_id), 'Quantity': move_qty}]}
-                                        )
-                                        print(f"[v69] Rollback response: {rb_resp.status_code}")
-                                    except Exception as rb_err:
-                                        print(f"[v69] Rollback failed: {rb_err}")
-                        except Exception as step2_err:
-                            print(f"[v69] Step 2 ERROR: {step2_err}")
-                            step_failed = True
-                            item_messages.append(f'Step 2 error: {str(step2_err)}')
-                    
-                    # STEP 3: Re-assign to CC at destination
-                    if not step_failed and cc_id and job_id and section_id:
-                        try:
-                            print(f"[v69] Step 3: Re-assign catalog {catalog_id} to CC {cc_id} at storage {dest_storage_id}")
-                            reassign_resp = simpro_request(
-                                'POST',
-                                f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{section_id}/costCenters/{cc_id}/stock/',
-                                json={'Catalog': int(catalog_id), 'AssignedBreakdown': [{'Storage': int(dest_storage_id), 'Quantity': move_qty}]}
-                            )
-                            print(f"[v69] Step 3 response: {reassign_resp.status_code} - {reassign_resp.text[:200] if reassign_resp.text else ''}")
-                            if reassign_resp.status_code not in (200, 201, 204):
-                                print(f"[v69] Step 3 FAILED: {reassign_resp.status_code}")
-                                step_failed = True
-                                item_messages.append(f'Step 3 failed (re-assign): HTTP {reassign_resp.status_code}')
-                        except Exception as step3_err:
-                            print(f"[v69] Step 3 ERROR: {step3_err}")
-                            step_failed = True
-                            item_messages.append(f'Step 3 error: {str(step3_err)}')
-                    elif not step_failed and not (cc_id and job_id and section_id):
-                        print(f"[v69] No CC info - skipping step 3 (re-assign)")
-                        item_messages.append('Transferred (no CC re-assignment - CC info not available)')
-                    
-                    if step_failed:
-                        item_success = False
-                    else:
-                        if cc_id and job_id and section_id:
-                            item_messages.append(f'3-step CC move OK: {source_storage_name} -> {storage_name}')
-                        else:
-                            item_messages.append(f'Direct transfer OK: {source_storage_name} -> {storage_name}')
-                        remaining_qty -= move_qty
-                
-                # Record result
-                if item_success:
-                    results.append({
-                        'catalogId': catalog_id,
-                        'success': True,
-                        'quantity': quantity,
-                        'verified': True,
-                        'method': 'cc_stock_move',
-                        'message': '; '.join(item_messages) if item_messages else f'Moved to {storage_name}'
-                    })
-                    success_count += 1
-                    print(f"[v69] SUCCESS: {part_no} x{quantity} -> {storage_name}")
-                else:
-                    error_summary = '; '.join(item_messages) if item_messages else 'Unknown error in CC stock move'
-                    print(f"[v69] FAILED: {part_no} - {error_summary}")
+                # Pre-check: Query stock levels to skip items with zero stock
+                items_with_stock = []
+                for item in group_items:
+                    catalog_id = item.get('catalogId')
+                    part_no = item.get('partNo', '')
+                    desc = item.get('description', '')
+                    quantity = item.get('quantity', 1)
                     
                     try:
-                        import json as json_mod
-                        err_conn = get_db()
-                        err_cursor = err_conn.cursor()
-                        err_cursor.execute(
-                            """INSERT INTO error_logs (error_type, po_number, catalog_id, staff_user, error_code, error_message, request_payload, response_body, endpoint)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                            ('cc_stock_move', str(po_number), str(catalog_id), session.get('display_name', 'Unknown'),
-                             0, error_summary,
-                             json.dumps({'allocs': str(allocs), 'dest': dest_storage_id}), '',
-                             'v69_3step_cc_move'))
-                        err_conn.commit()
-                        err_conn.close()
-                    except Exception as log_err:
-                        print(f"Error logging failed: {log_err}")
+                        # Use storageDevice stock endpoint (catalogs/stockOnHand returns 404)
+                        stock_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/storageDevices/{source_id}/stock/?Catalog.ID={catalog_id}')
+                        if stock_resp.status_code == 200:
+                            stock_data = stock_resp.json()
+                            source_stock = 0
+                            if stock_data and len(stock_data) > 0:
+                                source_stock = stock_data[0].get('InventoryCount', 0)
+                            
+                            if source_stock <= 0:
+                                print(f"⏭️ Skipping {part_no} ({desc}): 0 stock in {source_name}")
+                                results.append({
+                                    'catalogId': catalog_id,
+                                    'success': False,
+                                    'quantity': quantity,
+                                    'method': 'skipped_zero_stock',
+                                    'error': f'No stock available in {source_name} - item may not have arrived yet'
+                                })
+                                continue
+                            
+                            print(f"📦 {part_no}: {source_stock} in {source_name}")
+                            
+                            # Cap quantity to available stock
+                            if quantity > source_stock:
+                                print(f"⚠️ Reducing {part_no} qty from {quantity} to {source_stock} (available stock)")
+                                item['quantity'] = int(source_stock)
+                        else:
+                            # If stock check fails, skip item to avoid 404 on transfer
+                            print(f"⚠️ Could not check stock for catalog {catalog_id}: {stock_resp.status_code} - skipping")
+                            results.append({
+                                'catalogId': catalog_id,
+                                'success': False,
+                                'quantity': quantity,
+                                'method': 'skipped_stock_check_failed',
+                                'error': f'Could not verify stock level in {source_name} (API returned {stock_resp.status_code})'
+                            })
+                            continue
+                    except Exception as e:
+                        print(f"⚠️ Stock check error for catalog {catalog_id}: {e} - skipping")
+                        results.append({
+                            'catalogId': catalog_id,
+                            'success': False,
+                            'quantity': quantity,
+                            'method': 'skipped_stock_check_error',
+                            'error': f'Stock check failed: {str(e)}'
+                        })
+                        continue
                     
-                    results.append({
-                        'catalogId': catalog_id,
-                        'success': False,
-                        'quantity': quantity,
-                        'error': error_summary,
-                        'method': 'cc_stock_move'
+                    items_with_stock.append(item)
+                
+                if not items_with_stock:
+                    print(f"No items with stock to transfer from {source_name}")
+                    continue
+                
+                group_items = items_with_stock
+                
+                transfer_items = []
+                for item in group_items:
+                    catalog_id = item.get('catalogId')
+                    quantity = item.get('quantity', 1)
+                    if quantity <= 0:
+                        quantity = 1
+                    transfer_items.append({
+                        'CatalogID': int(catalog_id),
+                        'DestinationStorageDeviceID': int(storage_device_id),
+                        'Quantity': int(quantity)
                     })
-
+                
+                transfer_payload = {
+                    'SourceStorageDeviceID': int(source_id),
+                    'Items': transfer_items
+                }
+                
+                print(f"[POST-RECEIPT] Stock Transfer from {source_name} (ID:{source_id}) to {storage_name}")
+                print(f"Transfer payload: {json.dumps(transfer_payload)}")
+                
+                transfer_response = simpro_request('POST', f'/companies/{COMPANY_ID}/stockTransfer/', json=transfer_payload)
+                print(f"Stock Transfer Response: {transfer_response.status_code} - {transfer_response.text}")
+                
+                if transfer_response.status_code in (200, 201, 204):
+                    for item in group_items:
+                        results.append({
+                            'catalogId': item.get('catalogId'),
+                            'success': True,
+                            'quantity': item.get('quantity', 1),
+                            'verified': True,
+                            'method': 'stock_transfer',
+                            'message': f'Transferred from {source_name} to {storage_name}'
+                        })
+                        success_count += 1
+                    print(f"✅ Stock transfer successful: {len(group_items)} items moved from {source_name} to {storage_name}")
+                else:
+                    error_msg = f'Stock Transfer API returned {transfer_response.status_code}'
+                    try:
+                        error_detail = transfer_response.json()
+                        if isinstance(error_detail, dict) and 'Message' in error_detail:
+                            error_msg = error_detail['Message']
+                    except:
+                        pass
+                    
+                    print(f"❌ Stock transfer failed: {error_msg}")
+                    
+                    # If batch transfer failed, try items individually
+                    print(f"Retrying items individually...")
+                    for item in group_items:
+                        catalog_id = item.get('catalogId')
+                        quantity = item.get('quantity', 1)
+                        if quantity <= 0:
+                            quantity = 1
+                        
+                        single_payload = {
+                            'SourceStorageDeviceID': int(source_id),
+                            'Items': [{
+                                'CatalogID': int(catalog_id),
+                                'DestinationStorageDeviceID': int(storage_device_id),
+                                'Quantity': int(quantity)
+                            }]
+                        }
+                        
+                        single_resp = simpro_request('POST', f'/companies/{COMPANY_ID}/stockTransfer/', json=single_payload)
+                        if single_resp.status_code in (200, 201, 204):
+                            results.append({
+                                'catalogId': catalog_id,
+                                'success': True,
+                                'quantity': quantity,
+                                'verified': True,
+                                'method': 'stock_transfer',
+                                'message': f'Transferred from {source_name} to {storage_name}'
+                            })
+                            success_count += 1
+                            print(f"✅ Individual transfer success: catalog {catalog_id}")
+                        else:
+                            results.append({
+                                'catalogId': catalog_id,
+                                'success': False,
+                                'error': f'Stock transfer from {source_name} failed: {single_resp.status_code}',
+                                'method': 'stock_transfer'
+                            })
+                            print(f"❌ Individual transfer failed: catalog {catalog_id} - {single_resp.status_code}")
+        
         # Log the allocation
         staff_id = session.get('staff_id')
         staff_name = session.get('display_name', 'Unknown')
@@ -2050,22 +1402,18 @@ def allocate_items():
         # Only set if at least one item was successfully allocated AND there are pre-receipt items
         # ============================================
         goods_received_set = False
-        status_set = None
         if success_count > 0 and pre_receipt_items:
             try:
-                # Always set 239 (GOODS RECEIVED) when any items are allocated
-                # Kelly's KPro integration handles partial/complete status logic from here
                 print(f"=== SETTING GOODS RECEIVED STATUS for PO {po_id} ===")
                 gr_response = simpro_request('PATCH', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}', json={'Status': 239})
                 print(f"Goods Received API Response: {gr_response.status_code}")
                 if gr_response.status_code == 204:
                     goods_received_set = True
-                    status_set = 239
-                    print(f"\u2705 Goods Received status set successfully for PO {po_id}")
+                    print(f"✅ Goods Received status set successfully for PO {po_id}")
                 else:
-                    print(f"\u26a0\ufe0f Goods Received status update returned: {gr_response.status_code} - {gr_response.text}")
+                    print(f"⚠️ Goods Received status update returned: {gr_response.status_code} - {gr_response.text}")
             except Exception as gr_err:
-                print(f"\u26a0\ufe0f Failed to set PO status: {gr_err}")
+                print(f"⚠️ Failed to set Goods Received status: {gr_err}")
         
         # Determine allocation type for logging
         if post_receipt_items and pre_receipt_items:
@@ -2177,946 +1525,6 @@ def get_storage_stock(storage_id):
         print(f"Error getting storage stock: {e}")
         return jsonify({'items': [], 'error': str(e)})
 
-
-@app.route('/api/stock-search', methods=['POST'])
-@login_required
-def stock_search():
-    """Search for stock by PO or Job number - returns items with TRUE locations.
-    
-    Uses multiple data sources for accuracy:
-    1. PO allocation data (job/section/CC info + PO storage)
-    2. CC stock (actual assigned quantities and locations for job stock)
-    3. Storage device stock (fallback for items received outside normal flow)
-    """
-    try:
-        data = request.get_json()
-        search_type = data.get('searchType', 'po')
-        search_value = data.get('searchValue', '')
-        
-        if not search_value:
-            return jsonify({'error': 'Please enter a number'}), 400
-        
-        po_ids = []
-        
-        if search_type == 'job':
-            # Job search: look up job, iterate sections/cost centres, get stock
-            job_id_val = search_value.strip()
-            
-            # Step 1: Look up job by ID
-            job_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id_val}?columns=ID,Name,Customer,Site')
-            if job_resp.status_code != 200:
-                return jsonify({'error': f'Job {job_id_val} not found'}), 400
-            jd = job_resp.json()
-            cust = jd.get('Customer', {})
-            customer_name = ''
-            if isinstance(cust, dict):
-                customer_name = cust.get('CompanyName', cust.get('GivenName', ''))
-            job_name = jd.get('Name', str(job_id_val))
-            job_info = {
-                'jobNumber': job_name,
-                'customerName': customer_name,
-            }
-            
-            # Step 2: Get sections for the job
-            sec_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id_val}/sections/')
-            sections = []
-            if sec_resp.status_code == 200:
-                sections = sec_resp.json()
-            
-            all_items = []
-            collected_po_ids = set()
-            
-            for section in sections:
-                sid = section.get('ID')
-                if not sid:
-                    continue
-                
-                # Step 3: Get cost centres for this section
-                cc_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id_val}/sections/{sid}/costCenters/')
-                cost_centres = []
-                if cc_resp.status_code == 200:
-                    cost_centres = cc_resp.json()
-                
-                for cc in cost_centres:
-                    ccid = cc.get('ID')
-                    if not ccid:
-                        continue
-                    
-                    # Step 4: Get stock for this cost centre
-                    stock_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id_val}/sections/{sid}/costCenters/{ccid}/stock/')
-                    if stock_resp.status_code != 200:
-                        continue
-                    cc_stocks = stock_resp.json()
-                    
-                    # Step 5: Try to get vendor orders (POs) for this cost centre
-                    po_order_no = ''
-                    try:
-                        vo_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id_val}/sections/{sid}/costCenters/{ccid}/vendorOrders/')
-                        if vo_resp.status_code == 200:
-                            vos = vo_resp.json()
-                            for vo in vos:
-                                vo_id = vo.get('ID')
-                                vo_order_no = vo.get('OrderNo', '')
-                                if vo_id:
-                                    collected_po_ids.add(str(vo_id))
-                                if vo_order_no and not po_order_no:
-                                    po_order_no = vo_order_no
-                    except Exception:
-                        pass
-                    
-                    # Step 6: Build items from CC stock
-                    for s in cc_stocks:
-                        cat = s.get('Catalog', {})
-                        cat_id = cat.get('ID')
-                        if not cat_id:
-                            continue
-                        part_no = cat.get('PartNo', '?')
-                        name = cat.get('Name', '')
-                        qty_info = s.get('Quantity', {})
-                        assigned_qty = qty_info.get('Assigned', 0)
-                        breakdown = s.get('AssignedBreakdown', [])
-                        
-                        # Find storage with highest quantity
-                        best_storage_id = None
-                        best_storage_name = 'Unknown'
-                        best_qty = 0
-                        for bd in breakdown:
-                            bd_qty = bd.get('Quantity', 0)
-                            if bd_qty > best_qty:
-                                best_qty = bd_qty
-                                best_storage_id = bd.get('Storage', {}).get('ID')
-                                best_storage_name = bd.get('Storage', {}).get('Name', 'Unknown')
-                        
-                        if not best_storage_id and breakdown:
-                            best_storage_id = breakdown[0].get('Storage', {}).get('ID')
-                            best_storage_name = breakdown[0].get('Storage', {}).get('Name', 'Unknown')
-                        
-                        true_qty = best_qty if best_qty > 0 else assigned_qty
-                        # v85 fix: awaiting only when nothing assigned — empty breakdown ≠ not received
-                        awaiting = assigned_qty <= 0
-                        
-                        item_data = {
-                            'catalogId': cat_id,
-                            'partNo': part_no,
-                            'description': name,
-                            'storageId': best_storage_id,
-                            'storageName': best_storage_name,
-                            'quantity': true_qty,
-                            'quantityOrdered': 0,
-                            'awaitingReceipt': awaiting,
-                            'jobId': int(job_id_val),
-                            'sectionId': sid,
-                            'costCentreId': ccid,
-                            'poOrderNo': po_order_no,
-                        }
-                        all_items.append(item_data)
-                        print(f"  Job stock: {part_no}: storage={best_storage_name}, qty={true_qty}, awaiting={awaiting}")
-            
-            received_items = [i for i in all_items if not i['awaitingReceipt']]
-            awaiting_items = [i for i in all_items if i['awaitingReceipt']]
-            
-            po_list = [{'poId': pid} for pid in collected_po_ids]
-            
-            result = {
-                'job': job_info,
-                'pos': po_list,
-                'receivedCount': len(received_items),
-                'awaitingCount': len(awaiting_items),
-                'items': all_items
-            }
-            
-            return jsonify(result)
-        else:
-            po_ids = [search_value]
-        
-        all_items = []
-        job_info = None
-        job_id = None
-        section_id = None
-        cc_id = None
-        cc_stock_map = {}  # catalogId -> {assigned, storageId, storageName}
-        
-        for po_id in po_ids:
-            # Step 1: Get PO details
-            po_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}')
-            if po_resp.status_code != 200:
-                continue
-            po_data = po_resp.json()
-            po_order_no = po_data.get('OrderNo', str(po_id))
-            
-            # Step 2: Get catalog items and their allocations
-            cat_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/catalogs/')
-            if cat_resp.status_code != 200:
-                continue
-            catalogs = cat_resp.json()
-            
-            # Get allocation for first item to find job/section/CC
-            for cat_item in catalogs:
-                cat_id = cat_item.get('Catalog', {}).get('ID')
-                if not cat_id:
-                    continue
-                alloc_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/catalogs/{cat_id}/allocations/')
-                if alloc_resp.status_code == 200:
-                    allocs = alloc_resp.json()
-                    if allocs:
-                        assigned_to = allocs[0].get('AssignedTo', {})
-                        job_id = assigned_to.get('Job')
-                        section_id = assigned_to.get('Section')
-                        cc_id = assigned_to.get('ID')
-                        if job_id:
-                            break
-            
-            # Step 3: Get job info and CC stock in bulk (one API call for all items)
-            if job_id and section_id and cc_id:
-                # Get job info
-                job_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id}')
-                if job_resp.status_code == 200:
-                    jd = job_resp.json()
-                    cust = jd.get('Customer', {})
-                    customer_name = ''
-                    if isinstance(cust, dict):
-                        customer_name = cust.get('CompanyName', cust.get('GivenName', ''))
-                    job_info = {
-                        'jobNumber': jd.get('Name', str(job_id)),
-                        'customerName': customer_name,
-                    }
-                
-                # Get ALL CC stock in one call
-                cc_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{section_id}/costCenters/{cc_id}/stock/')
-                if cc_resp.status_code == 200:
-                    cc_stocks = cc_resp.json()
-                    for s in cc_stocks:
-                        cat = s.get('Catalog', {})
-                        cat_id = cat.get('ID')
-                        qty_info = s.get('Quantity', {})
-                        assigned_qty = qty_info.get('Assigned', 0)
-                        breakdown = s.get('AssignedBreakdown', [])
-                        
-                        # Find storage with highest quantity
-                        best_storage_id = None
-                        best_storage_name = 'Unknown'
-                        best_qty = 0
-                        for bd in breakdown:
-                            bd_qty = bd.get('Quantity', 0)
-                            if bd_qty > best_qty:
-                                best_qty = bd_qty
-                                best_storage_id = bd.get('Storage', {}).get('ID')
-                                best_storage_name = bd.get('Storage', {}).get('Name', 'Unknown')
-                        
-                        # Even if assigned=0, remember the storage reference
-                        if not best_storage_id and breakdown:
-                            best_storage_id = breakdown[0].get('Storage', {}).get('ID')
-                            best_storage_name = breakdown[0].get('Storage', {}).get('Name', 'Unknown')
-                        
-                        cc_stock_map[cat_id] = {
-                            'assigned': assigned_qty,
-                            'storageId': best_storage_id,
-                            'storageName': best_storage_name,
-                            'quantity': best_qty if best_qty > 0 else assigned_qty,
-                        }
-                    print(f"CC stock map: {json.dumps({k: v for k, v in cc_stock_map.items()}, default=str)}")
-            
-            # Step 4: Build item list
-            for cat_item in catalogs:
-                cat_catalog = cat_item.get('Catalog', {})
-                catalog_id = cat_catalog.get('ID')
-                part_no = cat_catalog.get('PartNo', '?')
-                name = cat_catalog.get('Name', '')
-                
-                if not catalog_id:
-                    continue
-                
-                # Get allocation for this specific item
-                alloc_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/catalogs/{catalog_id}/allocations/')
-                alloc_data = []
-                if alloc_resp.status_code == 200:
-                    alloc_data = alloc_resp.json()
-                alloc = alloc_data[0] if alloc_data else {}
-                po_qty_total = alloc.get('Quantity', {}).get('Total', 0)
-                po_qty_received = alloc.get('Quantity', {}).get('Received', 0)
-                po_storage = alloc.get('StorageDevice', {})
-                
-                # Determine TRUE location and received status
-                cc_data = cc_stock_map.get(catalog_id, {})
-                cc_assigned = cc_data.get('assigned', 0)
-                cc_qty = cc_data.get('quantity', 0)
-                
-                # Priority: CC stock assigned > 0 = definitely received and located
-                if cc_assigned > 0:
-                    true_storage_id = cc_data['storageId']
-                    true_storage_name = cc_data['storageName']
-                    true_qty = cc_qty
-                    awaiting = False
-                elif po_qty_received > 0:
-                    # PO says received but CC shows 0 assigned
-                    # CC assigned qty is authoritative - if 0, item has been consumed/moved/not actually there
-                    # Mark as awaiting receipt since we cannot confirm physical location
-                    true_storage_id = po_storage.get('ID')
-                    true_storage_name = po_storage.get('Name', 'Unknown')
-                    true_qty = 0
-                    awaiting = True
-                    print(f"  {part_no}: PO received but CC assigned=0, marking as awaiting")
-                else:
-                    # PO says 0 received AND CC says 0 assigned
-                    # CC assigned qty is authoritative - if 0, item is truly awaiting receipt
-                    # Do NOT check storage device as it may contain residual/unrelated stock data
-                    true_storage_id = po_storage.get('ID')
-                    true_storage_name = po_storage.get('Name', 'Unknown')
-                    true_qty = 0
-                    awaiting = True
-                
-                item_data = {
-                    'catalogId': catalog_id,
-                    'partNo': part_no,
-                    'description': name,
-                    'storageId': true_storage_id,
-                    'storageName': true_storage_name,
-                    'quantity': true_qty,
-                    'quantityOrdered': po_qty_total,
-                    'awaitingReceipt': awaiting,
-                    'jobId': job_id,
-                    'sectionId': section_id,
-                    'costCentreId': cc_id,
-                    'poOrderNo': po_order_no,
-
-                }
-                all_items.append(item_data)
-                print(f"  {part_no}: storage={true_storage_name}, qty={true_qty}, awaiting={awaiting}")
-        
-        received_items = [i for i in all_items if not i['awaitingReceipt']]
-        awaiting_items = [i for i in all_items if i['awaitingReceipt']]
-        
-        result = {
-            'job': job_info,
-            'pos': [{'poId': pid} for pid in po_ids],
-            'receivedCount': len(received_items),
-            'awaitingCount': len(awaiting_items),
-            'items': all_items
-        }
-        
-        return jsonify(result)
-        
-    except Exception as e:
-        print(f"Stock search error: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-
-
-
-def get_all_storage_devices():
-    """Fetch all storage devices from Simpro API, with 60-second cache."""
-    global _storage_devices_cache, _storage_devices_cache_time
-    now = time.time()
-    if _storage_devices_cache is not None and (now - _storage_devices_cache_time) < 60:
-        return _storage_devices_cache
-    try:
-        resp = simpro_request('GET', f'/companies/{COMPANY_ID}/storageDevices/?pageSize=200')
-        if resp.status_code == 200:
-            devices = {}
-            for dev in resp.json():
-                did = dev.get('ID')
-                dname = dev.get('Name', f'Device {did}')
-                if did:
-                    devices[did] = dname
-            _storage_devices_cache = devices
-            _storage_devices_cache_time = now
-            return devices
-    except Exception as e:
-        print(f'get_all_storage_devices error: {e}')
-    # Return cached version even if stale, or empty dict
-    return _storage_devices_cache or {}
-
-
-@app.route('/api/check-stock-for-catalogs', methods=['POST'])
-@login_required
-def check_stock_for_catalogs():
-    """Check which catalog IDs are in stock across all storage devices.
-    Fast: one API call per storage device (parallel), all catalog IDs in one pass.
-    Returns {catalogId: {storageId, storageName, quantity}} for any found."""
-    try:
-        data = request.get_json()
-        catalog_ids = set(data.get('catalogIds', []))
-        if not catalog_ids:
-            return jsonify({'stockMap': {}})
-        
-        storage_devs = get_all_storage_devices()
-        stock_map = {}
-        
-        import concurrent.futures as _cf
-        
-        def check_dev(sid_sname):
-            sid, sname = sid_sname
-            res = {}
-            try:
-                r = simpro_request('GET', f'/companies/{COMPANY_ID}/storageDevices/{sid}/stock/?columns=Catalog,InventoryCount&pageSize=200')
-                if r.status_code == 200:
-                    for s in r.json():
-                        cid = s.get('Catalog', {}).get('ID')
-                        inv = s.get('InventoryCount', 0)
-                        if cid in catalog_ids and inv > 0:
-                            res[cid] = {'storageId': sid, 'storageName': sname, 'quantity': inv}
-            except Exception as e:
-                print(f'check_stock_for_catalogs dev {sid}: {e}')
-            return res
-        
-        with _cf.ThreadPoolExecutor(max_workers=10) as ex:
-            futs = [ex.submit(check_dev, (sid, sname)) for sid, sname in storage_devs.items()]
-            for fut in _cf.as_completed(futs, timeout=20):
-                try:
-                    stock_map.update(fut.result())
-                except Exception:
-                    pass
-        
-        # Convert keys to strings for JSON
-        return jsonify({'stockMap': {str(k): v for k, v in stock_map.items()}})
-    except Exception as e:
-        print(f'check_stock_for_catalogs error: {e}')
-        return jsonify({'stockMap': {}, 'error': str(e)})
-
-
-@app.route('/api/stock-part-search', methods=['POST'])
-@login_required
-def stock_part_search():
-    """Search for a part number across all storage devices (parallel, fast)."""
-    from urllib.parse import quote as url_quote
-    import concurrent.futures
-    try:
-        data = request.get_json()
-        part_number = data.get('partNumber', '').strip()
-
-        if not part_number:
-            return jsonify({'error': 'Please enter a part number'}), 400
-
-        # Dynamically fetch all storage devices (cached for 60s)
-        STORAGE_DEVICES = get_all_storage_devices()
-
-        search_lower = part_number.lower()
-        encoded = url_quote(str(part_number), safe='')
-
-        def search_device(sid_sname):
-            sid, sname = sid_sname
-            try:
-                resp = simpro_request('GET', f'/companies/{COMPANY_ID}/storageDevices/{sid}/stock/?columns=Catalog,InventoryCount&Catalog.PartNo={encoded}')
-                results = []
-                if resp.status_code == 200:
-                    batch = resp.json()
-                    for s in batch:
-                        inv = s.get('InventoryCount', 0)
-                        if inv > 0:
-                            cat = s.get('Catalog', {})
-                            pno = cat.get('PartNo', '') or ''
-                            if search_lower in pno.lower():
-                                results.append({
-                                    'catalogId': cat.get('ID'),
-                                    'partNo': pno,
-                                    'description': cat.get('Name', ''),
-                                    'storageId': sid,
-                                    'storageName': sname,
-                                    'quantity': inv
-                                })
-                return results
-            except Exception as e:
-                print(f'stock_part_search device {sid} error: {e}')
-                return []
-
-        items = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-            futures = {executor.submit(search_device, (sid, sname)): sid for sid, sname in STORAGE_DEVICES.items()}
-            for future in concurrent.futures.as_completed(futures, timeout=15):
-                try:
-                    items.extend(future.result())
-                except Exception:
-                    pass
-
-        # Sort: highest quantity first
-        items.sort(key=lambda x: x.get('quantity', 0), reverse=True)
-
-        return jsonify({'items': items})
-    except Exception as e:
-        print(f'Part search error: {e}')
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/allocate-from-stock', methods=['POST'])
-@login_required
-def allocate_from_stock():
-    """Move selected stock items to a destination storage and optionally allocate to job.
-    Each item can have a different source storage. Uses 3-step CC move for job-allocated items."""
-    try:
-        data = request.get_json()
-        dest_id = data.get('destId')
-        dest_name = data.get('destName', 'Unknown')
-        job_number = data.get('jobNumber', '')
-        customer_name = data.get('customerName', '')
-        items = data.get('items', [])
-        staff_member = session.get('username', 'unknown')
-        staff_name = session.get('display_name', staff_member)
-        target_job_id = data.get('targetJobId', '')
-        
-        if not dest_id or not items:
-            return jsonify({"error": "Missing destination or items"}), 400
-        
-        print(f"=== ALLOCATE FROM STOCK ===")
-        print(f"Dest: {dest_name} (ID:{dest_id}) | Items: {len(items)} | Staff: {staff_name}")
-        
-        results = []
-        success_count = 0
-        
-        for item in items:
-            catalog_id = item.get('catalogId')
-            quantity = item.get('quantity', 1)
-            part_no = item.get('partNo', '?')
-            source_id = item.get('sourceId')
-            source_name = item.get('sourceName', 'Unknown')
-            job_id = item.get('jobId')
-            section_id = item.get('sectionId')
-            cost_centre_id = item.get('costCentreId')
-            
-            if not catalog_id:
-                results.append({"catalogId": catalog_id, "partNo": part_no, "success": False, "error": "Missing catalog ID"})
-                continue
-            
-            print(f"\n--- {part_no} (Cat:{catalog_id}) x{quantity}: {source_name}({source_id}) -> {dest_name}({dest_id}) ---")
-            
-            # Skip if source == destination
-            if source_id and str(source_id) == str(dest_id):
-                print(f"  Source == Dest, no move needed")
-                results.append({"catalogId": catalog_id, "partNo": part_no, "success": True, "method": "no_move_needed"})
-                success_count += 1
-                continue
-            
-            # CC confirmation required - block silent auto-allocation
-            if target_job_id and not (section_id and cost_centre_id):
-                results.append({"catalogId": catalog_id, "partNo": part_no, "success": False,
-                                "error": "Cost centre confirmation required before allocation"})
-                continue
-            
-            if job_id and section_id and cost_centre_id:
-                # Job-allocated stock: 3-step CC move
-                print(f"  Job-allocated: Job {job_id}, Section {section_id}, CC {cost_centre_id}")
-                step_failed = False
-                
-                # Step 1: Un-assign from CC at source
-                if source_id:
-                    print(f"  Step 1: Un-assign from {source_name}")
-                    try:
-                        unassign_resp = simpro_request(
-                            "PATCH",
-                            f"/companies/{COMPANY_ID}/jobs/{job_id}/sections/{section_id}/costCenters/{cost_centre_id}/stock/{catalog_id}",
-                            json={"AssignedBreakdown": [{"Storage": int(source_id), "Quantity": 0}]}
-                        )
-                        print(f"  Step 1: {unassign_resp.status_code}")
-                        if unassign_resp.status_code not in (200, 204):
-                            step_failed = True
-                            results.append({"catalogId": catalog_id, "partNo": part_no, "success": False, "error": f"Un-assign failed: HTTP {unassign_resp.status_code}"})
-                            continue
-                    except Exception as e:
-                        step_failed = True
-                        results.append({"catalogId": catalog_id, "partNo": part_no, "success": False, "error": f"Un-assign error: {str(e)}"})
-                        continue
-                
-                # Step 2: Stock transfer
-                if not step_failed and source_id:
-                    print(f"  Step 2: Transfer {source_name} -> {dest_name}")
-                    try:
-                        transfer_payload = {
-                            "SourceStorageDeviceID": int(source_id),
-                            "Items": [{
-                                "CatalogID": int(catalog_id),
-                                "DestinationStorageDeviceID": int(dest_id),
-                                "Quantity": int(quantity)
-                            }]
-                        }
-                        transfer_resp = simpro_request("POST", f"/companies/{COMPANY_ID}/stockTransfer/", json=transfer_payload)
-                        print(f"  Step 2: {transfer_resp.status_code}")
-                        if transfer_resp.status_code not in (200, 201, 204):
-                            # Rollback step 1
-                            print(f"  Step 2 FAILED - rolling back step 1")
-                            try:
-                                simpro_request("POST",
-                                    f"/companies/{COMPANY_ID}/jobs/{job_id}/sections/{section_id}/costCenters/{cost_centre_id}/stock/",
-                                    json={"Catalog": int(catalog_id), "AssignedBreakdown": [{"Storage": int(source_id), "Quantity": int(quantity)}]})
-                            except:
-                                pass
-                            results.append({"catalogId": catalog_id, "partNo": part_no, "success": False, "error": f"Transfer failed: HTTP {transfer_resp.status_code}"})
-                            continue
-                    except Exception as e:
-                        results.append({"catalogId": catalog_id, "partNo": part_no, "success": False, "error": f"Transfer error: {str(e)}"})
-                        continue
-                
-                # Step 3: Re-assign to CC at destination
-                print(f"  Step 3: Re-assign at {dest_name}")
-                try:
-                    reassign_resp = simpro_request(
-                        "POST",
-                        f"/companies/{COMPANY_ID}/jobs/{job_id}/sections/{section_id}/costCenters/{cost_centre_id}/stock/",
-                        json={"Catalog": int(catalog_id), "AssignedBreakdown": [{"Storage": int(dest_id), "Quantity": int(quantity)}]}
-                    )
-                    print(f"  Step 3: {reassign_resp.status_code}")
-                    if reassign_resp.status_code not in (200, 201, 204):
-                        results.append({"catalogId": catalog_id, "partNo": part_no, "success": False, "error": f"Re-assign failed: HTTP {reassign_resp.status_code}"})
-                        continue
-                except Exception as e:
-                    results.append({"catalogId": catalog_id, "partNo": part_no, "success": False, "error": f"Re-assign error: {str(e)}"})
-                    continue
-                
-                results.append({"catalogId": catalog_id, "partNo": part_no, "success": True, "method": "job_3step"})
-                success_count += 1
-                print(f"  SUCCESS: {part_no} moved")
-            elif target_job_id and not job_id:
-                # General stock → allocate to target job
-                print(f"  General stock → Job {target_job_id}")
-                
-                # Use confirmed section/CC from frontend CC confirmation step
-                found_section = section_id
-                found_cc = cost_centre_id
-                
-                if not found_section or not found_cc:
-                    results.append({"catalogId": catalog_id, "partNo": part_no, "success": False, "error": "Missing confirmed cost centre for job allocation"})
-                    continue
-                
-                # Step 2: Transfer stock from source to dest
-                if source_id and str(source_id) != str(dest_id):
-                    print(f"  Transfer: {source_name} -> {dest_name}")
-                    try:
-                        transfer_payload = {
-                            "SourceStorageDeviceID": int(source_id),
-                            "Items": [{
-                                "CatalogID": int(catalog_id),
-                                "DestinationStorageDeviceID": int(dest_id),
-                                "Quantity": int(quantity)
-                            }]
-                        }
-                        transfer_resp = simpro_request("POST", f"/companies/{COMPANY_ID}/stockTransfer/", json=transfer_payload)
-                        print(f"  Transfer: {transfer_resp.status_code}")
-                        if transfer_resp.status_code not in (200, 201, 204):
-                            err_msg = f"Transfer failed: HTTP {transfer_resp.status_code}"
-                            try:
-                                err = transfer_resp.json()
-                                if "Message" in err:
-                                    err_msg = err["Message"]
-                            except:
-                                pass
-                            results.append({"catalogId": catalog_id, "partNo": part_no, "success": False, "error": err_msg})
-                            continue
-                    except Exception as e:
-                        results.append({"catalogId": catalog_id, "partNo": part_no, "success": False, "error": f"Transfer error: {str(e)}"})
-                        continue
-                
-                # Step 3: Assign to job CC at destination
-                print(f"  Assign to Job {target_job_id} CC {found_cc}")
-                try:
-                    assign_resp = simpro_request(
-                        "POST",
-                        f"/companies/{COMPANY_ID}/jobs/{target_job_id}/sections/{found_section}/costCenters/{found_cc}/stock/",
-                        json={"Catalog": int(catalog_id), "AssignedBreakdown": [{"Storage": int(dest_id), "Quantity": int(quantity)}]}
-                    )
-                    print(f"  Assign: {assign_resp.status_code}")
-                    if assign_resp.status_code in (200, 201, 204):
-                        results.append({"catalogId": catalog_id, "partNo": part_no, "success": True, "method": "stock_to_job"})
-                        success_count += 1
-                        print(f"  SUCCESS: {part_no} allocated to Job {target_job_id}")
-                    else:
-                        err_msg = f"CC assign failed: HTTP {assign_resp.status_code}"
-                        try:
-                            err = assign_resp.json()
-                            if "Message" in err:
-                                err_msg = err["Message"]
-                        except:
-                            pass
-                        results.append({"catalogId": catalog_id, "partNo": part_no, "success": False, "error": err_msg})
-                except Exception as e:
-                    results.append({"catalogId": catalog_id, "partNo": part_no, "success": False, "error": f"CC assign error: {str(e)}"})
-            else:
-                # Non-job stock: simple transfer
-                if not source_id:
-                    results.append({"catalogId": catalog_id, "partNo": part_no, "success": False, "error": "No source storage found"})
-                    continue
-                print(f"  General stock: simple transfer")
-                try:
-                    transfer_payload = {
-                        "SourceStorageDeviceID": int(source_id),
-                        "Items": [{
-                            "CatalogID": int(catalog_id),
-                            "DestinationStorageDeviceID": int(dest_id),
-                            "Quantity": int(quantity)
-                        }]
-                    }
-                    transfer_resp = simpro_request("POST", f"/companies/{COMPANY_ID}/stockTransfer/", json=transfer_payload)
-                    if transfer_resp.status_code in (200, 201, 204):
-                        results.append({"catalogId": catalog_id, "partNo": part_no, "success": True, "method": "simple_transfer"})
-                        success_count += 1
-                        print(f"  SUCCESS: {part_no} transferred")
-                    else:
-                        err_msg = f"Transfer failed: HTTP {transfer_resp.status_code}"
-                        try:
-                            err = transfer_resp.json()
-                            if "Message" in err:
-                                err_msg = err["Message"]
-                        except:
-                            pass
-                        results.append({"catalogId": catalog_id, "partNo": part_no, "success": False, "error": err_msg})
-                except Exception as e:
-                    results.append({"catalogId": catalog_id, "partNo": part_no, "success": False, "error": str(e)})
-        
-        # Look up job info for response
-        response_customer = customer_name
-        response_job = job_number
-        if target_job_id and not customer_name:
-            try:
-                job_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{target_job_id}?columns=ID,Name,Customer')
-                if job_resp.status_code == 200:
-                    jd = job_resp.json()
-                    cust = jd.get('Customer', {})
-                    if isinstance(cust, dict):
-                        response_customer = cust.get('CompanyName', cust.get('GivenName', ''))
-                    response_job = jd.get('Name', str(target_job_id))
-            except:
-                pass
-        
-        # Log the allocation
-        try:
-            db = get_db()
-            for r in results:
-                if r.get("success"):
-                    orig = next((i for i in items if str(i.get("catalogId")) == str(r.get("catalogId"))), {})
-                    db.execute("""INSERT INTO allocation_log 
-                        (po_number, catalog_id, catalog_name, quantity, storage_location, staff_name, action_type, job_number, customer_name)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                        (orig.get("poOrderNo", "Stock"), str(r.get("catalogId")), r.get("partNo", ""),
-                         orig.get("quantity", 1), dest_name, staff_name, "stock_allocation",
-                         job_number, response_customer or customer_name))
-            db.commit()
-        except Exception as log_err:
-            print(f"Allocation log error: {log_err}")
-        
-        return jsonify({
-            "success": success_count > 0,
-            "totalItems": len(items),
-            "successCount": success_count,
-            "failCount": len(items) - success_count,
-            "results": results,
-            "customerName": response_customer,
-            "jobNumber": response_job
-        })
-    except Exception as e:
-        print(f"Allocate from stock error: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/stock-move', methods=['POST'])
-@login_required
-def stock_move():
-    """Move stock between storage locations - handles job-allocated receipted items.
-    
-    3-step process for job-allocated stock:
-    1. Un-assign from current storage in job cost centre
-    2. Stock transfer to new storage device
-    3. Re-assign to job cost centre at new storage
-    
-    For non-job stock: simple stock transfer only.
-    """
-    try:
-        data = request.get_json()
-        
-        po_id = data.get('poId')
-        source_id = data.get('sourceId')
-        source_name = data.get('sourceName', 'Unknown')
-        dest_id = data.get('destId')
-        dest_name = data.get('destName', 'Unknown')
-        items = data.get('items', [])
-        staff_member = session.get('username', 'unknown')
-        staff_name = session.get('display_name', staff_member)
-        
-        if not source_id or not dest_id or not items:
-            return jsonify({'error': 'Missing required fields'}), 400
-        
-        if str(source_id) == str(dest_id):
-            return jsonify({'error': 'Source and destination cannot be the same'}), 400
-        
-        print(f"=== STOCK MOVE REQUEST ===")
-        print(f"PO: {po_id} | From: {source_name} (ID:{source_id}) -> To: {dest_name} (ID:{dest_id})")
-        print(f"Items: {len(items)} | Staff: {staff_name}")
-        
-        success_count = 0
-        results = []
-        
-        for item in items:
-            catalog_id = item.get('catalogId')
-            quantity = item.get('quantity', 1)
-            part_no = item.get('partNo', '?')
-            job_id = item.get('jobId')
-            section_id = item.get('sectionId')
-            cc_id = item.get('costCentreId')
-            
-            if not catalog_id:
-                continue
-            
-            print(f"\n--- Moving {part_no} (Catalog:{catalog_id}) x{quantity} ---")
-            
-            # Auto-lookup section/CC if we have jobId but missing section/CC
-            if job_id and (not section_id or not cc_id):
-                print(f"  Auto-looking up section/CC for job {job_id}, catalog {catalog_id}")
-                sec_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/')
-                if sec_resp.status_code == 200:
-                    for sec in sec_resp.json():
-                        sid = sec.get('ID')
-                        if not sid:
-                            continue
-                        cc_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{sid}/costCenters/')
-                        if cc_resp.status_code == 200:
-                            for cc in cc_resp.json():
-                                ccid = cc.get('ID')
-                                if not ccid:
-                                    continue
-                                stock_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{sid}/costCenters/{ccid}/stock/{catalog_id}')
-                                if stock_resp.status_code == 200:
-                                    section_id = sid
-                                    cc_id = ccid
-                                    print(f"  Found: section={section_id}, cc={cc_id}")
-                                    break
-                            if section_id and cc_id:
-                                break
-
-            if job_id and section_id and cc_id:
-                # Job-allocated stock: 3-step process
-                print(f"Job-allocated: Job {job_id}, Section {section_id}, CC {cc_id}")
-                
-                # Step 1: Un-assign from current storage in job cost centre
-                print(f"Step 1: Un-assign from {source_name}")
-                unassign_payload = {
-                    "AssignedBreakdown": [{"Storage": int(source_id), "Quantity": 0}]
-                }
-                unassign_resp = simpro_request(
-                    'PATCH',
-                    f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{section_id}/costCenters/{cc_id}/stock/{catalog_id}',
-                    json=unassign_payload
-                )
-                print(f"Un-assign: {unassign_resp.status_code}")
-                
-                if unassign_resp.status_code not in (200, 204):
-                    error_msg = f'Un-assign failed: {unassign_resp.status_code}'
-                    try:
-                        err = unassign_resp.json()
-                        if 'errors' in err:
-                            error_msg = err['errors'][0].get('message', error_msg)
-                    except:
-                        pass
-                    results.append({'catalogId': catalog_id, 'partNo': part_no, 'success': False, 'error': error_msg, 'step': 'unassign'})
-                    print(f"FAILED at Step 1: {error_msg}")
-                    continue
-                
-                # Step 2: Stock transfer
-                print(f"Step 2: Transfer {source_name} -> {dest_name}")
-                transfer_payload = {
-                    'SourceStorageDeviceID': int(source_id),
-                    'Items': [{
-                        'CatalogID': int(catalog_id),
-                        'DestinationStorageDeviceID': int(dest_id),
-                        'Quantity': int(quantity)
-                    }]
-                }
-                transfer_resp = simpro_request('POST', f'/companies/{COMPANY_ID}/stockTransfer/', json=transfer_payload)
-                print(f"Transfer: {transfer_resp.status_code} - {transfer_resp.text[:200]}")
-                
-                if transfer_resp.status_code not in (200, 201, 204):
-                    error_msg = f'Transfer failed: {transfer_resp.status_code}'
-                    try:
-                        err = transfer_resp.json()
-                        if 'errors' in err:
-                            error_msg = err['errors'][0].get('message', error_msg)
-                    except:
-                        pass
-                    # Rollback: re-assign back to original storage
-                    print(f"Transfer failed, rolling back: re-assign to {source_name}")
-                    rollback = {
-                        "Catalog": int(catalog_id),
-                        "AssignedBreakdown": [{"Storage": int(source_id), "Quantity": int(quantity)}]
-                    }
-                    simpro_request('POST',
-                        f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{section_id}/costCenters/{cc_id}/stock/',
-                        json=rollback)
-                    results.append({'catalogId': catalog_id, 'partNo': part_no, 'success': False, 'error': error_msg, 'step': 'transfer'})
-                    print(f"FAILED at Step 2: {error_msg}")
-                    continue
-                
-                # Step 3: Re-assign to job at new storage
-                print(f"Step 3: Re-assign to job at {dest_name}")
-                reassign_payload = {
-                    "Catalog": int(catalog_id),
-                    "AssignedBreakdown": [{"Storage": int(dest_id), "Quantity": int(quantity)}]
-                }
-                reassign_resp = simpro_request(
-                    'POST',
-                    f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{section_id}/costCenters/{cc_id}/stock/',
-                    json=reassign_payload
-                )
-                print(f"Re-assign: {reassign_resp.status_code} - {reassign_resp.text[:200]}")
-                
-                if reassign_resp.status_code not in (200, 201, 204):
-                    error_msg = f'Re-assign failed (stock transferred but not reassigned): {reassign_resp.status_code}'
-                    try:
-                        err = reassign_resp.json()
-                        if 'errors' in err:
-                            error_msg = err['errors'][0].get('message', error_msg)
-                    except:
-                        pass
-                    results.append({'catalogId': catalog_id, 'partNo': part_no, 'success': False, 'error': error_msg, 'step': 'reassign'})
-                    print(f"WARNING at Step 3: {error_msg}")
-                    continue
-                
-                results.append({'catalogId': catalog_id, 'partNo': part_no, 'success': True, 'method': 'job_3step'})
-                success_count += 1
-                print(f"SUCCESS: {part_no} moved to {dest_name}")
-                
-            else:
-                # Non-job stock: simple stock transfer
-                print(f"General stock: simple transfer")
-                transfer_payload = {
-                    'SourceStorageDeviceID': int(source_id),
-                    'Items': [{
-                        'CatalogID': int(catalog_id),
-                        'DestinationStorageDeviceID': int(dest_id),
-                        'Quantity': int(quantity)
-                    }]
-                }
-                transfer_resp = simpro_request('POST', f'/companies/{COMPANY_ID}/stockTransfer/', json=transfer_payload)
-                print(f"Transfer: {transfer_resp.status_code} - {transfer_resp.text[:200]}")
-                
-                if transfer_resp.status_code in (200, 201, 204):
-                    results.append({'catalogId': catalog_id, 'partNo': part_no, 'success': True, 'method': 'simple_transfer'})
-                    success_count += 1
-                    print(f"SUCCESS: {part_no} moved to {dest_name}")
-                else:
-                    error_msg = f'Transfer failed: {transfer_resp.status_code}'
-                    try:
-                        err = transfer_resp.json()
-                        if 'errors' in err:
-                            error_msg = err['errors'][0].get('message', error_msg)
-                    except:
-                        pass
-                    results.append({'catalogId': catalog_id, 'partNo': part_no, 'success': False, 'error': error_msg})
-                    print(f"FAILED: {error_msg}")
-        
-        return jsonify({
-            'successCount': success_count,
-            'totalItems': len(items),
-            'results': results,
-            'movedBy': staff_name,
-            'from': source_name,
-            'to': dest_name
-        })
-        
-    except Exception as e:
-        print(f"Stock move error: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-
-
 @app.route('/api/relocate', methods=['POST'])
 @login_required
 def relocate_items():
@@ -3138,64 +1546,36 @@ def relocate_items():
         if source_id == dest_id:
             return jsonify({'error': 'Source and destination cannot be the same'}), 400
         
-        # Build list of valid items to transfer
+        # Build Stock Transfer API payload
         transfer_items = []
         for item in items:
             catalog_id = item.get('catalogId')
             quantity = item.get('quantity', 1)
             if catalog_id:
                 transfer_items.append({
-                    'catalogId': int(catalog_id),
-                    'quantity': int(quantity),
-                    'partNo': item.get('partNo', ''),
-                    'description': item.get('description', '')
+                    'CatalogID': int(catalog_id),
+                    'DestinationStorageDeviceID': int(dest_id),
+                    'Quantity': int(quantity)
                 })
         
         if not transfer_items:
             return jsonify({'error': 'No valid items to transfer'}), 400
         
+        payload = {
+            'SourceStorageDeviceID': int(source_id),
+            'Items': transfer_items
+        }
+        
         print(f"=== STOCK TRANSFER REQUEST ===")
         print(f"From: {source_name} (ID: {source_id}) -> To: {dest_name} (ID: {dest_id})")
         print(f"Items: {len(transfer_items)}")
+        print(f"Payload: {json.dumps(payload)}")
         
-        # Execute stock transfers INDIVIDUALLY (Simpro has a documented batch bug — API Forum #2409)
-        success_count = 0
-        results = []
+        # Execute stock transfer via Simpro API
+        response = simpro_request('POST', f'/companies/{COMPANY_ID}/stockTransfer/', json=payload)
+        print(f"Stock Transfer API Response: {response.status_code} - {response.text}")
         
-        for ti in transfer_items:
-            payload = {
-                'SourceStorageDeviceID': int(source_id),
-                'Items': [{
-                    'CatalogID': ti['catalogId'],
-                    'DestinationStorageDeviceID': int(dest_id),
-                    'Quantity': ti['quantity']
-                }]
-            }
-            
-            print(f"[TRANSFER] {ti['partNo']} x{ti['quantity']}: {source_name} -> {dest_name}")
-            print(f"Payload: {json.dumps(payload)}")
-            
-            # POST to stockTransfer/ (singular — verified working endpoint)
-            response = simpro_request('POST', f'/companies/{COMPANY_ID}/stockTransfer/', json=payload)
-            
-            print(f"Response: {response.status_code} - {response.text}")
-            
-            if response.status_code in (200, 201, 204):
-                success_count += 1
-                results.append({'catalogId': ti['catalogId'], 'success': True})
-                print(f"Transfer SUCCESS: {ti['partNo']}")
-            else:
-                error_msg = f'API returned {response.status_code}'
-                try:
-                    err = response.json()
-                    if isinstance(err, dict) and 'Message' in err:
-                        error_msg = err['Message']
-                except:
-                    pass
-                results.append({'catalogId': ti['catalogId'], 'success': False, 'error': error_msg})
-                print(f"Transfer FAILED: {ti['partNo']} - {error_msg}")
-        
-        if success_count > 0:
+        if response.status_code in (200, 201, 204):
             # Log the transfer
             staff_id = session.get('staff_id')
             log_allocation(
@@ -3204,35 +1584,36 @@ def relocate_items():
                 po_number='',
                 job_number='',
                 vendor_name='',
-                items_count=success_count,
+                items_count=len(transfer_items),
                 storage_location=f'{source_name} → {dest_name}',
                 allocation_type='stock_transfer',
                 verified=1
             )
             
             print(f"=== STOCK TRANSFER COMPLETE ===")
-            print(f"Transferred {success_count}/{len(transfer_items)} item(s) from {source_name} to {dest_name}")
+            print(f"Transferred {len(transfer_items)} item(s) from {source_name} to {dest_name}")
             
             return jsonify({
                 'success': True,
-                'message': f'Successfully transferred {success_count}/{len(transfer_items)} item(s) from {source_name} to {dest_name}',
-                'transferredCount': success_count,
-                'totalItems': len(transfer_items),
-                'results': results,
+                'message': f'Successfully transferred {len(transfer_items)} item(s) from {source_name} to {dest_name}',
+                'transferredCount': len(transfer_items),
                 'transferredBy': staff_name
             })
         else:
-            # All failed
-            error_msgs = [r.get('error', 'Unknown') for r in results if not r.get('success')]
-            error_summary = '; '.join(set(error_msgs)) if error_msgs else 'All transfers failed'
+            error_msg = f'Simpro API returned {response.status_code}'
+            try:
+                error_detail = response.json()
+                if isinstance(error_detail, dict) and 'Message' in error_detail:
+                    error_msg = error_detail['Message']
+            except:
+                error_msg = response.text or error_msg
             
             print(f"=== STOCK TRANSFER FAILED ===")
-            print(f"Error: {error_summary}")
+            print(f"Error: {error_msg}")
             
             return jsonify({
                 'success': False,
-                'error': error_summary,
-                'results': results
+                'error': error_msg
             }), 400
         
     except Exception as e:
@@ -3837,8 +2218,7 @@ def search_mystery_box():
 # ============================================
 # Fault Report Endpoints
 # ============================================
-FAULT_WEBHOOK_URL = os.environ.get('FAULT_WEBHOOK_URL', 'https://webhooks.tasklet.ai/v1/public/webhook?token=53c558477df26839f9518bab90f10e0c')
-DAMAGE_WEBHOOK_URL = os.environ.get('DAMAGE_WEBHOOK_URL', 'https://webhooks.tasklet.ai/v1/public/webhook?token=4c824d3655353426e8c5114a2317ffa0')
+FAULT_WEBHOOK_URL = os.environ.get('FAULT_WEBHOOK_URL', '')
 
 @app.route('/api/report-fault', methods=['POST'])
 @login_required
@@ -3970,7 +2350,7 @@ def resolve_fault_report(report_id):
         db = get_db()
         db.execute('''
             UPDATE fault_reports SET status = 'resolved', resolution = ?,
-                resolved_at = CURRENT_TIMESTAMP WHERE id = ?
+                resolved_at = datetime('now') WHERE id = ?
         ''', (resolution, report_id))
         db.commit()
         
@@ -3978,757 +2358,7 @@ def resolve_fault_report(report_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-
 # ============================================
-# Version Endpoint (for deploy verification)
-# ============================================
-
-@app.route('/api/job-intel', methods=['POST'])
-@login_required
-def job_intel():
-    """Get job stock intel - what's already received, what's pending, where it is"""
-    try:
-        data = request.json
-        job_id = data.get('job_id')
-        section_id = data.get('section_id')
-        cost_center_id = data.get('cost_center_id')
-        
-        if not job_id:
-            return jsonify({"error": "job_id required"}), 400
-        
-        token = get_simpro_token()
-        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-        base = SIMPRO_BASE_URL
-        
-        # 1. Get job details
-        job_resp = requests.get(f"{base}/companies/{COMPANY_ID}/jobs/{job_id}", headers=headers)
-        if job_resp.status_code != 200:
-            return jsonify({"error": f"Job {job_id} not found"}), 404
-        job = job_resp.json()
-        
-        job_info = {
-            "id": job_id,
-            "name": job.get("Name", ""),
-            "customer": job.get("Customer", {}).get("CompanyName", ""),
-            "site": job.get("Site", {}).get("Name", "")
-        }
-        
-        # 2. Get sections (use provided or discover)
-        if section_id:
-            sections = [{"ID": int(section_id)}]
-        else:
-            sec_resp = requests.get(f"{base}/companies/{COMPANY_ID}/jobs/{job_id}/sections/", headers=headers)
-            sections = sec_resp.json() if sec_resp.status_code == 200 else []
-        
-        # 3. For each section, get cost centers and stock
-        all_stock = []
-        cc_names = {}
-        
-        for section in sections:
-            sec_id = section["ID"]
-            
-            if cost_center_id:
-                ccs = [{"ID": int(cost_center_id), "Name": ""}]
-            else:
-                cc_resp = requests.get(f"{base}/companies/{COMPANY_ID}/jobs/{job_id}/sections/{sec_id}/costCenters/", headers=headers)
-                ccs = cc_resp.json() if cc_resp.status_code == 200 else []
-            
-            for cc in ccs:
-                cc_id = cc["ID"]
-                cc_name = cc.get("Name", "")
-                cc_names[cc_id] = cc_name
-                
-                stock_resp = requests.get(f"{base}/companies/{COMPANY_ID}/jobs/{job_id}/sections/{sec_id}/costCenters/{cc_id}/stock/", headers=headers)
-                if stock_resp.status_code == 200:
-                    stock_items = stock_resp.json()
-                    for item in stock_items:
-                        item["_cc_name"] = cc_name
-                        item["_cc_id"] = cc_id
-                        item["_section_id"] = sec_id
-                        all_stock.append(item)
-        
-        # 4. Build response
-        stock_list = []
-        storage_map = {}  # storage_name -> list of items
-        
-        for s in all_stock:
-            req_qty = s.get("Quantity", {}).get("Required", 0)
-            assigned_qty = s.get("Quantity", {}).get("Assigned", 0)
-            
-            if req_qty == 0 and assigned_qty == 0:
-                continue
-            
-            # Track storage locations where this item sits
-            item_storage = []
-            for breakdown in s.get("AssignedBreakdown", []):
-                qty = breakdown.get("Quantity", 0)
-                if qty > 0:
-                    storage_name = breakdown.get("Storage", {}).get("Name", "Unknown")
-                    storage_id = breakdown.get("Storage", {}).get("ID", 0)
-                    item_storage.append({"name": storage_name, "id": storage_id, "qty": qty})
-                    
-                    if storage_name not in storage_map:
-                        storage_map[storage_name] = {"name": storage_name, "id": storage_id, "items": []}
-                    storage_map[storage_name]["items"].append({
-                        "name": s["Catalog"]["Name"],
-                        "partNo": s["Catalog"].get("PartNo", ""),
-                        "qty": qty
-                    })
-            
-            stock_list.append({
-                "name": s["Catalog"]["Name"],
-                "partNo": s["Catalog"].get("PartNo", ""),
-                "required": req_qty,
-                "assigned": assigned_qty,
-                "pending": max(0, req_qty - assigned_qty),
-                "costCenter": s.get("_cc_name", ""),
-                "storageLocations": item_storage
-            })
-        
-        total_required = sum(s["required"] for s in stock_list)
-        total_assigned = sum(s["assigned"] for s in stock_list)
-        
-        return jsonify({
-            "job": job_info,
-            "stock": stock_list,
-            "summary": {
-                "totalItems": len(stock_list),
-                "totalRequired": total_required,
-                "totalAssigned": total_assigned,
-                "totalPending": max(0, total_required - total_assigned),
-                "isComplete": total_assigned >= total_required and total_required > 0
-            },
-            "storageLocations": list(storage_map.values())
-        })
-        
-    except Exception as e:
-        print(f"Job intel error: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/version')
-def get_version():
-    return jsonify({'version': '2026-04-19-stock-transfer-fix', 'status': 'ok'})
-
-# ============================================
-# Test Label PDF Endpoint
-# ============================================
-@app.route('/api/test-label-pdf')
-def test_label_pdf():
-    """Generate a test label PDF for QL-810W printer (DK-2225 38mm tape)"""
-    try:
-        from reportlab.lib.units import mm
-        from reportlab.pdfgen import canvas as pdf_canvas
-        from reportlab.pdfbase.pdfmetrics import stringWidth
-        
-        # DK-2225: 38mm wide continuous tape
-        page_w, page_h = 38*mm, 200*mm  # Portrait orientation confirmed working
-        margin = 3*mm
-        avail_w = page_h - 2*margin  # 194mm usable width (along tape length)
-        avail_h = page_w - 2*margin  # 32mm usable height
-        
-        # Test data
-        line1 = "Job 12345 \u00b7 Test Customer Name"
-        line2 = "ABC-1234 \u00b7 Test Catalog Item Description Here"
-        line3 = "Qty: 10 \u00b7 Van Stock (George) \u00b7 17/04/2026 \u00b7 PO 21100"
-        
-        def auto_fit_font(text, font_name, max_size, max_width):
-            """Find the largest font size that fits within max_width"""
-            size = max_size
-            while size > 5:
-                w = stringWidth(text, font_name, size)
-                if w <= max_width:
-                    return size
-                size -= 0.5
-            return 5
-        
-        # Calculate auto-fit font sizes (start big, scale down to fit)
-        size1 = auto_fit_font(line1, "Helvetica-Bold", 18, avail_w)
-        size2 = auto_fit_font(line2, "Helvetica", 14, avail_w)
-        size3 = auto_fit_font(line3, "Helvetica", 12, avail_w)
-        
-        buf = io.BytesIO()
-        c = pdf_canvas.Canvas(buf, pagesize=(page_w, page_h))
-        
-        # Rotate for portrait label (text reads along tape length)
-        c.saveState()
-        c.translate(0, 0)
-        c.rotate(90)
-        
-        # After rotation: drawing space is 200mm wide x 38mm tall
-        # Y coordinates are negative (rotated coordinate system)
-        # Distribute 3 lines evenly across 32mm height
-        line_spacing = avail_h / 3
-        y_base = -page_w + margin
-        
-        # Line 1 (top) - bold job info
-        c.setFont("Helvetica-Bold", size1)
-        c.drawString(margin, y_base + 2*line_spacing + 2*mm, line1)
-        
-        # Line 2 (middle) - catalog info
-        c.setFont("Helvetica", size2)
-        c.drawString(margin, y_base + line_spacing + 1*mm, line2)
-        
-        # Line 3 (bottom) - details
-        c.setFont("Helvetica", size3)
-        c.drawString(margin, y_base + 1*mm, line3)
-        
-        c.restoreState()
-        c.save()
-        buf.seek(0)
-        
-        return send_file(
-            buf,
-            mimetype='application/pdf',
-            as_attachment=False,
-            download_name='test-label.pdf'
-        )
-    except ImportError:
-        return jsonify({'error': 'reportlab not installed'}), 500
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-# ============================================
-# Dynamic Label PDF Endpoint (for PO items)
-# ============================================
-@app.route('/api/label-pdf', methods=['POST'])
-@login_required
-def generate_label_pdf():
-    """Generate label PDF(s) for QL-810W printer. Accepts single or multiple labels."""
-    try:
-        from reportlab.lib.units import mm
-        from reportlab.pdfgen import canvas as pdf_canvas
-        from reportlab.pdfbase.pdfmetrics import stringWidth
-        
-        data = request.get_json()
-        
-        # Support both single label and array of labels
-        labels = data.get('labels', None)
-        if labels is None:
-            # Single label format (backward compatible)
-            labels = [{
-                'line1': data.get('jobInfo', 'Unknown Job'),
-                'line2': data.get('catalogInfo', 'Unknown Item'),
-                'line3': data.get('detailInfo', '')
-            }]
-        
-        if not labels:
-            return jsonify({'error': 'No labels provided'}), 400
-        
-        page_w, page_h = 38*mm, 200*mm
-        margin = 3*mm
-        avail_w = page_h - 2*margin
-        avail_h = page_w - 2*margin
-        
-        def auto_fit_font(text, font_name, max_size, max_width):
-            size = max_size
-            while size > 5:
-                w = stringWidth(text, font_name, size)
-                if w <= max_width:
-                    return size
-                size -= 0.5
-            return 5
-        
-        buf = io.BytesIO()
-        c = pdf_canvas.Canvas(buf, pagesize=(page_w, page_h))
-        
-        for idx, label in enumerate(labels):
-            if idx > 0:
-                c.showPage()
-            
-            l1 = str(label.get('line1', ''))
-            l2 = str(label.get('line2', ''))
-            l3 = str(label.get('line3', ''))
-            label_type = label.get('type', 'item')
-            
-            if label_type == 'filing':
-                # Compact filing label - 28mm long, all bold, for sticking on paperwork
-                filing_h = 28*mm
-                c.setPageSize((page_w, filing_h))
-                filing_avail_w = filing_h - 2*margin  # 22mm text width
-                filing_avail_h = page_w - 2*margin     # 32mm text height
-                
-                size1 = auto_fit_font(l1, "Helvetica-Bold", 12, filing_avail_w)
-                size2 = auto_fit_font(l2, "Helvetica-Bold", 10, filing_avail_w)
-                size3 = auto_fit_font(l3, "Helvetica-Bold", 9, filing_avail_w)
-                
-                c.saveState()
-                c.rotate(90)
-                
-                line_spacing = filing_avail_h / 3
-                y_base = -page_w + margin
-                
-                # Draw a thin border to make it visually distinct
-                c.setStrokeColorRGB(0.3, 0.3, 0.3)
-                c.setLineWidth(0.5)
-                c.rect(margin, y_base, filing_avail_w, filing_avail_h)
-                
-                c.setFont("Helvetica-Bold", size1)
-                c.drawString(margin + 1*mm, y_base + 2*line_spacing + 0.5*mm, l1)
-                c.setFont("Helvetica-Bold", size2)
-                c.drawString(margin + 1*mm, y_base + line_spacing + 0.5*mm, l2)
-                c.setFont("Helvetica-Bold", size3)
-                c.drawString(margin + 1*mm, y_base + 0.5*mm, l3)
-                
-                c.restoreState()
-                # Reset page size for any subsequent labels
-                c.setPageSize((page_w, page_h))
-            else:
-                # Standard item label
-                size1 = auto_fit_font(l1, "Helvetica-Bold", 18, avail_w)
-                size2 = auto_fit_font(l2, "Helvetica", 14, avail_w)
-                size3 = auto_fit_font(l3, "Helvetica", 12, avail_w)
-                
-                c.saveState()
-                c.rotate(90)
-                
-                line_spacing = avail_h / 3
-                y_base = -page_w + margin
-                
-                c.setFont("Helvetica-Bold", size1)
-                c.drawString(margin, y_base + 2*line_spacing + 2*mm, l1)
-                c.setFont("Helvetica", size2)
-                c.drawString(margin, y_base + line_spacing + 1*mm, l2)
-                c.setFont("Helvetica", size3)
-                c.drawString(margin, y_base + 1*mm, l3)
-                
-                c.restoreState()
-        
-        c.save()
-        buf.seek(0)
-        
-        return send_file(
-            buf,
-            mimetype='application/pdf',
-            as_attachment=False,
-            download_name='labels.pdf'
-        )
-    except ImportError:
-        return jsonify({'error': 'reportlab not installed'}), 500
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-# ============================================
-# Damage Report Endpoints
-# ============================================
-@app.route('/api/report-damage', methods=['POST'])
-@login_required
-def report_damage():
-    """Receive damage report from app user and forward to Tasklet webhook"""
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({'error': 'No data provided'}), 400
-        
-        po_number = data.get('po_number', '')
-        po_id = data.get('po_id', '')
-        catalog_id = data.get('catalog_id', '')
-        item_description = data.get('item_description', '')
-        part_number = data.get('part_number', '')
-        quantity_damaged = data.get('quantity_damaged', 1)
-        notes = data.get('notes', '').strip()
-        photos_base64 = data.get('photos', [])
-        vendor_name = data.get('vendor_name', '')
-        vendor_id = data.get('vendor_id', '')
-        job_number = data.get('job_number', '')
-        customer_name = data.get('customer_name', '')
-        
-        if not item_description:
-            return jsonify({'error': 'Item description is required'}), 400
-        
-        report_id = str(uuid.uuid4())[:8]
-        staff_user = session.get('username', 'unknown')
-        staff_name = session.get('display_name', 'Unknown')
-        
-        db = get_db()
-        db.execute('''
-            INSERT INTO damage_reports (id, po_number, po_id, catalog_id, item_description,
-                part_number, quantity_damaged, notes, photo_count, photos_base64,
-                vendor_name, vendor_id, job_number, customer_name,
-                staff_user, staff_name, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new')
-        ''', (report_id, po_number, po_id, catalog_id, item_description,
-              part_number, quantity_damaged, notes,
-              len(photos_base64), json.dumps(photos_base64),
-              vendor_name, vendor_id, job_number, customer_name,
-              staff_user, staff_name))
-        db.commit()
-        
-        print(f"=== DAMAGE REPORT {report_id} ===")
-        print(f"Staff: {staff_name} ({staff_user})")
-        print(f"PO: {po_number}, Item: {item_description}")
-        print(f"Part: {part_number}, Qty damaged: {quantity_damaged}")
-        print(f"Vendor: {vendor_name}, Job: {job_number}, Customer: {customer_name}")
-        print(f"Notes: {notes}")
-        print(f"Photos: {len(photos_base64)}")
-        
-        if DAMAGE_WEBHOOK_URL:
-            try:
-                webhook_payload = {
-                    'type': 'damage_report',
-                    'report_id': report_id,
-                    'po_number': po_number,
-                    'po_id': po_id,
-                    'catalog_id': catalog_id,
-                    'item_description': item_description,
-                    'part_number': part_number,
-                    'quantity_damaged': quantity_damaged,
-                    'notes': notes,
-                    'photo_count': len(photos_base64),
-                    'vendor_name': vendor_name,
-                    'vendor_id': vendor_id,
-                    'job_number': job_number,
-                    'customer_name': customer_name,
-                    'staff_user': staff_user,
-                    'staff_name': staff_name,
-                    'timestamp': datetime.now().isoformat()
-                }
-                resp = requests.post(DAMAGE_WEBHOOK_URL, json=webhook_payload, timeout=10)
-                print(f"Damage webhook sent: {resp.status_code}")
-            except Exception as e:
-                print(f"Damage webhook failed (report still saved): {e}")
-        else:
-            print("WARNING: DAMAGE_WEBHOOK_URL not set - report saved but not forwarded")
-        
-        return jsonify({
-            'success': True,
-            'report_id': report_id,
-            'message': 'Damage reported! Supplier and customer will be notified.'
-        })
-        
-    except Exception as e:
-        print(f"Error saving damage report: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/damage-reports', methods=['GET'])
-@login_required
-def list_damage_reports():
-    """List damage reports"""
-    try:
-        status = request.args.get('status', None)
-        po_number = request.args.get('po_number', None)
-        db = get_db()
-        
-        query = '''SELECT id, po_number, item_description, part_number, quantity_damaged,
-                    notes, photo_count, vendor_name, job_number, customer_name,
-                    staff_user, staff_name, status, created_at, resolved_at
-                FROM damage_reports'''
-        conditions = []
-        params = []
-        
-        if status:
-            conditions.append('status = ?')
-            params.append(status)
-        if po_number:
-            conditions.append('po_number = ?')
-            params.append(po_number)
-        
-        if conditions:
-            query += ' WHERE ' + ' AND '.join(conditions)
-        query += ' ORDER BY created_at DESC'
-        
-        reports = db.execute(query, tuple(params)).fetchall()
-        return jsonify({'reports': [dict(r) for r in reports], 'count': len(reports)})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/damage-reports/<report_id>', methods=['GET'])
-def get_damage_report(report_id):
-    """Fetch a damage report by ID (for Tasklet email processing)"""
-    try:
-        db = get_db()
-        report = db.execute('SELECT * FROM damage_reports WHERE id = ?', (report_id,)).fetchone()
-        if not report:
-            return jsonify({'error': 'Report not found'}), 404
-        
-        result = dict(report)
-        if result.get('photos_base64'):
-            result['photos'] = json.loads(result['photos_base64'])
-        else:
-            result['photos'] = []
-        del result['photos_base64']
-        
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/damage-reports/<report_id>/resolve', methods=['POST'])
-@login_required
-def resolve_damage_report(report_id):
-    """Mark a damage report as resolved"""
-    try:
-        data = request.get_json() or {}
-        resolution = data.get('resolution', '')
-        
-        db = get_db()
-        if USE_PG:
-            db.execute('UPDATE damage_reports SET status = %s, resolved_at = NOW() WHERE id = %s',
-                       ('resolved', report_id))
-        else:
-            db.execute("UPDATE damage_reports SET status = 'resolved', resolved_at = datetime('now') WHERE id = ?",
-                       (report_id,))
-        db.commit()
-        
-        return jsonify({'success': True})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-
-
-@app.route('/api/job-cc-lookup', methods=['POST'])
-@login_required
-def job_cc_lookup():
-    """Look up job details and matching cost centres for a catalog item.
-    No AI - pure string/ID matching only."""
-    try:
-        data = request.get_json()
-        job_id = data.get('jobId')
-        catalog_id = data.get('catalogId')
-        part_no = (data.get('partNo') or '').strip().lower()
-        description = (data.get('description') or '').strip().lower()
-
-        if not job_id:
-            return jsonify({'error': 'jobId is required'}), 400
-        if not catalog_id and not part_no and not description:
-            return jsonify({'error': 'At least one of catalogId, partNo, or description is required'}), 400
-
-        # Get job details
-        job_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id}?columns=ID,Name,Customer,Site')
-        if job_resp.status_code != 200:
-            return jsonify({'error': f'Job not found: HTTP {job_resp.status_code}'}), 400
-        
-        jd = job_resp.json()
-        cust = jd.get('Customer', {})
-        customer_name = ''
-        if isinstance(cust, dict):
-            customer_name = cust.get('CompanyName') or cust.get('GivenName', '')
-        site = jd.get('Site', {})
-        site_address = ''
-        if isinstance(site, dict):
-            addr = site.get('Address', {})
-            if isinstance(addr, dict):
-                parts = [addr.get('Line1', ''), addr.get('City', ''), addr.get('State', '')]
-                site_address = ', '.join(p for p in parts if p)
-            elif isinstance(site, dict):
-                site_address = site.get('Name', '')
-
-        job_info = {
-            'id': job_id,
-            'name': jd.get('Name', str(job_id)),
-            'customer': customer_name,
-            'site': site_address
-        }
-
-        # Get all sections
-        sec_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/')
-        if sec_resp.status_code != 200:
-            return jsonify({'job': job_info, 'matches': [], 'notFound': True})
-
-        matches = []
-
-        for sec in sec_resp.json():
-            sid = sec.get('ID')
-            section_name = sec.get('Name', f'Section {sid}')
-            if not sid:
-                continue
-
-            cc_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{sid}/costCenters/')
-            if cc_resp.status_code != 200:
-                continue
-
-            for cc in cc_resp.json():
-                ccid = cc.get('ID')
-                cc_name = cc.get('Name', f'Cost Centre {ccid}')
-                if not ccid:
-                    continue
-
-                # Get stock items on this CC
-                stock_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{sid}/costCenters/{ccid}/stock/')
-                if stock_resp.status_code != 200:
-                    continue
-
-                stock_items = stock_resp.json()
-                if not isinstance(stock_items, list):
-                    stock_items = []
-
-                for stock_item in stock_items:
-                    item_catalog_id = stock_item.get('Catalog', {})
-                    if isinstance(item_catalog_id, dict):
-                        item_catalog_id = item_catalog_id.get('ID')
-                    
-                    item_part_no = (stock_item.get('PartNo') or stock_item.get('Catalog', {}).get('PartNo', '') if isinstance(stock_item.get('Catalog'), dict) else '').strip().lower()
-                    item_desc = (stock_item.get('Name') or stock_item.get('Catalog', {}).get('Name', '') if isinstance(stock_item.get('Catalog'), dict) else '').strip().lower()
-
-                    # Match logic: primary catalogId, secondary partNo, tertiary description
-                    matched = False
-                    if catalog_id and item_catalog_id and str(item_catalog_id) == str(catalog_id):
-                        matched = True
-                    elif part_no and item_part_no and item_part_no == part_no:
-                        matched = True
-                    elif description and item_desc and item_desc == description:
-                        matched = True
-
-                    if matched:
-                        required_qty = stock_item.get('Quantity', 0) or 0
-                        assigned_qty = stock_item.get('AssignedQuantity', 0) or 0
-                        remaining_qty = max(0, required_qty - assigned_qty)
-
-                        # Get storage locations
-                        storage_locs = []
-                        breakdown = stock_item.get('AssignedBreakdown', [])
-                        if isinstance(breakdown, list):
-                            for b in breakdown:
-                                storage_id = b.get('Storage')
-                                if isinstance(storage_id, dict):
-                                    storage_id = storage_id.get('ID')
-                                storage_name = b.get('StorageName', '')
-                                if not storage_name and isinstance(b.get('Storage'), dict):
-                                    storage_name = b['Storage'].get('Name', '')
-                                qty = b.get('Quantity', 0)
-                                if storage_id and qty:
-                                    storage_locs.append({'id': storage_id, 'name': storage_name, 'qty': qty})
-
-                        matches.append({
-                            'sectionId': sid,
-                            'sectionName': section_name,
-                            'costCentreId': ccid,
-                            'costCentreName': cc_name,
-                            'catalogId': item_catalog_id,
-                            'description': stock_item.get('Name') or (stock_item.get('Catalog', {}).get('Name', '') if isinstance(stock_item.get('Catalog'), dict) else ''),
-                            'partNo': stock_item.get('PartNo') or (stock_item.get('Catalog', {}).get('PartNo', '') if isinstance(stock_item.get('Catalog'), dict) else ''),
-                            'requiredQty': required_qty,
-                            'assignedQty': assigned_qty,
-                            'remainingQty': remaining_qty,
-                            'storageLocations': storage_locs
-                        })
-
-        not_found = len(matches) == 0
-        return jsonify({'job': job_info, 'matches': matches, 'notFound': not_found})
-
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/job-note', methods=['POST'])
-@login_required
-def job_note():
-    """Add a note to a job in Simpro."""
-    try:
-        data = request.get_json()
-        job_id = data.get('jobId')
-        note = data.get('note', '')
-
-        if not job_id or not note:
-            return jsonify({'error': 'jobId and note are required'}), 400
-
-        note_resp = simpro_request('POST', f'/companies/{COMPANY_ID}/jobs/{job_id}/notes/',
-                                   json={'Description': note})
-        if note_resp.status_code in (200, 201):
-            return jsonify({'success': True})
-        else:
-            return jsonify({'error': f'Failed to add note: HTTP {note_resp.status_code}'}), 500
-
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/find-item-stock', methods=['POST'])
-@login_required
-def find_item_stock():
-    """Find all storage locations where a catalog item has stock.
-    Checks CC stock first (job-allocated), then storage devices (unallocated stock).
-    Returns list of {storageId, storageName, quantity, source} sorted by quantity desc.
-    """
-    data = request.get_json()
-    catalog_id = data.get('catalogId')
-    job_id = data.get('jobId')
-
-    if not catalog_id:
-        return jsonify({'error': 'catalogId required'}), 400
-
-    locations = []
-    seen_storage_ids = set()
-
-    # Step 1: Check CC stock for this job (job-allocated items)
-    if job_id:
-        try:
-            sec_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/')
-            if sec_resp.status_code == 200:
-                sections = sec_resp.json()
-                for section in sections:
-                    sid = section.get('ID')
-                    if not sid:
-                        continue
-                    cc_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{sid}/costCenters/')
-                    if cc_resp.status_code != 200:
-                        continue
-                    for cc in cc_resp.json():
-                        ccid = cc.get('ID')
-                        if not ccid:
-                            continue
-                        stock_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{sid}/costCenters/{ccid}/stock/{catalog_id}/')
-                        if stock_resp.status_code != 200:
-                            continue
-                        stock = stock_resp.json()
-                        breakdown = stock.get('AssignedBreakdown', [])
-                        for bd in breakdown:
-                            qty = bd.get('Quantity', 0)
-                            if qty > 0:
-                                st = bd.get('Storage', {})
-                                st_id = st.get('ID')
-                                st_name = st.get('Name', 'Unknown')
-                                if st_id and st_id not in seen_storage_ids:
-                                    seen_storage_ids.add(st_id)
-                                    locations.append({
-                                        'storageId': st_id,
-                                        'storageName': st_name,
-                                        'quantity': qty,
-                                        'source': 'cc'
-                                    })
-        except Exception as e:
-            print(f"[find-item-stock] CC check error: {e}")
-
-    # Step 2: Check storage devices (for unallocated stock)
-    # Only if CC check found nothing (CC-allocated stock is invisible to storage device API)
-    if not locations:
-        try:
-            # Get all storage devices
-            dev_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/storageDevices/?pageSize=100')
-            if dev_resp.status_code == 200:
-                devices = dev_resp.json()
-                for dev in devices:
-                    dev_id = dev.get('ID')
-                    if not dev_id or dev_id in seen_storage_ids:
-                        continue
-                    # Check if this device has the catalog item
-                    st_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/storageDevices/{dev_id}/stock/{catalog_id}/')
-                    if st_resp.status_code == 200:
-                        st_data = st_resp.json()
-                        qty = st_data.get('Quantity', 0)
-                        if isinstance(qty, dict):
-                            qty = qty.get('Total', qty.get('Available', 0))
-                        if qty and float(qty) > 0:
-                            seen_storage_ids.add(dev_id)
-                            locations.append({
-                                'storageId': dev_id,
-                                'storageName': dev.get('Name', 'Unknown'),
-                                'quantity': float(qty),
-                                'source': 'storage_device'
-                            })
-        except Exception as e:
-            print(f"[find-item-stock] Storage device check error: {e}")
-
-    # Sort by quantity descending
-    locations.sort(key=lambda x: x['quantity'], reverse=True)
-
-    return jsonify({'locations': locations, 'found': len(locations) > 0})
-
 # Initialize and Run
 # ============================================
 # Initialize database on module load (for gunicorn)
