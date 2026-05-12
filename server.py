@@ -722,7 +722,7 @@ def generate_labels():
 @app.route('/api/label-pdf', methods=['POST'])
 @login_required
 def generate_label_pdf():
-    """Generate a PDF of labels optimized for QL-810W with DK-2225 38mm continuous tape."""
+    """Generate PDF labels for QL-810W DK-2225 38mm tape - LANDSCAPE orientation."""
     try:
         from reportlab.lib.units import mm
         from reportlab.pdfgen import canvas
@@ -730,95 +730,77 @@ def generate_label_pdf():
         
         data = request.get_json()
         if not data or 'labels' not in data:
-            return jsonify({'error': 'Missing labels in request'}), 400
-        
+            return jsonify({'error': 'Missing labels'}), 400
         labels = data['labels']
         if not labels:
-            return jsonify({'error': 'No labels to print'}), 400
+            return jsonify({'error': 'No labels'}), 400
         
-        # QL-810W with DK-2225: 38mm wide continuous tape
-        LABEL_WIDTH = 38 * mm
-        LABEL_HEIGHT = 25 * mm
-        FILING_LABEL_HEIGHT = 20 * mm
-        MARGIN_X = 2 * mm
+        # QL-810W DK-2225: 38mm wide continuous tape
+        # LANDSCAPE: label width = tape feed length, label height = 38mm tape width
+        TAPE_WIDTH = 38 * mm      # Fixed by physical tape
+        ITEM_LABEL_W = 90 * mm    # Length of tape per item label
+        FILING_LABEL_W = 70 * mm  # Shorter filing label
+        MARGIN = 2 * mm
         
         buffer = io.BytesIO()
         
-        # Calculate total page height (all labels stacked on continuous tape)
-        total_height = 0
-        for label in labels:
-            if label.get('type') == 'filing':
-                total_height += FILING_LABEL_HEIGHT
-            else:
-                total_height += LABEL_HEIGHT
+        # Each label = one page (landscape on 38mm tape)
+        c = canvas.Canvas(buffer)
         
-        c = canvas.Canvas(buffer, pagesize=(LABEL_WIDTH, total_height))
-        
-        y_pos = total_height  # Start from top
-        
-        for label in labels:
+        for i, label in enumerate(labels):
             is_filing = label.get('type') == 'filing'
-            label_h = FILING_LABEL_HEIGHT if is_filing else LABEL_HEIGHT
-            y_pos -= label_h
+            lw = FILING_LABEL_W if is_filing else ITEM_LABEL_W
+            lh = TAPE_WIDTH
             
-            line1 = label.get('line1', '')
-            line2 = label.get('line2', '')
-            line3 = label.get('line3', '')
+            c.setPageSize((lw, lh))
             
-            # Draw border
-            c.setStrokeColorRGB(0.8, 0.8, 0.8)
-            c.setLineWidth(0.5)
-            c.rect(0, y_pos, LABEL_WIDTH, label_h)
-            c.setFillColorRGB(0, 0, 0)
+            line1 = label.get('line1', '') or ''
+            line2 = label.get('line2', '') or ''
+            line3 = label.get('line3', '') or ''
             
-            avail_w = LABEL_WIDTH - 2 * MARGIN_X
+            avail_w = lw - 2 * MARGIN
             
             def _trunc(text, font, size, max_w):
-                if not text:
-                    return ''
-                if stringWidth(text, font, size) <= max_w:
-                    return text
+                if not text: return ''
+                if stringWidth(text, font, size) <= max_w: return text
                 t = text
                 while t and stringWidth(t + '...', font, size) > max_w:
                     t = t[:-1]
                 return t + '...'
             
+            # Draw border
+            c.setStrokeColorRGB(0.7, 0.7, 0.7)
+            c.setLineWidth(0.5)
+            c.rect(0.5, 0.5, lw - 1, lh - 1)
+            c.setFillColorRGB(0, 0, 0)
+            
             if is_filing:
-                c.setFont("Helvetica-Bold", 7)
-                c.drawString(MARGIN_X, y_pos + label_h - 8 * mm, _trunc(line1, "Helvetica-Bold", 7, avail_w))
-                c.setFont("Helvetica", 6)
-                c.drawString(MARGIN_X, y_pos + label_h - 13 * mm, _trunc(line2, "Helvetica", 6, avail_w))
+                # Filing label: 3 lines, slightly smaller
+                c.setFont("Helvetica-Bold", 9)
+                c.drawString(MARGIN, lh - 10 * mm, _trunc("FILE: " + line1, "Helvetica-Bold", 9, avail_w))
+                c.setFont("Helvetica", 8)
+                c.drawString(MARGIN, lh - 18 * mm, _trunc(line2, "Helvetica", 8, avail_w))
                 if line3:
-                    c.drawString(MARGIN_X, y_pos + label_h - 17 * mm, _trunc(line3, "Helvetica", 6, avail_w))
+                    c.drawString(MARGIN, lh - 26 * mm, _trunc(line3, "Helvetica", 8, avail_w))
             else:
-                c.setFont("Helvetica-Bold", 7)
-                c.drawString(MARGIN_X, y_pos + label_h - 7 * mm, _trunc(line1, "Helvetica-Bold", 7, avail_w))
+                # Item label: Job/customer line, part number (bold), qty/location/date
                 c.setFont("Helvetica-Bold", 8)
-                c.drawString(MARGIN_X, y_pos + label_h - 14 * mm, _trunc(line2, "Helvetica-Bold", 8, avail_w))
-                c.setFont("Helvetica", 6)
-                c.drawString(MARGIN_X, y_pos + label_h - 20 * mm, _trunc(line3, "Helvetica", 6, avail_w))
+                c.drawString(MARGIN, lh - 9 * mm, _trunc(line1, "Helvetica-Bold", 8, avail_w))
+                c.setFont("Helvetica-Bold", 10)
+                c.drawString(MARGIN, lh - 19 * mm, _trunc(line2, "Helvetica-Bold", 10, avail_w))
+                c.setFont("Helvetica", 8)
+                c.drawString(MARGIN, lh - 28 * mm, _trunc(line3, "Helvetica", 8, avail_w))
+            
+            c.showPage()
         
-        c.showPage()
         c.save()
         buffer.seek(0)
-        
-        return send_file(
-            buffer,
-            mimetype='application/pdf',
-            as_attachment=False,
-            download_name='labels.pdf'
-        )
-        
+        return send_file(buffer, mimetype='application/pdf', download_name='labels.pdf')
     except Exception as e:
-        print(f"[{datetime.now()}] Label PDF error: {e}")
         import traceback
         traceback.print_exc()
-        return jsonify({'error': f'Label PDF generation failed: {str(e)}'}), 500
+        return jsonify({'error': str(e)}), 500
 
-
-# ============================================
-# Static File Routes
-# ============================================
 @app.route('/')
 def serve_index():
     return send_from_directory('.', 'index.html')
