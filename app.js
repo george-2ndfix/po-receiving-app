@@ -1870,22 +1870,9 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         }
         
         try {
-            // Pre-open window BEFORE async fetch - iOS Safari requires window.open
-            // in the synchronous user gesture call stack (before any await)
-            let pdfWindow = null;
-            try {
-                pdfWindow = window.open('about:blank', '_blank');
-                if (pdfWindow) {
-                    pdfWindow.document.write('<html><body style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;color:#666;"><p>Generating labels...</p></body></html>');
-                }
-            } catch(e) { /* popup blocked - will use fallback */ }
-            
             const response = await this.authFetch('/api/label-pdf', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${this.token}`
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ labels })
             });
             
@@ -1897,24 +1884,28 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             const blob = await response.blob();
             const url = URL.createObjectURL(blob);
             
-            // Redirect the pre-opened window to the PDF
-            if (pdfWindow && !pdfWindow.closed) {
-                pdfWindow.location.href = url;
-            } else {
-                // Fallback: try window.open (may work on desktop)
-                const win = window.open(url, '_blank');
-                if (!win) {
-                    // Last resort: navigate current page briefly
-                    window.location.href = url;
-                }
+            // Show in-page overlay instead of popup (works on iOS + Android)
+            var overlay = document.getElementById('label-overlay');
+            if (!overlay) {
+                overlay = document.createElement('div');
+                overlay.id = 'label-overlay';
+                overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:10000;display:flex;flex-direction:column;align-items:center;padding:10px;';
+                document.body.appendChild(overlay);
             }
+            overlay.style.display = 'flex';
+            overlay.innerHTML = `
+                <div style="display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap;justify-content:center;">
+                    <a href="${url}" download="labels.pdf" style="padding:12px 24px;background:#2563eb;color:white;border-radius:8px;text-decoration:none;font-size:16px;font-weight:600;">\u2b07\ufe0f Download PDF</a>
+                    <button onclick="window.open('${url}','_blank')" style="padding:12px 24px;background:#059669;color:white;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">\ud83d\udda8\ufe0f Open to Print</button>
+                    <button onclick="document.getElementById('label-overlay').style.display='none'" style="padding:12px 24px;background:#dc2626;color:white;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">\u2716 Close</button>
+                </div>
+                <iframe src="${url}" style="flex:1;width:100%;max-width:600px;border:none;border-radius:8px;background:white;"></iframe>
+            `;
             
-            // Clean up after a delay
-            setTimeout(() => URL.revokeObjectURL(url), 60000);
+            // Clean up blob URL after 5 minutes
+            setTimeout(() => URL.revokeObjectURL(url), 300000);
             
         } catch (err) {
-            // Close pre-opened window on error
-            if (pdfWindow && !pdfWindow.closed) pdfWindow.close();
             alert('Label error: ' + err.message);
             console.error('Label PDF error:', err);
         }

@@ -2795,9 +2795,10 @@ def allocate_from_stock_v2():
                     assign_resp = simpro_request("POST", assign_url, json=assign_payload)
 
                     if assign_resp.status_code in (400, 409):
-                        # Item may already exist on CC - try PATCH
-                        print(f"  POST assign returned {assign_resp.status_code}, trying PATCH...")
-                        patch_resp = simpro_request("PATCH", assign_url, json=assign_payload)
+                        # Item may already exist on CC - try PATCH with catalog ID in URL
+                        patch_url = f"/companies/{COMPANY_ID}/jobs/{job_id}/sections/{section_id}/costCenters/{cc_id}/stock/{cat_id}/"
+                        print(f"  POST assign returned {assign_resp.status_code}, trying PATCH on {patch_url}...")
+                        patch_resp = simpro_request("PATCH", patch_url, json={"AssignedBreakdown": [{"Storage": {"ID": int(dest_storage_id)}, "Quantity": quantity}]})
                         if patch_resp.status_code not in (200, 201, 204):
                             print(f"  PATCH assign also failed: {patch_resp.status_code} {patch_resp.text[:200]}")
                         else:
