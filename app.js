@@ -4127,4 +4127,7 @@ const destDropdown = document.getElementById('stock-storage-dropdown');
 };
 
 // Initialize on DOM ready
-document.addEventListener('DOMContentLoaded', () => app.init());
+document.addEventListener('DOMContentLoaded', () => {
+    app.init();
+    setTimeout(() => app.updatePrintQueueBadge(), 500);
+});
