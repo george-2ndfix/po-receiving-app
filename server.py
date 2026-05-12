@@ -2429,9 +2429,9 @@ def submit_fault_report():
         db = get_db()
         cursor = db.cursor()
         cursor.execute("""
-            INSERT INTO fault_reports (report_id, reporter_name, reporter_email, description, current_screen, staff_user, created_at, status)
-            VALUES (?, ?, ?, ?, ?, ?, datetime('now'), 'open')
-        """, (report_id, reporter_name, reporter_email, description, current_screen, staff_user))
+            INSERT INTO fault_reports (id, reporter_name, reporter_email, description, current_screen, staff_user, status)
+            VALUES (?, ?, ?, ?, ?, ?, 'new')
+        """, (report_id, reporter_name, reporter_email or 'unknown', description, current_screen, staff_user))
         db.commit()
         
         # Forward to webhook if configured
