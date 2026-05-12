@@ -2673,9 +2673,9 @@ def job_stock_search():
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=30) as executor:
             futures = {executor.submit(fetch_storage_stock, dev): dev for dev in physical_storage}
-            for future in concurrent.futures.as_completed(futures, timeout=20):
+            for future in concurrent.futures.as_completed(futures, timeout=90):
                 try:
-                    results = future.result(timeout=12)
+                    results = future.result(timeout=15)
                     for r in results:
                         cid = r["catalogId"]
                         if cid not in catalog_stock_map:
