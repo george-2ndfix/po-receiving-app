@@ -12,7 +12,7 @@ import sqlite3
 import uuid
 from datetime import datetime, timedelta
 from functools import wraps
-from flask import Flask, request, jsonify, send_from_directory, session
+from flask import Flask, request, jsonify, send_from_directory, send_file, session
 import requests
 import io
 import base64
@@ -2406,6 +2406,59 @@ def report_fault():
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/fault-reports/submit', methods=['POST'])
+@login_required
+def submit_fault_report():
+    """Submit a fault report from the app and forward to webhook."""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Missing request body'}), 400
+        
+        import uuid
+        report_id = str(uuid.uuid4())[:8]
+        reporter_name = data.get('reporter_name', 'Unknown')
+        reporter_email = data.get('reporter_email', '')
+        description = data.get('description', '')
+        current_screen = data.get('current_screen', '')
+        staff_user = data.get('staff_user', '')
+        
+        # Save to database
+        db = get_db()
+        cursor = db.cursor()
+        cursor.execute("""
+            INSERT INTO fault_reports (report_id, reporter_name, reporter_email, description, current_screen, staff_user, created_at, status)
+            VALUES (?, ?, ?, ?, ?, ?, datetime('now'), 'open')
+        """, (report_id, reporter_name, reporter_email, description, current_screen, staff_user))
+        db.commit()
+        
+        # Forward to webhook if configured
+        webhook_url = os.environ.get('FAULT_WEBHOOK_URL', '')
+        if webhook_url:
+            try:
+                import requests as req
+                webhook_payload = {
+                    'type': 'fault_report',
+                    'report_id': report_id,
+                    'reporter_name': reporter_name,
+                    'reporter_email': reporter_email,
+                    'description': description,
+                    'current_screen': current_screen,
+                    'staff_user': staff_user,
+                    'timestamp': datetime.now().isoformat()
+                }
+                req.post(webhook_url, json=webhook_payload, timeout=5)
+            except Exception as e:
+                print(f"[{datetime.now()}] Webhook forward failed: {e}")
+        
+        return jsonify({'success': True, 'report_id': report_id})
+        
+    except Exception as e:
+        print(f"[{datetime.now()}] Fault report error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 
 @app.route('/api/fault-reports', methods=['GET'])
 def list_fault_reports():
