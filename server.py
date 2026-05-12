@@ -2531,6 +2531,120 @@ def search_mystery_box():
     return jsonify({'results': results, 'count': len(results)})
 
 # ============================================
+# Job Intel Endpoint
+# ============================================
+@app.route('/api/job-intel', methods=['POST'])
+@login_required
+def job_intel():
+    """Get job stock intel - what's already received, what's pending, where it is"""
+    try:
+        data = request.json
+        job_id = data.get('job_id')
+
+        if not job_id:
+            return jsonify({"error": "job_id required"}), 400
+
+        # 1. Get job details
+        job_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id}/?columns=ID,Name,Customer,Site')
+        if job_resp.status_code != 200:
+            return jsonify({"error": f"Job {job_id} not found"}), 404
+        job = job_resp.json()
+
+        job_info = {
+            "id": job_id,
+            "name": job.get("Name", ""),
+            "customer": job.get("Customer", {}).get("CompanyName", ""),
+            "site": job.get("Site", {}).get("Name", "")
+        }
+
+        # 2. Get sections
+        sec_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/')
+        sections = sec_resp.json() if sec_resp.status_code == 200 else []
+
+        # 3. For each section, get cost centers and stock
+        all_stock = []
+        cc_names = {}
+
+        for section in sections:
+            sec_id = section["ID"]
+            cc_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{sec_id}/costCenters/')
+            ccs = cc_resp.json() if cc_resp.status_code == 200 else []
+
+            for cc in ccs:
+                cc_id = cc["ID"]
+                cc_name = cc.get("Name", "")
+                cc_names[cc_id] = cc_name
+
+                stock_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{sec_id}/costCenters/{cc_id}/stock/')
+                if stock_resp.status_code == 200:
+                    stock_items = stock_resp.json()
+                    for item in stock_items:
+                        item["_cc_name"] = cc_name
+                        item["_cc_id"] = cc_id
+                        item["_section_id"] = sec_id
+                        all_stock.append(item)
+
+        # 4. Build response
+        stock_list = []
+        storage_map = {}
+
+        for s in all_stock:
+            req_qty = s.get("Quantity", {}).get("Required", 0)
+            assigned_qty = s.get("Quantity", {}).get("Assigned", 0)
+
+            if req_qty == 0 and assigned_qty == 0:
+                continue
+
+            item_storage = []
+            for breakdown in s.get("AssignedBreakdown", []):
+                qty = breakdown.get("Quantity", 0)
+                if qty > 0:
+                    storage_name = breakdown.get("Storage", {}).get("Name", "Unknown")
+                    storage_id = breakdown.get("Storage", {}).get("ID", 0)
+                    item_storage.append({"name": storage_name, "id": storage_id, "qty": qty})
+
+                    if storage_name not in storage_map:
+                        storage_map[storage_name] = {"name": storage_name, "id": storage_id, "items": []}
+                    storage_map[storage_name]["items"].append({
+                        "name": s["Catalog"]["Name"],
+                        "partNo": s["Catalog"].get("PartNo", ""),
+                        "qty": qty
+                    })
+
+            stock_list.append({
+                "name": s["Catalog"]["Name"],
+                "partNo": s["Catalog"].get("PartNo", ""),
+                "required": req_qty,
+                "assigned": assigned_qty,
+                "pending": max(0, req_qty - assigned_qty),
+                "costCenter": s.get("_cc_name", ""),
+                "storageLocations": item_storage
+            })
+
+        total_required = sum(s["required"] for s in stock_list)
+        total_assigned = sum(s["assigned"] for s in stock_list)
+
+        return jsonify({
+            "job": job_info,
+            "stock": stock_list,
+            "summary": {
+                "totalItems": len(stock_list),
+                "totalRequired": total_required,
+                "totalAssigned": total_assigned,
+                "totalPending": max(0, total_required - total_assigned),
+                "isComplete": total_assigned >= total_required and total_required > 0
+            },
+            "storageLocations": list(storage_map.values())
+        })
+
+    except Exception as e:
+        print(f"Job intel error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+# ============================================
 # Fault Report Endpoints
 # ============================================
 FAULT_WEBHOOK_URL = os.environ.get('FAULT_WEBHOOK_URL', '')
