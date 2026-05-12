@@ -2615,6 +2615,15 @@ def job_stock_search():
                         "costCentreName": cc_name
                     })
 
+        # Resolve catalog names (CC stock doesn't include them)
+        for mat in job_materials:
+            if not mat.get("name"):
+                cat_resp = simpro_request("GET", f"/companies/{COMPANY_ID}/catalogs/{mat['catalogId']}/")
+                if cat_resp.status_code == 200:
+                    cat_data = cat_resp.json()
+                    mat["name"] = cat_data.get("Name", "") or cat_data.get("Description", "")
+                    mat["partNo"] = cat_data.get("PartNo", "") or mat.get("partNo", "")
+
         if not job_materials:
             return jsonify({"job": job_info, "items": [], "message": "No unassigned materials found on this job"})
 
@@ -2661,7 +2670,8 @@ def job_stock_search():
                     cat = s.get("Catalog", {})
                     c_id = cat.get("ID")
                     if c_id in needed_catalog_ids:
-                        qty = s.get("Quantity", 0)
+                        # Storage device stock uses InventoryCount, not Quantity
+                        qty = s.get("InventoryCount", 0) or s.get("Quantity", 0) or 0
                         if isinstance(qty, dict):
                             qty = qty.get("Available", 0) or qty.get("Quantity", 0) or 0
                         if qty and qty > 0:
