@@ -955,6 +955,105 @@ def generate_labels():
         print(f"[{datetime.now()}] Label generation error: {e}")
         return jsonify({'error': f'Label generation failed: {str(e)}'}), 500
 
+
+@app.route('/api/label-pdf', methods=['POST'])
+@login_required
+def generate_label_pdf():
+    """Generate a PDF of labels optimized for QL-810W with DK-2225 38mm continuous tape."""
+    try:
+        from reportlab.lib.units import mm
+        from reportlab.pdfgen import canvas
+        from reportlab.pdfbase.pdfmetrics import stringWidth
+        
+        data = request.get_json()
+        if not data or 'labels' not in data:
+            return jsonify({'error': 'Missing labels in request'}), 400
+        
+        labels = data['labels']
+        if not labels:
+            return jsonify({'error': 'No labels to print'}), 400
+        
+        # QL-810W with DK-2225: 38mm wide continuous tape
+        # Labels print in portrait: width=38mm, height varies per label
+        LABEL_WIDTH = 38 * mm
+        LABEL_HEIGHT = 25 * mm
+        FILING_LABEL_HEIGHT = 20 * mm
+        MARGIN_X = 2 * mm
+        
+        buffer = io.BytesIO()
+        
+        # Calculate total page height (all labels stacked on continuous tape)
+        total_height = 0
+        for label in labels:
+            if label.get('type') == 'filing':
+                total_height += FILING_LABEL_HEIGHT
+            else:
+                total_height += LABEL_HEIGHT
+        
+        c = canvas.Canvas(buffer, pagesize=(LABEL_WIDTH, total_height))
+        
+        y_pos = total_height  # Start from top
+        
+        for label in labels:
+            is_filing = label.get('type') == 'filing'
+            label_h = FILING_LABEL_HEIGHT if is_filing else LABEL_HEIGHT
+            y_pos -= label_h
+            
+            line1 = label.get('line1', '')
+            line2 = label.get('line2', '')
+            line3 = label.get('line3', '')
+            
+            # Draw border
+            c.setStrokeColorRGB(0.8, 0.8, 0.8)
+            c.setLineWidth(0.5)
+            c.rect(0, y_pos, LABEL_WIDTH, label_h)
+            
+            c.setFillColorRGB(0, 0, 0)
+            
+            def _trunc(text, font, size, max_w):
+                if not text:
+                    return ''
+                if stringWidth(text, font, size) <= max_w:
+                    return text
+                while text and stringWidth(text + '...', font, size) > max_w:
+                    text = text[:-1]
+                return text + '...'
+            
+            avail_w = LABEL_WIDTH - 2 * MARGIN_X
+            
+            if is_filing:
+                c.setFont("Helvetica-Bold", 7)
+                c.drawString(MARGIN_X, y_pos + label_h - 8 * mm, _trunc(line1, "Helvetica-Bold", 7, avail_w))
+                c.setFont("Helvetica", 6)
+                c.drawString(MARGIN_X, y_pos + label_h - 13 * mm, _trunc(line2, "Helvetica", 6, avail_w))
+                if line3:
+                    c.drawString(MARGIN_X, y_pos + label_h - 17 * mm, _trunc(line3, "Helvetica", 6, avail_w))
+            else:
+                c.setFont("Helvetica-Bold", 7)
+                c.drawString(MARGIN_X, y_pos + label_h - 7 * mm, _trunc(line1, "Helvetica-Bold", 7, avail_w))
+                c.setFont("Helvetica-Bold", 8)
+                c.drawString(MARGIN_X, y_pos + label_h - 14 * mm, _trunc(line2, "Helvetica-Bold", 8, avail_w))
+                c.setFont("Helvetica", 6)
+                c.drawString(MARGIN_X, y_pos + label_h - 20 * mm, _trunc(line3, "Helvetica", 6, avail_w))
+        
+        c.showPage()
+        c.save()
+        buffer.seek(0)
+        
+        return send_file(
+            buffer,
+            mimetype='application/pdf',
+            as_attachment=False,
+            download_name='labels.pdf'
+        )
+        
+    except Exception as e:
+        print(f"[{datetime.now()}] Label PDF error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'Label PDF generation failed: {str(e)}'}), 500
+
+
 # ============================================
 # Static File Routes
 # ============================================
