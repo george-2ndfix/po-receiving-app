@@ -773,7 +773,7 @@ footer {
     
     /* Default: 36mm tape printer (overridden dynamically for QL-810W) */
     @page {
-        size: auto 36mm;
+        size: 120mm 38mm;
         margin: 1mm 2mm;
     }
     
@@ -3137,3 +3137,4 @@ footer {
     0%, 100% { transform: scale(1); }
     50% { transform: scale(1.08); }
 }
+
