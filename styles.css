@@ -3126,7 +3126,7 @@ footer {
     font-size: 18px;
     font-weight: 700;
     box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-    z-index: 9999;
+    z-index: 900;
     display: none;
     align-items: center;
     gap: 6px;
@@ -3137,4 +3137,5 @@ footer {
     0%, 100% { transform: scale(1); }
     50% { transform: scale(1.08); }
 }
+
 
