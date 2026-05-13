@@ -1828,6 +1828,69 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         await this.generateAndShowLabels(items, poNumber);
     },
 
+
+    // Android HTML-based label printing (QL-810W can't print custom PDF pages from Android)
+    showLabelsHTML(labels, items, poNumber) {
+        const esc = (s) => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        
+        let labelHTML = '<!DOCTYPE html><html><head><meta charset="utf-8"><style>';
+        labelHTML += '@page { size: 120mm 38mm; margin: 0; }';
+        labelHTML += '* { margin:0; padding:0; box-sizing:border-box; }';
+        labelHTML += 'body { font-family: Arial, Helvetica, sans-serif; -webkit-print-color-adjust: exact; }';
+        labelHTML += '.label { width:120mm; height:38mm; display:flex; flex-direction:column; justify-content:center; padding:2mm 3mm; page-break-after:always; overflow:hidden; }';
+        labelHTML += '.label:last-child { page-break-after:auto; }';
+        labelHTML += '.line1 { font-size:11pt; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom:1mm; }';
+        labelHTML += '.line2 { font-size:13pt; font-weight:bold; margin-bottom:1mm; }';
+        labelHTML += '.line3 { font-size:10pt; color:#333; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }';
+        labelHTML += '.filing .line1 { font-size:13pt; font-weight:bold; }';
+        labelHTML += '.filing .line2 { font-size:11pt; font-weight:normal; }';
+        labelHTML += '.filing .line3 { font-size:10pt; }';
+        labelHTML += '@media screen { .label { border:1px dashed #ccc; margin-bottom:5px; background:white; } body { background:#f0f0f0; padding:10px; } }';
+        labelHTML += '</style></head><body>';
+        
+        for (const label of labels) {
+            const cls = label.type === 'filing' ? 'label filing' : 'label';
+            labelHTML += '<div class="' + cls + '">';
+            labelHTML += '<div class="line1">' + esc(label.line1) + '</div>';
+            labelHTML += '<div class="line2">' + esc(label.line2) + '</div>';
+            labelHTML += '<div class="line3">' + esc(label.line3) + '</div>';
+            labelHTML += '</div>';
+        }
+        
+        labelHTML += '</body></html>';
+        
+        const blob = new Blob([labelHTML], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        
+        // Show in same overlay as iPhone
+        var overlay = document.getElementById('label-overlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'label-overlay';
+            overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:10000;display:flex;flex-direction:column;align-items:center;padding:10px;';
+            document.body.appendChild(overlay);
+        }
+        overlay.style.display = 'flex';
+        overlay.innerHTML = '<div style="display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap;justify-content:center;">'
+            + '<button onclick="window.open(document.getElementById(\'label-print-frame\').src,\'_blank\')" style="padding:12px 24px;background:#059669;color:white;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">🖨️ Open to Print</button>'
+            + '<button id="print-later-btn-android" style="padding:12px 24px;background:#f59e0b;color:white;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">📥 Print Later</button>'
+            + '<button onclick="document.getElementById(\'label-overlay\').style.display=\'none\'" style="padding:12px 24px;background:#dc2626;color:white;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">✖ Close</button>'
+            + '</div>'
+            + '<iframe id="label-print-frame" src="' + url + '" style="flex:1;width:100%;max-width:600px;border:none;border-radius:8px;background:white;"></iframe>';
+        
+        // Wire up Print Later
+        const printLaterBtn = document.getElementById('print-later-btn-android');
+        if (printLaterBtn && items) {
+            printLaterBtn.onclick = () => {
+                const desc = items.length > 0 ? ('Job ' + (items[0].jobNumber || 'N/A') + ' - PO ' + (poNumber || 'N/A')) : 'Labels';
+                this.saveLabelsToPrintQueue(labels, desc);
+                document.getElementById('label-overlay').style.display = 'none';
+            };
+        }
+        
+        setTimeout(() => URL.revokeObjectURL(url), 300000);
+    },
+
     async generateAndShowLabels(items, poNumber) {
         // Generate PDF labels via server (QL-810W optimised)
         const today = new Date().toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit', year: 'numeric' });
@@ -1869,6 +1932,13 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             return;
         }
         
+        // Android: use HTML-based labels (QL-810W can't print custom PDF pages from Android)
+        if (/Android/i.test(navigator.userAgent)) {
+            this.showLabelsHTML(labels, items, poNumber);
+            return;
+        }
+        
+        // iPhone/Desktop: use PDF-based labels (working perfectly via AirPrint)
         try {
             const response = await this.authFetch('/api/label-pdf', {
                 method: 'POST',
@@ -1895,10 +1965,10 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             overlay.style.display = 'flex';
             overlay.innerHTML = `
                 <div style="display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap;justify-content:center;">
-                    <a href="${url}" download="labels.pdf" style="padding:12px 24px;background:#2563eb;color:white;border-radius:8px;text-decoration:none;font-size:16px;font-weight:600;">\u2b07\ufe0f Download PDF</a>
-                    <button onclick="window.open('${url}','_blank')" style="padding:12px 24px;background:#059669;color:white;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">\ud83d\udda8\ufe0f Open to Print</button>
-                    <button id="print-later-btn" style="padding:12px 24px;background:#f59e0b;color:white;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">\ud83d\udce5 Print Later</button>
-                    <button onclick="document.getElementById('label-overlay').style.display='none'" style="padding:12px 24px;background:#dc2626;color:white;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">\u2716 Close</button>
+                    <a href="${url}" download="labels.pdf" style="padding:12px 24px;background:#2563eb;color:white;border-radius:8px;text-decoration:none;font-size:16px;font-weight:600;">⬇️ Download PDF</a>
+                    <button onclick="window.open('${url}','_blank')" style="padding:12px 24px;background:#059669;color:white;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">🖨️ Open to Print</button>
+                    <button id="print-later-btn" style="padding:12px 24px;background:#f59e0b;color:white;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">📥 Print Later</button>
+                    <button onclick="document.getElementById('label-overlay').style.display='none'" style="padding:12px 24px;background:#dc2626;color:white;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">✖ Close</button>
                 </div>
                 <iframe src="${url}" style="flex:1;width:100%;max-width:600px;border:none;border-radius:8px;background:white;"></iframe>
             `;
@@ -1956,7 +2026,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         }
         if (queue.length > 0) {
             badge.style.display = 'flex';
-            badge.innerHTML = '\ud83d\udda8\ufe0f ' + queue.length;
+            badge.innerHTML = '🖨️ ' + queue.length;
         } else {
             badge.style.display = 'none';
         }
@@ -1977,6 +2047,16 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             descriptions.push(item.description);
         }
 
+        // Android: use HTML-based labels
+        if (/Android/i.test(navigator.userAgent)) {
+            this.showLabelsHTML(allLabels, [], descriptions.join(', '));
+            // Clear queue after showing
+            localStorage.removeItem('printLaterQueue');
+            this.updatePrintQueueBadge();
+            return;
+        }
+        
+        // iPhone/Desktop: use PDF-based labels
         try {
             const response = await this.authFetch('/api/label-pdf', {
                 method: 'POST',
@@ -2002,13 +2082,13 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             overlay.innerHTML = `
                 <div style="display:flex;justify-content:space-between;align-items:center;width:100%;max-width:600px;margin-bottom:8px;">
                     <div style="color:white;font-size:14px;text-align:center;flex:1;">
-                        \ud83d\udda8\ufe0f Print Queue: ${allLabels.length} label(s) from ${queue.length} job(s)
+                        🖨️ Print Queue: ${allLabels.length} label(s) from ${queue.length} job(s)
                     </div>
-                    <button id="close-queue-btn" style="background:none;border:none;color:white;font-size:28px;cursor:pointer;padding:4px 8px;">\u2716</button>
+                    <button id="close-queue-btn" style="background:none;border:none;color:white;font-size:28px;cursor:pointer;padding:4px 8px;">✖</button>
                 </div>
                 <div style="display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap;justify-content:center;">
-                    <a href="${url}" download="print_queue_labels.pdf" style="padding:12px 24px;background:#2563eb;color:white;border-radius:8px;text-decoration:none;font-size:16px;font-weight:600;">\u2b07\ufe0f Download PDF</a>
-                    <button onclick="window.open('${url}','_blank')" style="padding:12px 24px;background:#059669;color:white;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">\ud83d\udda8\ufe0f Open to Print</button>
+                    <a href="${url}" download="print_queue_labels.pdf" style="padding:12px 24px;background:#2563eb;color:white;border-radius:8px;text-decoration:none;font-size:16px;font-weight:600;">⬇️ Download PDF</a>
+                    <button onclick="window.open('${url}','_blank')" style="padding:12px 24px;background:#059669;color:white;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">🖨️ Open to Print</button>
                     <button id="clear-queue-btn" style="padding:12px 24px;background:#dc2626;color:white;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">\ud83d\uddd1\ufe0f Clear Queue</button>
                 </div>
                 <iframe src="${url}" style="flex:1;width:100%;max-width:600px;border:none;border-radius:8px;background:white;"></iframe>
@@ -4137,4 +4217,5 @@ document.addEventListener('DOMContentLoaded', () => {
     app.init();
     setTimeout(() => app.updatePrintQueueBadge(), 500);
 });
+
 
