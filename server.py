@@ -9,6 +9,21 @@ import json
 import hashlib
 import secrets
 import sqlite3
+
+# PostgreSQL support
+try:
+    import psycopg
+    from psycopg.rows import dict_row
+    HAS_PSYCOPG = True
+except ImportError:
+    HAS_PSYCOPG = False
+
+DATABASE_URL = os.environ.get('DATABASE_URL')
+# Fix Render's postgres:// to postgresql://
+if DATABASE_URL and DATABASE_URL.startswith('postgres://'):
+    DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+
+USE_POSTGRES = bool(DATABASE_URL and HAS_PSYCOPG)
 import uuid
 import concurrent.futures
 
@@ -191,125 +206,368 @@ token_cache = {
 # ============================================
 # Database Setup
 # ============================================
+class PostgresCursorWrapper:
+    """Wraps psycopg cursor to translate ? placeholders to %s"""
+    def __init__(self, cursor):
+        self._cursor = cursor
+    
+    def execute(self, query, params=None):
+        # Convert SQLite ? placeholders to PostgreSQL %s
+        query = query.replace('?', '%s')
+        # Convert SQLite datetime('now') to PostgreSQL NOW()
+        query = query.replace("datetime('now')", "NOW()")
+        if params:
+            return self._cursor.execute(query, params)
+        return self._cursor.execute(query)
+    
+    def fetchone(self):
+        row = self._cursor.fetchone()
+        if row is None:
+            return None
+        # Return a dict-like object that supports both dict access and index access
+        return DictRow(row)
+    
+    def fetchall(self):
+        rows = self._cursor.fetchall()
+        return [DictRow(row) for row in rows]
+    
+    @property
+    def rowcount(self):
+        return self._cursor.rowcount
+    
+    @property
+    def lastrowid(self):
+        # PostgreSQL doesn't have lastrowid - not used in this app
+        return None
+    
+    @property 
+    def description(self):
+        return self._cursor.description
+
+
+class DictRow:
+    """Makes psycopg dict rows work like sqlite3.Row (supports both index and key access)"""
+    def __init__(self, data):
+        if isinstance(data, dict):
+            self._data = data
+            self._keys = list(data.keys())
+        else:
+            self._data = dict(data) if hasattr(data, 'keys') else {}
+            self._keys = list(self._data.keys())
+    
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return self._data[self._keys[key]]
+        return self._data[key]
+    
+    def __contains__(self, key):
+        return key in self._data
+    
+    def keys(self):
+        return self._keys
+    
+    def get(self, key, default=None):
+        return self._data.get(key, default)
+    
+    def __repr__(self):
+        return repr(self._data)
+
+
+class PostgresConnectionWrapper:
+    """Wraps psycopg connection to behave like sqlite3 connection"""
+    def __init__(self, conn):
+        self._conn = conn
+    
+    def cursor(self):
+        return PostgresCursorWrapper(self._conn.cursor())
+    
+    def commit(self):
+        self._conn.commit()
+    
+    def close(self):
+        self._conn.close()
+    
+    def rollback(self):
+        self._conn.rollback()
+    
+    def __enter__(self):
+        return self
+    
+    def __exit__(self, *args):
+        self.close()
+
+
 def get_db():
-    """Get database connection"""
-    conn = sqlite3.connect(DB_FILE)
-    conn.row_factory = sqlite3.Row
-    return conn
+    """Get database connection - PostgreSQL if available, SQLite fallback"""
+    if USE_POSTGRES:
+        conn = psycopg.connect(DATABASE_URL, row_factory=dict_row, autocommit=False)
+        return PostgresConnectionWrapper(conn)
+    else:
+        conn = sqlite3.connect(DB_FILE)
+        conn.row_factory = sqlite3.Row
+        return conn
 
 def init_db():
     """Initialize database tables"""
     conn = get_db()
     cursor = conn.cursor()
     
-    # Staff table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS staff (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            display_name TEXT NOT NULL,
-            password_hash TEXT NOT NULL,
-            role TEXT NOT NULL DEFAULT 'staff' CHECK(role IN ('admin', 'manager', 'staff')),
-            email TEXT,
-            active INTEGER NOT NULL DEFAULT 1,
-            created_at TEXT DEFAULT (datetime('now')),
-            updated_at TEXT DEFAULT (datetime('now'))
-        )
-    ''')
-    
-    # Allocation logs table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS allocation_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            staff_id INTEGER NOT NULL,
-            staff_name TEXT NOT NULL,
-            po_number TEXT,
-            job_number TEXT,
-            vendor_name TEXT,
-            items_allocated INTEGER,
-            storage_location TEXT,
-            allocation_type TEXT,
-            verified INTEGER DEFAULT 0,
-            created_at TEXT DEFAULT (datetime('now')),
-            FOREIGN KEY (staff_id) REFERENCES staff(id)
-        )
-    ''')
-    
-    # Backorder items table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS backorder_items (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            po_id TEXT NOT NULL,
-            po_number TEXT NOT NULL,
-            catalog_id INTEGER NOT NULL,
-            description TEXT,
-            part_no TEXT,
-            quantity_backordered INTEGER NOT NULL,
-            job_number TEXT,
-            customer_name TEXT,
-            vendor_name TEXT,
-            vendor_email TEXT,
-            staff_id INTEGER,
-            staff_name TEXT,
-            status TEXT DEFAULT 'pending',
-            created_at TEXT DEFAULT (datetime('now')),
-            resolved_at TEXT
-        )
-    ''')
-    
-    # Docket OCR data table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS docket_data (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            po_id TEXT,
-            po_number TEXT,
-            supplier_name TEXT,
-            packing_slip_number TEXT,
-            tracking_number TEXT,
-            delivery_date TEXT,
-            raw_ocr_text TEXT,
-            staff_id INTEGER,
-            staff_name TEXT,
-            created_at TEXT DEFAULT (datetime('now'))
-        )
-    ''')
-    
-    # Fault reports table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS error_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            error_type TEXT NOT NULL,
-            po_number TEXT,
-            catalog_id TEXT,
-            staff_user TEXT,
-            error_code INTEGER,
-            error_message TEXT,
-            request_payload TEXT,
-            response_body TEXT,
-            endpoint TEXT,
-            created_at TEXT DEFAULT (datetime('now'))
-        )
-    ''')
-    
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS fault_reports (
-            id TEXT PRIMARY KEY,
-            reporter_name TEXT NOT NULL,
-            reporter_email TEXT NOT NULL,
-            description TEXT NOT NULL,
-            po_number TEXT,
-            job_number TEXT,
-            current_screen TEXT,
-            error_message TEXT,
-            photo_count INTEGER DEFAULT 0,
-            photos_base64 TEXT,
-            staff_user TEXT,
-            status TEXT DEFAULT 'new',
-            resolution TEXT,
-            created_at TEXT DEFAULT (datetime('now')),
-            resolved_at TEXT
-        )
-    ''')
+    if USE_POSTGRES:
+        # PostgreSQL DDL
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS staff (
+                id SERIAL PRIMARY KEY,
+                username TEXT UNIQUE NOT NULL,
+                display_name TEXT NOT NULL,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'staff',
+                email TEXT,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS allocation_logs (
+                id SERIAL PRIMARY KEY,
+                staff_id INTEGER NOT NULL,
+                staff_name TEXT NOT NULL,
+                po_number TEXT,
+                job_number TEXT,
+                vendor_name TEXT,
+                items_allocated INTEGER,
+                storage_location TEXT,
+                allocation_type TEXT,
+                verified INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS backorder_items (
+                id SERIAL PRIMARY KEY,
+                po_id TEXT NOT NULL,
+                po_number TEXT NOT NULL,
+                catalog_id INTEGER NOT NULL,
+                description TEXT,
+                part_no TEXT,
+                quantity_backordered INTEGER NOT NULL,
+                job_number TEXT,
+                customer_name TEXT,
+                vendor_name TEXT,
+                vendor_email TEXT,
+                staff_id INTEGER,
+                staff_name TEXT,
+                status TEXT DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT NOW(),
+                resolved_at TEXT
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS docket_data (
+                id SERIAL PRIMARY KEY,
+                po_id TEXT,
+                po_number TEXT,
+                supplier_name TEXT,
+                packing_slip_number TEXT,
+                tracking_number TEXT,
+                delivery_date TEXT,
+                raw_ocr_text TEXT,
+                staff_id INTEGER,
+                staff_name TEXT,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS error_logs (
+                id SERIAL PRIMARY KEY,
+                error_type TEXT NOT NULL,
+                po_number TEXT,
+                catalog_id TEXT,
+                staff_user TEXT,
+                error_code INTEGER,
+                error_message TEXT,
+                request_payload TEXT,
+                response_body TEXT,
+                endpoint TEXT,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS fault_reports (
+                id TEXT PRIMARY KEY,
+                reporter_name TEXT NOT NULL,
+                reporter_email TEXT NOT NULL,
+                description TEXT NOT NULL,
+                po_number TEXT,
+                job_number TEXT,
+                current_screen TEXT,
+                error_message TEXT,
+                photo_count INTEGER DEFAULT 0,
+                photos_base64 TEXT,
+                staff_user TEXT,
+                status TEXT DEFAULT 'new',
+                resolution TEXT,
+                created_at TIMESTAMP DEFAULT NOW(),
+                resolved_at TEXT
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS damage_reports (
+                id SERIAL PRIMARY KEY,
+                po_id TEXT,
+                po_number TEXT,
+                catalog_id INTEGER,
+                part_number TEXT,
+                description TEXT,
+                quantity_damaged INTEGER,
+                damage_notes TEXT,
+                photo_count INTEGER DEFAULT 0,
+                photos_base64 TEXT,
+                staff_id INTEGER,
+                staff_name TEXT,
+                vendor_name TEXT,
+                job_number TEXT,
+                customer_name TEXT,
+                notification_sent INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS pending_relocations (
+                id SERIAL PRIMARY KEY,
+                po_id TEXT NOT NULL,
+                catalog_id INTEGER NOT NULL,
+                part_number TEXT,
+                description TEXT,
+                quantity INTEGER NOT NULL,
+                source_storage_id INTEGER,
+                source_storage_name TEXT,
+                dest_storage_id INTEGER,
+                dest_storage_name TEXT,
+                job_id TEXT,
+                job_number TEXT,
+                section_id TEXT,
+                cost_center_id TEXT,
+                status TEXT DEFAULT 'pending',
+                staff_id INTEGER,
+                staff_name TEXT,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        ''')
+        
+        print("PostgreSQL tables initialized")
+    else:
+        # SQLite DDL (existing code)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS staff (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                display_name TEXT NOT NULL,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'staff' CHECK(role IN ('admin', 'manager', 'staff')),
+                email TEXT,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT DEFAULT (datetime('now')),
+                updated_at TEXT DEFAULT (datetime('now'))
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS allocation_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                staff_id INTEGER NOT NULL,
+                staff_name TEXT NOT NULL,
+                po_number TEXT,
+                job_number TEXT,
+                vendor_name TEXT,
+                items_allocated INTEGER,
+                storage_location TEXT,
+                allocation_type TEXT,
+                verified INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY (staff_id) REFERENCES staff(id)
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS backorder_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                po_id TEXT NOT NULL,
+                po_number TEXT NOT NULL,
+                catalog_id INTEGER NOT NULL,
+                description TEXT,
+                part_no TEXT,
+                quantity_backordered INTEGER NOT NULL,
+                job_number TEXT,
+                customer_name TEXT,
+                vendor_name TEXT,
+                vendor_email TEXT,
+                staff_id INTEGER,
+                staff_name TEXT,
+                status TEXT DEFAULT 'pending',
+                created_at TEXT DEFAULT (datetime('now')),
+                resolved_at TEXT
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS docket_data (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                po_id TEXT,
+                po_number TEXT,
+                supplier_name TEXT,
+                packing_slip_number TEXT,
+                tracking_number TEXT,
+                delivery_date TEXT,
+                raw_ocr_text TEXT,
+                staff_id INTEGER,
+                staff_name TEXT,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS error_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                error_type TEXT NOT NULL,
+                po_number TEXT,
+                catalog_id TEXT,
+                staff_user TEXT,
+                error_code INTEGER,
+                error_message TEXT,
+                request_payload TEXT,
+                response_body TEXT,
+                endpoint TEXT,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS fault_reports (
+                id TEXT PRIMARY KEY,
+                reporter_name TEXT NOT NULL,
+                reporter_email TEXT NOT NULL,
+                description TEXT NOT NULL,
+                po_number TEXT,
+                job_number TEXT,
+                current_screen TEXT,
+                error_message TEXT,
+                photo_count INTEGER DEFAULT 0,
+                photos_base64 TEXT,
+                staff_user TEXT,
+                status TEXT DEFAULT 'new',
+                resolution TEXT,
+                created_at TEXT DEFAULT (datetime('now')),
+                resolved_at TEXT
+            )
+        ''')
     
     conn.commit()
     
@@ -318,10 +576,10 @@ def init_db():
         cursor.execute("ALTER TABLE staff ADD COLUMN email TEXT")
         print("Added email column to staff table")
     except:
-        pass  # Column already exists
+        if USE_POSTGRES:
+            conn.rollback()  # PostgreSQL requires rollback after failed ALTER
     
-    # Seed all staff accounts (survives Render restarts)
-    # Each staff member is created if they don't already exist
+    # Seed staff accounts
     staff_seed = [
         ('george', 'George', 'admin', '2ndFix5082', 'george@2ndfix.com.au'),
         ('jim', 'Jim', 'manager', '2ndFix5082', 'jim@2ndfix.com.au'),
@@ -335,14 +593,14 @@ def init_db():
     
     for username, display_name, role, password, email in staff_seed:
         cursor.execute("SELECT COUNT(*) FROM staff WHERE username = ?", (username,))
-        if cursor.fetchone()[0] == 0:
+        count = cursor.fetchone()[0]
+        if count == 0:
             cursor.execute('''
                 INSERT INTO staff (username, display_name, password_hash, role, active, email)
                 VALUES (?, ?, ?, ?, ?, ?)
             ''', (username, display_name, hash_password(password), role, 1, email))
             print(f"Created staff account: {username} ({role})")
         else:
-            # Update password and email for existing staff
             cursor.execute('UPDATE staff SET password_hash = ? WHERE username = ?',
                           (hash_password(password), username))
             print(f"Reset password for {username}")
@@ -1999,7 +2257,10 @@ def get_pending_relocations():
         cursor = conn.cursor()
         
         # Check if table exists
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='pending_relocations'")
+        if USE_POSTGRES:
+            cursor.execute("SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename=%s", ('pending_relocations',))
+        else:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='pending_relocations'")
         if not cursor.fetchone():
             conn.close()
             return jsonify({'relocations': [], 'count': 0})
@@ -3176,8 +3437,14 @@ def allocate_from_stock_v2():
 print("Initializing database...")
 init_db()
 
+if USE_POSTGRES:
+    print("\u2705 Using PostgreSQL database (persistent)")
+else:
+    print("\u26a0\ufe0f Using SQLite database (ephemeral)")
+
 if __name__ == '__main__':
     print("Starting PO Receiving App server...")
     print("Staff management enabled")
     port = int(os.environ.get('PORT', 8000))
     app.run(host='0.0.0.0', port=port, debug=False)
+
