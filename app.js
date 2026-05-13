@@ -2000,16 +2000,22 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             }
             overlay.style.display = 'flex';
             overlay.innerHTML = `
-                <div style="color:white;font-size:14px;margin-bottom:8px;text-align:center;">
-                    \ud83d\udda8\ufe0f Print Queue: ${allLabels.length} label(s) from ${queue.length} job(s)
+                <div style="display:flex;justify-content:space-between;align-items:center;width:100%;max-width:600px;margin-bottom:8px;">
+                    <div style="color:white;font-size:14px;text-align:center;flex:1;">
+                        \ud83d\udda8\ufe0f Print Queue: ${allLabels.length} label(s) from ${queue.length} job(s)
+                    </div>
+                    <button id="close-queue-btn" style="background:none;border:none;color:white;font-size:28px;cursor:pointer;padding:4px 8px;">\u2716</button>
                 </div>
                 <div style="display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap;justify-content:center;">
                     <a href="${url}" download="print_queue_labels.pdf" style="padding:12px 24px;background:#2563eb;color:white;border-radius:8px;text-decoration:none;font-size:16px;font-weight:600;">\u2b07\ufe0f Download PDF</a>
                     <button onclick="window.open('${url}','_blank')" style="padding:12px 24px;background:#059669;color:white;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">\ud83d\udda8\ufe0f Open to Print</button>
-                    <button id="clear-queue-btn" style="padding:12px 24px;background:#dc2626;color:white;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">\u2716 Done - Clear Queue</button>
+                    <button id="clear-queue-btn" style="padding:12px 24px;background:#dc2626;color:white;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">\ud83d\uddd1\ufe0f Clear Queue</button>
                 </div>
                 <iframe src="${url}" style="flex:1;width:100%;max-width:600px;border:none;border-radius:8px;background:white;"></iframe>
             `;
+            document.getElementById('close-queue-btn').onclick = () => {
+                overlay.style.display = 'none';
+            };
             document.getElementById('clear-queue-btn').onclick = () => {
                 localStorage.setItem('label_print_queue', '[]');
                 this.updatePrintQueueBadge();
@@ -4131,3 +4137,4 @@ document.addEventListener('DOMContentLoaded', () => {
     app.init();
     setTimeout(() => app.updatePrintQueueBadge(), 500);
 });
+
