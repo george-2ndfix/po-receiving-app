@@ -2544,8 +2544,8 @@ def job_intel():
         if not job_id:
             return jsonify({"error": "job_id required"}), 400
 
-        # 1. Get job details
-        job_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id}/?columns=ID,Name,Customer,Site')
+        # 1. Get job details (no trailing slash for single resource)
+        job_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id}?columns=ID,Name,Customer,Site')
         if job_resp.status_code != 200:
             return jsonify({"error": f"Job {job_id} not found"}), 404
         job = job_resp.json()
