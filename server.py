@@ -863,10 +863,11 @@ def label_pdf():
     """Generate label PDF for QL-810W printer - landscape, DK-2225 38mm tape."""
     try:
         data = request.get_json()
-        if not data or 'items' not in data:
-            return jsonify({'error': 'Missing items'}), 400
+        if not data or ('items' not in data and 'labels' not in data):
+            return jsonify({'error': 'Missing items or labels'}), 400
         
-        items = data['items']
+        use_preformatted = 'labels' in data
+        items = data.get('labels', data.get('items', []))
         po_number = data.get('poNumber', 'N/A')
         job_number = data.get('jobNumber', '')
         customer_name = data.get('customerName', '')
@@ -910,20 +911,37 @@ def label_pdf():
         c = pdf_canvas.Canvas(buf)
         
         for item in items:
-            part_no = item.get('partNo', '')
-            desc = item.get('description', '')
-            qty = item.get('quantity', 0)
-            storage = item.get('storageLocation', '')
-            item_job = item.get('jobNumber', job_number)
-            item_customer = item.get('customerName', customer_name)
+            # Skip filing labels in main loop (handled separately below)
+            if use_preformatted and item.get('type') == 'filing':
+                continue
             
-            line1 = f"Job {item_job}  {item_customer}" if item_job else item_customer
-            bottom_parts = [f"Qty: {qty}"]
-            if storage:
-                bottom_parts.append(storage)
-            bottom_parts.append(today)
-            bottom_parts.append(f"PO {po_number}")
-            line_bottom = "    ".join(bottom_parts)
+            if use_preformatted:
+                # Pre-formatted labels from v107+ client
+                line1 = item.get('line1', '')
+                line2_raw = item.get('line2', '')
+                line_bottom = item.get('line3', '')
+                # Split line2 into bold part code and regular description
+                if ' \u00b7 ' in line2_raw:
+                    part_no, desc = line2_raw.split(' \u00b7 ', 1)
+                else:
+                    part_no = line2_raw
+                    desc = ''
+            else:
+                # Legacy raw items format
+                part_no = item.get('partNo', '')
+                desc = item.get('description', '')
+                qty = item.get('quantity', 0)
+                storage = item.get('storageLocation', '')
+                item_job = item.get('jobNumber', job_number)
+                item_customer = item.get('customerName', customer_name)
+                
+                line1 = f"Job {item_job}  {item_customer}" if item_job else item_customer
+                bottom_parts = [f"Qty: {qty}"]
+                if storage:
+                    bottom_parts.append(storage)
+                bottom_parts.append(today)
+                bottom_parts.append(f"PO {po_number}")
+                line_bottom = "    ".join(bottom_parts)
             
             content_w = ITEM_W - MARGIN * 2
             part_w_px = stringWidth(part_no + "  ", "Helvetica-Bold", 12)
@@ -978,11 +996,46 @@ def label_pdf():
             
             c.showPage()
         
-        if job_number:
+        # Check for preformatted filing label first
+        filing_label = None
+        if use_preformatted:
+            for item in data.get('labels', []):
+                if item.get('type') == 'filing':
+                    filing_label = item
+                    break
+            # Extract metadata from labels if not provided
+            if not job_number:
+                for lbl in data.get('labels', []):
+                    if lbl.get('type') != 'filing':
+                        l1 = lbl.get('line1', '')
+                        if 'Job ' in l1:
+                            for p in l1.replace(' \u00b7 ', '|').split('|'):
+                                p = p.strip()
+                                if p.startswith('Job '):
+                                    job_number = p.replace('Job ', '')
+                                elif p and not customer_name:
+                                    customer_name = p
+                        l3 = lbl.get('line3', '')
+                        if 'PO ' in l3:
+                            for seg in l3.replace(' \u00b7 ', '|').split('|'):
+                                seg = seg.strip()
+                                if seg.startswith('PO '):
+                                    po_number = seg.replace('PO ', '')
+                        break
+        
+        if filing_label:
+            filing_line1 = filing_label.get('line1', '')
+            filing_line2 = filing_label.get('line2', '')
+            filing_line3 = filing_label.get('line3', '')
+        elif job_number:
+            storage_loc = items[0].get('storageLocation', '') if items else ''
             filing_line1 = f"Job {job_number}  PO {po_number}"
             filing_line2 = customer_name
-            storage_loc = items[0].get('storageLocation', '') if items else ''
             filing_line3 = f"Storage: {storage_loc}  {today}" if storage_loc else today
+        else:
+            filing_line1 = None
+        
+        if filing_line1:
             
             filing_w = calc_width([
                 (filing_line1, "Helvetica-Bold", 14),
