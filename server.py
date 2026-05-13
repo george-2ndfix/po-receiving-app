@@ -281,6 +281,12 @@ class PostgresConnectionWrapper:
     def cursor(self):
         return PostgresCursorWrapper(self._conn.cursor())
     
+    def execute(self, query, params=None):
+        """Support db.execute() calls (SQLite pattern) - creates cursor, executes, returns cursor"""
+        cur = self.cursor()
+        cur.execute(query, params)
+        return cur
+    
     def commit(self):
         self._conn.commit()
     
@@ -3470,5 +3476,6 @@ if __name__ == '__main__':
     print("Staff management enabled")
     port = int(os.environ.get('PORT', 8000))
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
