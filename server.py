@@ -281,12 +281,6 @@ class PostgresConnectionWrapper:
     def cursor(self):
         return PostgresCursorWrapper(self._conn.cursor())
     
-    def execute(self, query, params=None):
-        """Support db.execute() calls (SQLite pattern) - creates cursor, executes, returns cursor"""
-        cur = self.cursor()
-        cur.execute(query, params)
-        return cur
-    
     def commit(self):
         self._conn.commit()
     
@@ -1124,9 +1118,7 @@ def generate_labels():
 @app.route('/api/label-pdf', methods=['POST'])
 @login_required
 def label_pdf():
-    """Generate label PDF for QL-810W printer - DK-2225 38mm tape.
-    Uses 38mm-wide page (matching tape) with text rotated 90 degrees.
-    This is the proven approach that works correctly with the QL-810W."""
+    """Generate label PDF for QL-810W printer - landscape, DK-2225 38mm tape."""
     try:
         data = request.get_json()
         if not data or ('items' not in data and 'labels' not in data):
@@ -1139,222 +1131,201 @@ def label_pdf():
         customer_name = data.get('customerName', '')
         today = datetime.now().strftime('%d/%m/%Y')
         
-        from reportlab.lib.units import mm
+        from reportlab.lib.pagesizes import mm
         from reportlab.pdfgen import canvas as pdf_canvas
         from reportlab.pdfbase.pdfmetrics import stringWidth
         
-        PAGE_W = 38 * mm          # tape width (fixed - matches DK-2225)
-        ITEM_LENGTH = 120 * mm    # item label length along tape
+        LABEL_H = 38 * mm
+        ITEM_W = 120 * mm
+        MIN_W = 50 * mm
+        MAX_W = 120 * mm
         MARGIN = 3 * mm
-        MIN_FILING_LEN = 50 * mm
-        MAX_FILING_LEN = 120 * mm
         
-        def auto_fit_font(text, font_name, max_size, max_width):
-            size = max_size
-            while size > 5:
-                w = stringWidth(text, font_name, size)
-                if w <= max_width:
-                    return size
-                size -= 0.5
-            return 5
+        def calc_width(texts_fonts):
+            max_text_w = 0
+            for text, fn, fs in texts_fonts:
+                w = stringWidth(text, fn, fs)
+                if w > max_text_w:
+                    max_text_w = w
+            return min(MAX_W, max(MIN_W, max_text_w + MARGIN * 2 + 2*mm))
         
         def wrap_text(text, font_name, font_size, max_w):
             words = text.split()
-            lines_out, current = [], ""
+            lines = []
+            current = ""
             for word in words:
                 test = f"{current} {word}".strip()
                 if stringWidth(test, font_name, font_size) <= max_w:
                     current = test
                 else:
                     if current:
-                        lines_out.append(current)
+                        lines.append(current)
                     current = word
             if current:
-                lines_out.append(current)
-            return lines_out if lines_out else [""]
-        
-        def calc_filing_length(texts_fonts):
-            max_w = 0
-            for text, fn, fs in texts_fonts:
-                w = stringWidth(text, fn, fs)
-                if w > max_w:
-                    max_w = w
-            return min(MAX_FILING_LEN, max(MIN_FILING_LEN, max_w + MARGIN * 2 + 2*mm))
+                lines.append(current)
+            return lines if lines else [""]
         
         buf = io.BytesIO()
         c = pdf_canvas.Canvas(buf)
         
-        for label_item in items:
-            label_type = label_item.get('type', 'item') if use_preformatted else 'item'
-            
-            # Skip filing labels in main loop (handled after)
-            if label_type == 'filing':
+        for item in items:
+            # Skip filing labels in main loop (handled separately below)
+            if use_preformatted and item.get('type') == 'filing':
                 continue
             
             if use_preformatted:
-                l1 = str(label_item.get('line1', ''))
-                l2_raw = str(label_item.get('line2', ''))
-                l3 = str(label_item.get('line3', ''))
-                # Split line2 into bold part code + regular description
-                if ' \u00b7 ' in l2_raw:
-                    part_code, desc = l2_raw.split(' \u00b7 ', 1)
+                # Pre-formatted labels from v107+ client
+                line1 = item.get('line1', '')
+                line2_raw = item.get('line2', '')
+                line_bottom = item.get('line3', '')
+                # Split line2 into bold part code and regular description
+                if ' \u00b7 ' in line2_raw:
+                    part_no, desc = line2_raw.split(' \u00b7 ', 1)
                 else:
-                    part_code = l2_raw
+                    part_no = line2_raw
                     desc = ''
             else:
-                part_no_raw = label_item.get('partNo', '')
-                desc = label_item.get('description', '')
-                qty = label_item.get('quantity', 0)
-                storage = label_item.get('storageLocation', '')
-                item_job = label_item.get('jobNumber', job_number)
-                item_customer = label_item.get('customerName', customer_name)
+                # Legacy raw items format
+                part_no = item.get('partNo', '')
+                desc = item.get('description', '')
+                qty = item.get('quantity', 0)
+                storage = item.get('storageLocation', '')
+                item_job = item.get('jobNumber', job_number)
+                item_customer = item.get('customerName', customer_name)
                 
-                l1 = f"Job {item_job}  {item_customer}" if item_job else item_customer
-                part_code = part_no_raw
+                line1 = f"Job {item_job}  {item_customer}" if item_job else item_customer
                 bottom_parts = [f"Qty: {qty}"]
                 if storage:
                     bottom_parts.append(storage)
                 bottom_parts.append(today)
                 bottom_parts.append(f"PO {po_number}")
-                l3 = "    ".join(bottom_parts)
+                line_bottom = "    ".join(bottom_parts)
             
-            # Item label: 38mm wide (tape) x 120mm long
-            c.setPageSize((PAGE_W, ITEM_LENGTH))
-            avail_w = ITEM_LENGTH - 2 * MARGIN  # text width along tape
-            avail_h = PAGE_W - 2 * MARGIN       # text height across tape (32mm)
+            content_w = ITEM_W - MARGIN * 2
+            part_w_px = stringWidth(part_no + "  ", "Helvetica-Bold", 12)
+            desc_avail = content_w - part_w_px
             
-            # Font sizes
-            s1 = auto_fit_font(l1, "Helvetica-Bold", 14, avail_w)
-            s_part = auto_fit_font(part_code, "Helvetica-Bold", 12, avail_w)
-            s3 = auto_fit_font(l3, "Helvetica", 10, avail_w)
-            
-            # Check if description fits inline after part code
-            part_w = stringWidth(part_code + "  ", "Helvetica-Bold", s_part)
-            desc_avail = avail_w - part_w
             desc_inline = desc and stringWidth(desc, "Helvetica", 9) <= desc_avail
-            
             if desc and not desc_inline:
-                desc_wrapped = wrap_text(desc, "Helvetica", 9, avail_w)
+                desc_lines = wrap_text(desc, "Helvetica", 9, content_w)
             else:
-                desc_wrapped = []
+                desc_lines = [desc] if desc else []
             
-            # Calculate vertical layout (in mm)
-            line_heights = [s1 * 0.3528, s_part * 0.3528, s3 * 0.3528]
-            extra_desc = len(desc_wrapped) * 4 if desc_wrapped else 0
-            gap = 2.5
-            total_h = line_heights[0] + gap + line_heights[1] + extra_desc + gap + line_heights[2]
+            line1_h = 14 * 0.3528
+            line2_h = 12 * 0.3528
+            line3_h = 10 * 0.3528
+            gap = 3
+            extra_wrap = len(desc_lines) * 4 if not desc_inline and desc_lines else 0
+            total_block_h = line1_h + gap + line2_h + extra_wrap + gap + line3_h
             
-            # Center vertically in available height
-            top_offset = ((avail_h / mm) - total_h) / 2
+            label_h = LABEL_H
+            needed = total_block_h + 6
+            if needed > LABEL_H / mm:
+                label_h = needed * mm
             
-            c.saveState()
-            c.rotate(90)
+            c.setPageSize((ITEM_W, label_h))
+            top_margin = (label_h / mm - total_block_h) / 2
             
-            # After rotate(90): x = along tape, y = -(across tape)
-            y_start = -PAGE_W + MARGIN + avail_h - top_offset * mm
-            y = y_start
+            x = MARGIN
+            y = label_h - top_margin * mm
             
-            # Line 1: Job + Customer (bold)
-            c.setFont("Helvetica-Bold", s1)
-            y -= line_heights[0] * mm
-            c.drawString(MARGIN, y, l1)
+            c.setFont("Helvetica-Bold", 14)
+            y -= line1_h * mm
+            c.drawString(x, y, line1)
             
-            # Line 2: Part code (bold) + optional inline description
             y -= gap * mm
-            c.setFont("Helvetica-Bold", s_part)
-            y -= line_heights[1] * mm
-            c.drawString(MARGIN, y, part_code)
+            c.setFont("Helvetica-Bold", 12)
+            y -= line2_h * mm
+            c.drawString(x, y, part_no)
             
-            if desc_inline and desc:
+            if desc_inline and desc_lines:
                 c.setFont("Helvetica", 9)
-                c.drawString(MARGIN + part_w, y, desc)
-            elif desc_wrapped:
+                c.drawString(x + part_w_px, y, desc_lines[0])
+            elif desc_lines:
                 c.setFont("Helvetica", 9)
-                for dl in desc_wrapped:
+                for dl in desc_lines:
                     y -= 4 * mm
-                    c.drawString(MARGIN, y, dl)
+                    c.drawString(x, y, dl)
             
-            # Line 3: Qty, Location, Date, PO
             y -= gap * mm
-            c.setFont("Helvetica", s3)
-            y -= line_heights[2] * mm
-            c.drawString(MARGIN, y, l3)
+            c.setFont("Helvetica", 10)
+            y -= line3_h * mm
+            c.drawString(x, y, line_bottom)
             
-            c.restoreState()
             c.showPage()
         
-        # Filing label
+        # Check for preformatted filing label first
         filing_label = None
         if use_preformatted:
-            for fi in data.get('labels', []):
-                if fi.get('type') == 'filing':
-                    filing_label = fi
+            for item in data.get('labels', []):
+                if item.get('type') == 'filing':
+                    filing_label = item
                     break
-            # Extract metadata from first label if needed
+            # Extract metadata from labels if not provided
             if not job_number:
                 for lbl in data.get('labels', []):
                     if lbl.get('type') != 'filing':
-                        ll1 = lbl.get('line1', '')
-                        if 'Job ' in ll1:
-                            for p in ll1.replace(' \u00b7 ', '|').split('|'):
+                        l1 = lbl.get('line1', '')
+                        if 'Job ' in l1:
+                            for p in l1.replace(' \u00b7 ', '|').split('|'):
                                 p = p.strip()
                                 if p.startswith('Job '):
                                     job_number = p.replace('Job ', '')
                                 elif p and not customer_name:
                                     customer_name = p
-                        ll3 = lbl.get('line3', '')
-                        if 'PO ' in ll3:
-                            for seg in ll3.replace(' \u00b7 ', '|').split('|'):
+                        l3 = lbl.get('line3', '')
+                        if 'PO ' in l3:
+                            for seg in l3.replace(' \u00b7 ', '|').split('|'):
                                 seg = seg.strip()
                                 if seg.startswith('PO '):
                                     po_number = seg.replace('PO ', '')
                         break
         
         if filing_label:
-            fl1 = filing_label.get('line1', '')
-            fl2 = filing_label.get('line2', '')
-            fl3 = filing_label.get('line3', '')
+            filing_line1 = filing_label.get('line1', '')
+            filing_line2 = filing_label.get('line2', '')
+            filing_line3 = filing_label.get('line3', '')
         elif job_number:
             storage_loc = items[0].get('storageLocation', '') if items else ''
-            fl1 = f"Job {job_number}  PO {po_number}"
-            fl2 = customer_name
-            fl3 = f"Storage: {storage_loc}  {today}" if storage_loc else today
+            filing_line1 = f"Job {job_number}  PO {po_number}"
+            filing_line2 = customer_name
+            filing_line3 = f"Storage: {storage_loc}  {today}" if storage_loc else today
         else:
-            fl1 = None
+            filing_line1 = None
         
-        if fl1:
-            filing_len = calc_filing_length([
-                (fl1, "Helvetica-Bold", 14),
-                (fl2, "Helvetica-Bold", 11),
-                (fl3, "Helvetica-Bold", 10),
+        if filing_line1:
+            
+            filing_w = calc_width([
+                (filing_line1, "Helvetica-Bold", 14),
+                (filing_line2, "Helvetica", 11),
+                (filing_line3, "Helvetica", 10),
             ])
-            c.setPageSize((PAGE_W, filing_len))
             
-            f_avail_w = filing_len - 2 * MARGIN
-            f_avail_h = PAGE_W - 2 * MARGIN
+            c.setPageSize((filing_w, LABEL_H))
             
-            fs1 = auto_fit_font(fl1, "Helvetica-Bold", 14, f_avail_w)
-            fs2 = auto_fit_font(fl2, "Helvetica-Bold", 11, f_avail_w)
-            fs3 = auto_fit_font(fl3, "Helvetica-Bold", 10, f_avail_w)
+            fl1_h = 14 * 0.3528
+            fl2_h = 11 * 0.3528
+            fl3_h = 10 * 0.3528
+            total_f = fl1_h + gap + fl2_h + gap + fl3_h
+            top_f = (LABEL_H / mm - total_f) / 2
             
-            c.saveState()
-            c.rotate(90)
+            x = MARGIN
+            y = LABEL_H - top_f * mm
             
-            y_base = -PAGE_W + MARGIN
-            line_spacing = f_avail_h / 3
+            c.setFont("Helvetica-Bold", 14)
+            y -= fl1_h * mm
+            c.drawString(x, y, filing_line1)
             
-            c.setStrokeColorRGB(0.3, 0.3, 0.3)
-            c.setLineWidth(0.5)
-            c.rect(MARGIN, y_base, f_avail_w, f_avail_h)
+            y -= gap * mm
+            c.setFont("Helvetica", 11)
+            y -= fl2_h * mm
+            c.drawString(x, y, filing_line2)
             
-            c.setFont("Helvetica-Bold", fs1)
-            c.drawString(MARGIN + 1*mm, y_base + 2*line_spacing + 0.5*mm, fl1)
-            c.setFont("Helvetica-Bold", fs2)
-            c.drawString(MARGIN + 1*mm, y_base + line_spacing + 0.5*mm, fl2)
-            c.setFont("Helvetica-Bold", fs3)
-            c.drawString(MARGIN + 1*mm, y_base + 0.5*mm, fl3)
+            y -= gap * mm
+            c.setFont("Helvetica", 10)
+            y -= fl3_h * mm
+            c.drawString(x, y, filing_line3)
             
-            c.restoreState()
             c.showPage()
         
         c.save()
@@ -3371,12 +3342,10 @@ def allocate_from_stock_v2():
                 # Step 1: Stock transfer (if source != destination)
                 if str(src_id) != str(dest_storage_id):
                     transfer_payload = {
-                        "SourceStorageDeviceID": int(src_id),
-                        "Items": [{
-                            "CatalogID": int(cat_id),
-                            "DestinationStorageDeviceID": int(dest_storage_id),
-                            "Quantity": int(quantity)
-                        }]
+                        "Catalog": int(cat_id),
+                        "FromStorage": int(src_id),
+                        "ToStorage": int(dest_storage_id),
+                        "Quantity": int(quantity)
                     }
                     print(f"  Transferring {quantity}x {part_no} from {src_name} ({src_id}) to {dest_storage_name} ({dest_storage_id})")
                     transfer_resp = simpro_request("POST", f"/companies/{COMPANY_ID}/stockTransfer/", json=transfer_payload)
@@ -3394,6 +3363,7 @@ def allocate_from_stock_v2():
                     print(f"  Source == destination for {part_no}, skipping transfer")
 
                 # Step 2: Assign to job cost centre
+                assign_ok = False
                 if section_id and cc_id:
                     assign_payload = {
                         "Catalog": {"ID": cat_id},
@@ -3415,13 +3385,21 @@ def allocate_from_stock_v2():
                             print(f"  PATCH assign also failed: {patch_resp.status_code} {patch_resp.text[:200]}")
                         else:
                             print(f"  PATCH assign succeeded")
+                            assign_ok = True
                     elif assign_resp.status_code not in (200, 201, 204):
                         print(f"  POST assign failed: {assign_resp.status_code} {assign_resp.text[:200]}")
                     else:
                         print(f"  POST assign succeeded")
+                        assign_ok = True
+                else:
+                    # No assign needed (no section/cc provided)
+                    assign_ok = True
 
-                result_entry["success"] = True
-                result_entry["message"] = f"Moved {quantity} from {src_name} to {dest_storage_name}"
+                if assign_ok:
+                    result_entry["success"] = True
+                    result_entry["message"] = f"Moved {quantity} from {src_name} to {dest_storage_name}"
+                else:
+                    result_entry["error"] = "Stock transferred but assign to cost centre failed"
 
                 # Update stock cache in-place (deduct from source)
                 _deduct_from_cache(int(cat_id), int(src_id), int(quantity))
@@ -3476,6 +3454,4 @@ if __name__ == '__main__':
     print("Staff management enabled")
     port = int(os.environ.get('PORT', 8000))
     app.run(host='0.0.0.0', port=port, debug=False)
-
-
 
