@@ -118,6 +118,13 @@ const app = {
 document.getElementById('view-history-btn')?.addEventListener('click', () => this.showLogs());
         document.getElementById('print-labels-btn')?.addEventListener('click', () => this.printLabels());
         
+        // Allocate from Stock - Look Up
+        document.getElementById('job-lookup-btn')?.addEventListener('click', () => this.stockLookup());
+        document.getElementById('job-number')?.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') this.stockLookup();
+        });
+        document.getElementById('part-search-btn')?.addEventListener('click', () => this.partSearch());
+        
         // Back buttons
         document.querySelectorAll('.back-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
@@ -2004,6 +2011,263 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         }
     },
     
+    // ============================================
+    // Allocate from Stock
+    // ============================================
+    async stockLookup() {
+        const jobInput = document.getElementById('job-number');
+        const jobId = jobInput.value.trim();
+        if (!jobId) { alert('Enter a job number'); return; }
+        
+        const btn = document.getElementById('job-lookup-btn');
+        const results = document.getElementById('stock-results');
+        btn.disabled = true;
+        btn.textContent = 'Searching...';
+        results.innerHTML = '<p class="hint">Searching stock...</p>';
+        
+        try {
+            const resp = await fetch('/api/job-stock-search', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${this.token}` },
+                body: JSON.stringify({ jobId })
+            });
+            
+            if (!resp.ok) {
+                const err = await resp.json();
+                throw new Error(err.error || 'Search failed');
+            }
+            
+            const data = await resp.json();
+            this._stockJob = data.job;
+            this._stockItems = data.items;
+            
+            if (!data.items || data.items.length === 0) {
+                results.innerHTML = `<div class="card" style="padding:16px;text-align:center;">
+                    <h3>Job ${data.job.id} — ${data.job.customer || data.job.number}</h3>
+                    <p>${data.message || 'No unassigned items with available stock found.'}</p>
+                </div>`;
+                return;
+            }
+            
+            // Build results UI
+            let html = `<div class="card" style="padding:12px;margin-bottom:12px;">
+                <h3 style="margin:0 0 4px;">Job ${data.job.id} — ${data.job.customer || ''}</h3>
+                <p style="margin:0;color:#666;font-size:14px;">${data.job.number}</p>
+            </div>`;
+            
+            html += '<div class="stock-items-list">';
+            data.items.forEach((item, i) => {
+                const bestLoc = item.stockLocations[0];
+                html += `<div class="card" style="padding:12px;margin-bottom:8px;">
+                    <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;">
+                        <input type="checkbox" class="stock-item-cb" data-index="${i}" checked style="margin-top:4px;width:20px;height:20px;">
+                        <div style="flex:1;">
+                            <div style="font-weight:bold;font-size:14px;">${item.partNo}</div>
+                            <div style="font-size:13px;color:#333;">${item.name}</div>
+                            <div style="font-size:12px;color:#666;margin-top:4px;">
+                                CC: ${item.costCentreName} | Need: ${item.neededQty}
+                            </div>
+                            <div style="margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                                <label style="font-size:12px;font-weight:600;">Qty:</label>
+                                <input type="number" class="stock-qty" data-index="${i}" value="${item.neededQty}" min="1" max="${bestLoc.availableQty}" 
+                                    style="width:60px;padding:4px 8px;border:1px solid #ccc;border-radius:4px;font-size:14px;">
+                                <label style="font-size:12px;font-weight:600;">From:</label>
+                                <select class="stock-source" data-index="${i}" style="flex:1;min-width:120px;padding:4px;border:1px solid #ccc;border-radius:4px;font-size:13px;">
+                                    ${item.stockLocations.map(loc => `<option value="${loc.storageId}" data-name="${loc.storageName}">${loc.storageName} (${loc.availableQty} avail)</option>`).join('')}
+                                </select>
+                            </div>
+                        </div>
+                    </label>
+                </div>`;
+            });
+            html += '</div>';
+            
+            // Destination storage picker
+            html += `<div class="card" style="padding:12px;margin-top:12px;">
+                <h3 style="margin:0 0 8px;">Destination Storage</h3>
+                <select id="stock-dest-storage" style="width:100%;padding:10px;border:1px solid #ccc;border-radius:6px;font-size:15px;">
+                    <option value="">-- Select Destination --</option>
+                    <optgroup label="Special Locations">
+                        <option value="4" data-name="Customer Cupboard">Customer Cupboard</option>
+                        <option value="21" data-name="Builders Cupboard">Builders Cupboard</option>
+                    </optgroup>
+                    <optgroup label="Container 1">
+                        <option value="5" data-name="1.01">1.01</option>
+                        <option value="6" data-name="1.02">1.02</option>
+                        <option value="7" data-name="1.03">1.03</option>
+                        <option value="8" data-name="1.04">1.04</option>
+                    </optgroup>
+                    <optgroup label="Container 2">
+                        <option value="13" data-name="2.01">2.01</option>
+                        <option value="14" data-name="2.02">2.02</option>
+                        <option value="15" data-name="2.03">2.03</option>
+                        <option value="16" data-name="2.04">2.04</option>
+                    </optgroup>
+                    <optgroup label="Container 3">
+                        <option value="22" data-name="3.01">3.01</option>
+                        <option value="23" data-name="3.02">3.02</option>
+                    </optgroup>
+                </select>
+            </div>`;
+            
+            html += `<button id="stock-allocate-btn" class="btn btn-primary" style="width:100%;margin-top:12px;padding:14px;font-size:16px;">
+                Allocate Selected Items
+            </button>`;
+            
+            results.innerHTML = html;
+            
+            // Wire allocate button
+            document.getElementById('stock-allocate-btn')?.addEventListener('click', () => this.allocateFromStockSubmit());
+            
+        } catch (err) {
+            results.innerHTML = `<p class="hint" style="color:red;">Error: ${err.message}</p>`;
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Look Up';
+        }
+    },
+
+    async partSearch() {
+        const input = document.getElementById('part-search');
+        const query = input.value.trim();
+        if (!query) { alert('Enter a part number'); return; }
+        
+        const btn = document.getElementById('part-search-btn');
+        const results = document.getElementById('stock-results');
+        btn.disabled = true;
+        results.innerHTML = '<p class="hint">Searching...</p>';
+        
+        try {
+            const resp = await fetch(`/api/stock-part-search?q=${encodeURIComponent(query)}`, {
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            if (!resp.ok) throw new Error('Search failed');
+            const data = await resp.json();
+            if (!data.results || data.results.length === 0) {
+                results.innerHTML = '<p class="hint">No items found matching that part number.</p>';
+                return;
+            }
+            let html = '';
+            data.results.forEach(item => {
+                html += `<div class="card" style="padding:12px;margin-bottom:8px;">
+                    <div style="font-weight:bold;">${item.partNo || ''}</div>
+                    <div style="font-size:13px;">${item.name || ''}</div>
+                    <div style="font-size:12px;color:#666;">Stock: ${item.availableQty || 0} in ${item.storageName || 'Unknown'}</div>
+                </div>`;
+            });
+            results.innerHTML = html;
+        } catch (err) {
+            results.innerHTML = `<p class="hint" style="color:red;">Error: ${err.message}</p>`;
+        } finally {
+            btn.disabled = false;
+        }
+    },
+
+    async allocateFromStockSubmit() {
+        const destSelect = document.getElementById('stock-dest-storage');
+        const destId = destSelect.value;
+        const destName = destSelect.options[destSelect.selectedIndex]?.dataset?.name || destSelect.options[destSelect.selectedIndex]?.text || '';
+        
+        if (!destId) { alert('Select a destination storage location'); return; }
+        if (!this._stockJob || !this._stockItems) { alert('No items loaded'); return; }
+        
+        // Gather checked items
+        const checkboxes = document.querySelectorAll('.stock-item-cb:checked');
+        if (checkboxes.length === 0) { alert('Select at least one item'); return; }
+        
+        const items = [];
+        checkboxes.forEach(cb => {
+            const idx = parseInt(cb.dataset.index);
+            const item = this._stockItems[idx];
+            const qtyInput = document.querySelector(`.stock-qty[data-index="${idx}"]`);
+            const srcSelect = document.querySelector(`.stock-source[data-index="${idx}"]`);
+            const srcOpt = srcSelect.options[srcSelect.selectedIndex];
+            
+            items.push({
+                catalogId: item.catalogId,
+                name: item.name,
+                partNo: item.partNo,
+                quantity: parseInt(qtyInput.value) || item.neededQty,
+                sourceStorageId: parseInt(srcSelect.value),
+                sourceStorageName: srcOpt.dataset.name || srcOpt.text,
+                sectionId: item.sectionId,
+                costCentreId: item.costCentreId
+            });
+        });
+        
+        const allocBtn = document.getElementById('stock-allocate-btn');
+        allocBtn.disabled = true;
+        allocBtn.textContent = 'Allocating...';
+        
+        try {
+            const resp = await fetch('/api/allocate-from-stock', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${this.token}` },
+                body: JSON.stringify({
+                    jobId: this._stockJob.id,
+                    destinationStorageId: parseInt(destId),
+                    destinationStorageName: destName,
+                    items
+                })
+            });
+            
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || 'Allocation failed');
+            
+            const successCount = data.successCount || 0;
+            const totalCount = data.totalCount || items.length;
+            
+            // Show results
+            let resultHtml = `<div class="card" style="padding:16px;text-align:center;">
+                <h3 style="color:${successCount === totalCount ? '#22c55e' : '#f59e0b'};">
+                    ${successCount === totalCount ? '✅' : '⚠️'} ${successCount}/${totalCount} items allocated
+                </h3>`;
+            
+            if (data.results) {
+                data.results.forEach(r => {
+                    const icon = r.success ? '✅' : '❌';
+                    resultHtml += `<div style="text-align:left;padding:4px 0;font-size:13px;">
+                        ${icon} ${r.partNo || ''} — ${r.success ? (r.message || 'OK') : (r.error || 'Failed')}
+                    </div>`;
+                });
+            }
+            
+            resultHtml += `<button class="btn btn-primary" style="margin-top:12px;padding:10px 24px;" onclick="document.getElementById('stock-results').innerHTML='<p class=hint>Enter a job number to see items available in stock</p>';document.getElementById('job-number').value='';">
+                Done — New Lookup
+            </button>`;
+            
+            // Print labels button if any succeeded
+            if (successCount > 0) {
+                resultHtml += `<button class="btn btn-secondary" style="margin-top:8px;padding:10px 24px;" id="stock-print-labels-btn">
+                    🏷️ Print Labels
+                </button>`;
+            }
+            
+            resultHtml += '</div>';
+            document.getElementById('stock-results').innerHTML = resultHtml;
+            
+            // Wire print labels
+            if (successCount > 0) {
+                document.getElementById('stock-print-labels-btn')?.addEventListener('click', () => {
+                    const labelItems = items.filter((_, i) => data.results[i]?.success).map(it => ({
+                        jobNumber: this._stockJob.id,
+                        customerName: this._stockJob.customer || '',
+                        partNo: it.partNo,
+                        description: it.name,
+                        quantity: it.quantity,
+                        storageLocation: destName
+                    }));
+                    this.generateAndShowLabels(labelItems, `Stock-J${this._stockJob.id}`);
+                });
+            }
+            
+        } catch (err) {
+            alert('Allocation error: ' + err.message);
+            allocBtn.disabled = false;
+            allocBtn.textContent = 'Allocate Selected Items';
+        }
+    },
+
     // ============================================
     // Utilities
     // ============================================
