@@ -281,6 +281,12 @@ class PostgresConnectionWrapper:
     def cursor(self):
         return PostgresCursorWrapper(self._conn.cursor())
     
+    def execute(self, query, params=None):
+        """Proxy execute to cursor for SQLite compatibility"""
+        cursor = self.cursor()
+        cursor.execute(query, params)
+        return cursor
+    
     def commit(self):
         self._conn.commit()
     
@@ -1565,6 +1571,8 @@ def allocate_items():
         print(f"PO ID: {po_id}, Storage: {storage_device_id}, Items count: {len(items)}")
         print(f"Items: {items}")
         storage_name = data.get('storageName', 'Unknown')
+        
+        po_number = data.get('poNumber', po_id)  # Define early - used in error logging
         
         if not po_id or not items or not storage_device_id:
             return jsonify({'error': 'Missing required fields'}), 400
