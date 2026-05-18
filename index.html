@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-visual">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>PO Receiving - 2nd Fix</title>
     
     <!-- PWA Support -->
@@ -23,43 +23,23 @@
     <!-- Tesseract.js OCR -->
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     
-    <!-- Register Service Worker with Auto-Update -->
+    <!-- Register Service Worker with Force Update -->
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                let refreshing = false;
-                
-                // Listen for new SW taking control — reload to get fresh assets
-                navigator.serviceWorker.addEventListener('controllerchange', () => {
-                    if (!refreshing) {
-                        refreshing = true;
-                        console.log('New version active — reloading');
-                        window.location.reload();
-                    }
-                });
-                
                 navigator.serviceWorker.register('sw.js')
                     .then(reg => {
                         console.log('SW registered');
-                        // Check for updates on every page load
+                        // Check for updates immediately and every 5 minutes
                         reg.update();
-                        // Also check every 5 minutes for long-lived sessions
                         setInterval(() => reg.update(), 5 * 60 * 1000);
-                        
-                        // If a SW is already waiting (user ignored previous update), activate it
-                        if (reg.waiting) {
-                            reg.waiting.postMessage('SKIP_WAITING');
-                        }
-                        
-                        // When new SW is found installing, watch for it to become ready
+                        // When new SW is waiting, activate it immediately
                         reg.addEventListener('updatefound', () => {
                             const newWorker = reg.installing;
-                            if (!newWorker) return;
                             newWorker.addEventListener('statechange', () => {
-                                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                                    // New SW is ready and waiting — tell it to take over
-                                    console.log('New version installed — activating');
-                                    newWorker.postMessage('SKIP_WAITING');
+                                if (newWorker.state === 'activated') {
+                                    console.log('New version available - refreshing');
+                                    window.location.reload();
                                 }
                             });
                         });
@@ -71,29 +51,28 @@
 </head>
 <body>
     <!-- Login Screen -->
-    <!-- Screen: Loading Splash (shown during auth check) -->
-    <div id="screen-splash" class="screen active">
-        <main style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: 16px;">
-            <div style="font-size: 48px;">🔧</div>
-            <div style="font-size: 20px; font-weight: 700; color: #1e293b;">2nd Fix Doors & Hardware</div>
-            <div class="spinner" style="margin-top: 12px;"></div>
-        </main>
-    </div>
-
-    <div id="screen-login" class="screen">
-        <div class="login-container">
-            <div class="login-logo">🔐</div>
-            <h1 class="login-title">2nd Fix</h1>
-            <p class="login-subtitle">PO Receiving App</p>
-            <div class="login-form">
-                <input type="text" id="login-username" class="login-input" placeholder="Username" autocapitalize="none" autocomplete="off" autocorrect="off" spellcheck="false" data-lpignore="true">
-                <input type="text" id="login-password" class="login-input" placeholder="Password" autocomplete="off" data-lpignore="true" style="-webkit-text-security: disc;">
-                <button class="btn btn-primary login-btn-full" id="login-btn">Login →</button>
+    <div id="screen-login" class="screen active">
+        <header>
+            <h1>🔐 2nd Fix</h1>
+            <p class="subtitle">PO Receiving App</p>
+        </header>
+        
+        <main style="display: flex; flex-direction: column; justify-content: center;">
+            <div style="text-align: center; margin-bottom: 32px;">
+                <div style="font-size: 64px; margin-bottom: 16px;">📦</div>
+                <p style="color: #6b7280;">Staff login required</p>
             </div>
-            <div id="login-error" class="login-error">
+            
+            <div class="input-group" style="flex-direction: column; gap: 16px;">
+                <input type="text" id="login-username" placeholder="Username" style="text-align: center; font-size: 18px;" autocapitalize="sentences" autocomplete="username">
+                <input type="password" id="login-password" placeholder="Password" style="text-align: center; font-size: 18px;" autocomplete="current-password">
+                <button class="btn btn-primary" id="login-btn" style="width: 100%;">Login →</button>
+            </div>
+            
+            <div id="login-error" style="color: #dc2626; text-align: center; margin-top: 16px; display: none;">
                 Invalid username or password
             </div>
-        </div>
+        </main>
     </div>
 
     <!-- Screen 1: Scan/Enter PO -->
@@ -163,14 +142,6 @@
                     </div>
                     <div class="option-arrow">→</div>
                 </button>
-                <button class="home-option" id="option-logs">
-                    <div class="option-icon">📋</div>
-                    <div class="option-content">
-                        <h3>Allocation Logs</h3>
-                        <p>View all receiving & allocation history</p>
-                    </div>
-                    <div class="option-arrow">→</div>
-                </button>
                 
                 <button class="home-option" id="option-sop">
                     <div class="option-icon">📖</div>
@@ -202,7 +173,9 @@
                     <button class="manager-btn" id="option-staff">
                         <span>👥</span> Staff Management
                     </button>
-
+                    <button class="manager-btn" id="option-logs">
+                        <span>📋</span> Allocation Logs
+                    </button>
                 </div>
             </div>
         </main>
@@ -277,7 +250,7 @@
         </div>
     </div>
     
-    <!-- Allocation Logs Screen (All Staff) -->
+    <!-- Allocation Logs Screen (Managers Only) -->
     <div id="screen-logs" class="screen">
         <header>
             <button class="back-btn" data-screen="home">← Back</button>
@@ -301,8 +274,8 @@
         <main>
             <div class="camera-box" id="camera-capture">
                 <div class="camera-icon">📷</div>
-                <p>Tap to photograph<br>or choose from library</p>
-                <input type="file" accept="image/*" id="docket-photo" hidden>
+                <p>Tap to photograph<br>delivery docket</p>
+                <input type="file" accept="image/*" capture="environment" id="docket-photo" hidden>
             </div>
             
             <div id="ocr-progress" class="ocr-progress">
@@ -367,29 +340,6 @@
     </div>
 
     <!-- Screen 3: Select Storage -->
-
-    <!-- Screen: Job Materials Overview (before storage selection) -->
-    <div id="screen-job-materials" class="screen">
-        <header>
-            <button class="back-btn" data-screen="verify">&larr; Back</button>
-            <h1>&#x1F4CB; Job Materials</h1>
-        </header>
-        
-        <main>
-            <div id="job-materials-loading" style="text-align: center; padding: 40px;">
-                <div class="spinner"></div>
-                <p style="margin-top: 12px; color: #6b7280;">Loading all job materials...</p>
-            </div>
-            <div id="job-materials-content" class="hidden"></div>
-        </main>
-        
-        <footer style="padding: 16px;">
-            <button class="btn btn-primary btn-large" id="continue-allocate-btn" style="width: 100%;">
-                Continue to Allocate &rarr;
-            </button>
-        </footer>
-    </div>
-
     <div id="screen-storage" class="screen">
         <header>
             <button class="back-btn" data-screen="verify">← Back</button>
@@ -556,8 +506,8 @@
                 <div id="group-photo-section" class="hidden">
                     <div class="camera-box small" id="evidence-capture">
                         <div class="camera-icon">📷</div>
-                        <p>Tap to photograph or choose from library</p>
-                        <input type="file" accept="image/*" id="evidence-photo" hidden>
+                        <p>Tap to photograph all items together</p>
+                        <input type="file" accept="image/*" capture="environment" id="evidence-photo" hidden>
                     </div>
                     <div id="evidence-preview" class="photo-preview hidden">
                         <img id="evidence-img" src="" alt="Evidence photo">
@@ -609,8 +559,6 @@
             <div class="success-card">
                 <div class="success-icon">✓</div>
                 <h2>Allocation Complete!</h2>
-                <p id="success-po-info" class="detail" style="font-size:16px; font-weight:600; margin-bottom:4px;"></p>
-                <p id="success-job-info" class="detail" style="font-size:15px; margin-bottom:8px;"></p>
                 <p id="success-summary">0 items → Storage</p>
                 <p id="success-received-by" class="detail staff-badge">Received by: <strong id="success-staff-name">Staff</strong></p>
                 <p id="success-verification" class="detail verification-status"></p>
@@ -632,13 +580,6 @@
                 <button class="btn btn-secondary btn-large" id="generate-picking-slip-btn" onclick="app.generatePickingSlip()">
                     📋 Generate Picking Slip
                 </button>
-            </div>
-
-            <div id="job-intel-section" class="job-intel-section" style="display:none; margin-top: 16px;">
-                <h3>📦 Job Intel</h3>
-                <div id="job-intel-content">
-                    <div class="loading-small">Loading job intel...</div>
-                </div>
             </div>
         </main>
         
@@ -708,79 +649,6 @@
             <div id="stock-results" class="stock-results">
                 <p class="hint">Enter a job number to see items available in stock</p>
             </div>
-            <div id="stock-action-panel" style="display:none; position:sticky; bottom:0; background:#1a1a2e; border-top:2px solid #22d3ee; padding:16px; border-radius:12px 12px 0 0; margin-top:16px;">
-                <p style="color:#94a3b8; margin-bottom:8px;">Move <strong id="stock-item-count" style="color:#22d3ee;">0</strong> selected items to:</p>
-                <div id="stock-target-job-group" style="display:none; margin-bottom:12px;">
-                    <p style="color:#94a3b8; margin-bottom:4px; font-size:14px;">Allocate to Job:</p>
-                    <input type="text" id="stock-target-job" placeholder="Enter Job number..." inputmode="numeric" style="width:100%; padding:10px; border-radius:8px; border:1px solid #334155; background:#0f172a; color:#e2e8f0; font-size:16px;">
-                </div>
-                <select id="stock-storage-dropdown" class="storage-dropdown" style="width:100%; margin-bottom:12px;">
-                    <option value="">-- Select Destination --</option>
-                    <optgroup label="📌 Special Locations">
-                        <option value="4">Customer Cupboard</option>
-                        <option value="21">Builders Cupboard</option>
-                        <option value="38">ON TOP - Builders Cupboard</option>
-                    </optgroup>
-                    <optgroup label="📦 Container 1">
-                        <option value="5">1.01 Blue Shipping Container</option>
-                        <option value="6">1.02 Blue Shipping Container</option>
-                        <option value="7">1.03</option>
-                        <option value="8">1.04</option>
-                        <option value="48">1.05</option>
-                        <option value="49">1.06</option>
-                        <option value="50">1.07</option>
-                        <option value="51">1.08</option>
-                    </optgroup>
-                    <optgroup label="📦 Container 2">
-                        <option value="13">2.01</option>
-                        <option value="14">2.02</option>
-                        <option value="15">2.03</option>
-                        <option value="16">2.04</option>
-                        <option value="17">2.05</option>
-                        <option value="18">2.06</option>
-                        <option value="19">2.07</option>
-                        <option value="20">2.08</option>
-                        <option value="255">2.09 - Container Side</option>
-                    </optgroup>
-                    <optgroup label="📦 Container 3">
-                        <option value="22">3.01</option>
-                        <option value="23">3.02</option>
-                        <option value="24">3.03</option>
-                        <option value="25">3.04</option>
-                        <option value="26">3.05</option>
-                        <option value="27">3.06</option>
-                        <option value="28">3.07</option>
-                        <option value="29">3.08</option>
-                    </optgroup>
-                    <optgroup label="📦 Container 4">
-                        <option value="30">4.01</option>
-                        <option value="31">4.02</option>
-                        <option value="32">4.03</option>
-                        <option value="33">4.04</option>
-                        <option value="34">4.05</option>
-                        <option value="35">4.06</option>
-                        <option value="36">4.07</option>
-                        <option value="37">4.08</option>
-                    </optgroup>
-                    <optgroup label="📦 Container 5">
-                        <option value="39">5.01</option>
-                        <option value="40">5.02</option>
-                        <option value="41">5.03</option>
-                        <option value="42">5.04</option>
-                        <option value="43">5.05</option>
-                        <option value="44">5.06</option>
-                        <option value="45">5.07</option>
-                        <option value="46">5.08</option>
-                    </optgroup>
-                    <optgroup label="🏢 Other">
-                        <option value="1">Stock Holding</option>
-                        <option value="47">Stock Holding 2</option>
-                        <option value="2">Vehicle - George</option>
-                        <option value="3">Vehicle - Jim</option>
-                    </optgroup>
-                </select>
-                <button class="btn btn-primary btn-large" id="stock-allocate-btn" style="width:100%; padding:14px; font-size:16px;">📦 Move & Print Labels</button>
-            </div>
         </main>
     </div>
     
@@ -792,21 +660,13 @@
         </header>
         
         <main>
-            <!-- Mode Toggle -->
-            <div class="relocate-mode-toggle">
-                <button id="relocate-mode-location" class="mode-btn active" onclick="app.setRelocateMode('location')">📍 By Location</button>
-                <button id="relocate-mode-search" class="mode-btn" onclick="app.setRelocateMode('search')">🔍 By Job/PO</button>
+            <div class="section-title">
+                <h3>Step 1: Select Source Location</h3>
+                <p class="hint">Where are the items currently stored?</p>
             </div>
             
-            <!-- Location Mode (existing) -->
-            <div id="relocate-location-mode">
-                <div class="section-title">
-                    <h3>Select Source Location</h3>
-                    <p class="hint">Where are the items currently stored?</p>
-                </div>
-                
-                <div class="storage-selector">
-                    <label for="relocate-source-dropdown">Source Storage Location</label>
+            <div class="storage-selector">
+                <label for="relocate-source-dropdown">Source Storage Location</label>
                 <select id="relocate-source-dropdown" class="storage-dropdown">
                     <option value="">-- Select Source Location --</option>
                     
@@ -935,44 +795,6 @@
                 </select>
             </div>
             
-            </div><!-- end relocate-location-mode -->
-            
-            <!-- Search Mode (new) -->
-            <div id="relocate-search-mode" class="hidden">
-                <div class="section-title">
-                    <h3>Search by Job or PO</h3>
-                    <p class="hint">Find items and see where they are stored</p>
-                </div>
-                
-                <div class="search-type-toggle">
-                    <label class="radio-pill">
-                        <input type="radio" name="relocate-search-type" value="po" checked onchange="app.updateSearchPlaceholder()">
-                        <span>PO Number</span>
-                    </label>
-                    <label class="radio-pill">
-                        <input type="radio" name="relocate-search-type" value="job" onchange="app.updateSearchPlaceholder()">
-                        <span>Job Number</span>
-                    </label>
-                </div>
-                
-                <div class="search-input-row">
-                    <input type="text" id="relocate-search-input" class="form-input" 
-                           placeholder="Enter PO number..." inputmode="numeric"
-                           onkeypress="if(event.key==='Enter')app.searchStockByJobPO()">
-                    <button id="relocate-search-btn" class="btn btn-primary" onclick="app.searchStockByJobPO()">🔍</button>
-                </div>
-                
-                <div id="relocate-search-status" class="status-message hidden"></div>
-                
-                <div id="relocate-search-results" class="hidden">
-                    <div id="relocate-search-job-info" class="job-info-banner hidden"></div>
-                    <div id="relocate-search-items-list" class="items-list"></div>
-                    <div class="selection-summary">
-                        <span id="relocate-search-selection-count">0 items selected</span>
-                    </div>
-                </div>
-            </div>
-            
             <div id="relocate-source-status" class="status-message hidden"></div>
         </main>
         
@@ -1029,7 +851,7 @@
         
         <main>
             <div class="storage-info">
-                <p>Moving <strong id="relocate-dest-item-count">0</strong> items <span id="relocate-from-info">from <strong id="relocate-from-name">---</strong></span></p>
+                <p>Moving <strong id="relocate-dest-item-count">0</strong> items from <strong id="relocate-from-name">---</strong></p>
             </div>
             
             <div class="section-title">
@@ -1270,57 +1092,6 @@
     </div>
 
     <!-- Report Issue Floating Button (visible on all screens except login) -->
-    <!-- Damaged Goods Modal -->
-    <div id="damage-modal" class="damage-modal-overlay hidden">
-        <div class="damage-modal">
-            <div class="damage-modal-header">
-                <h2>&#9888;&#65039; Report Damaged Item</h2>
-                <button class="damage-close-btn" onclick="app.hideDamageModal()">&#10005;</button>
-            </div>
-            <div class="damage-modal-body">
-                <div class="damage-item-info">
-                    <div id="damage-item-name" class="damage-item-name">Item Name</div>
-                    <div id="damage-item-meta" class="damage-item-meta">Part: --- | PO #--- | Vendor</div>
-                </div>
-                <div class="damage-field">
-                    <label for="damage-qty">Quantity Damaged</label>
-                    <input type="number" id="damage-qty" min="1" max="99" value="1">
-                </div>
-                <div class="damage-field">
-                    <label>Photos of Damage *</label>
-                    <div class="damage-photo-area">
-                        <input type="file" id="damage-photos-camera" accept="image/*" multiple style="display:none" onchange="app.handleDamagePhotos(event)">
-                        <input type="file" id="damage-photos-library" accept="image/*" multiple style="display:none" onchange="app.handleDamagePhotos(event)">
-                        <div style="display:flex;gap:8px;margin-bottom:8px;">
-                            <button class="btn btn-secondary" style="flex:1;" onclick="document.getElementById('damage-photos-camera').click()">
-                                &#128247; Camera
-                            </button>
-                            <button class="btn btn-secondary" style="flex:1;" onclick="document.getElementById('damage-photos-library').click()">
-                                &#128444;&#65039; Library
-                            </button>
-                        </div>
-                        <div id="damage-photo-preview" class="report-photo-preview"></div>
-                    </div>
-                </div>
-                <div class="damage-field">
-                    <label for="damage-notes">Notes (describe the damage)</label>
-                    <textarea id="damage-notes" rows="3" placeholder="Describe the damage - e.g. dented, scratched, wrong colour, missing parts..."></textarea>
-                </div>
-                <div id="damage-status" class="status-message hidden"></div>
-            </div>
-            <div class="damage-modal-footer">
-                <button class="btn btn-secondary" onclick="app.hideDamageModal()">Cancel</button>
-                <button class="btn btn-danger" id="damage-submit-btn" onclick="app.submitDamageReport()">
-                    &#9888;&#65039; Report Damage
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <button id="report-issue-fab" class="report-issue-fab hidden" onclick="app.showReportIssue()">
-        ⚠️
-    </button>
-    
     
     <!-- SOP / Help Screen -->
     <div id="screen-sop" class="screen">
@@ -1586,6 +1357,10 @@
         </main>
     </div>
 
+    <button id="report-issue-fab" class="report-issue-fab hidden" onclick="app.showReportIssue()">
+        ⚠️
+    </button>
+    
     <!-- Report Issue Modal -->
     <div id="report-issue-modal" class="report-modal-overlay hidden">
         <div class="report-modal">
@@ -1635,6 +1410,7 @@
             </div>
         </div>
     </div>
-    <script src="app.js?v=66"></script>
+
+    <script src="app.js"></script>
 </body>
 </html>

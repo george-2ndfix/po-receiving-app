@@ -66,6 +66,7 @@ const app = {
             if (e.key === 'Enter') this.searchMysteryBox();
         });
         document.getElementById('option-labels')?.addEventListener('click', () => this.showScreen('labels'));
+        document.getElementById('option-sop')?.addEventListener('click', () => this.showScreen('sop'));
         document.getElementById('label-po-input')?.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') this.lookupLabels();
         });
