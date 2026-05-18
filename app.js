@@ -1449,7 +1449,36 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
     },
 
     async generateAndShowLabels(items, poNumber) {
-        // Build HTML labels for browser printing (AirPrint compatible)
+        const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+        
+        if (isIOS) {
+            // iPhone: Use PDF labels via server (gold standard - proven working)
+            try {
+                const resp = await fetch('/api/label-pdf', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ items, poNumber })
+                });
+                if (!resp.ok) throw new Error('Label PDF generation failed');
+                const blob = await resp.blob();
+                const url = URL.createObjectURL(blob);
+                // Open PDF - iOS Safari shows it with AirPrint option
+                const printWindow = window.open(url, '_blank');
+                if (!printWindow) {
+                    // Popup blocked - use iframe approach
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.target = '_blank';
+                    link.click();
+                }
+            } catch (err) {
+                console.error('PDF label error:', err);
+                alert('Label generation failed: ' + err.message);
+            }
+            return;
+        }
+        
+        // Android/other: HTML labels with window.print()
         const today = new Date().toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit', year: 'numeric' });
         
         let labelsHtml = '';
@@ -1461,7 +1490,6 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             const desc = item.description || item.name || '';
             const location = item.storageLocation || item.storageName || '';
             
-            // Generate one label per quantity
             for (let i = 0; i < qty; i++) {
                 labelsHtml += `
                     <div class="print-label">
@@ -1482,7 +1510,6 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             }
         }
         
-        // Show overlay with preview and print button
         const overlay = document.createElement('div');
         overlay.id = 'label-overlay';
         overlay.innerHTML = `
@@ -1496,7 +1523,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                 </div>
                 <div class="label-overlay-footer">
                     <button class="btn btn-primary btn-large" onclick="window.print()">🖨️ Print Labels</button>
-                    <p style="margin-top:8px; color:#6b7280; font-size:13px;">Select any AirPrint printer from the dialog</p>
+                    <p style="margin-top:8px; color:#6b7280; font-size:13px;">Select your printer from the dialog</p>
                 </div>
             </div>
         `;
