@@ -163,6 +163,98 @@ def _deduct_from_cache(catalog_id, storage_id, quantity):
                     return
         print(f"[stock-cache] Warning: catalog {catalog_id} / storage {storage_id} not found in cache")
 
+
+def _lookup_stock_for_items(catalog_ids):
+    """Fast stock lookup using /catalogs/{id}/inventories/ endpoint.
+    Returns dict: {catalog_id: [{storageId, storageName, availableQty}]}
+    Much faster than full device scan — only queries the items we need.
+    """
+    import time as _time
+    start = _time.time()
+    result = {}
+
+    SKIP_NAMES = {"Delivered to Site", "On Site", "Customer Collected", "PICK UP FROM SUPPLIER", "Delivery by Supplier"}
+
+    def lookup_single_item(cat_id):
+        """Look up all storage locations + quantities for one catalog item."""
+        try:
+            token = get_simpro_token()
+            headers = {"Authorization": f"Bearer {token}"}
+
+            # Step 1: Get list of storage devices for this item
+            list_resp = requests.get(
+                f"{SIMPRO_BASE_URL}/companies/{COMPANY_ID}/catalogs/{cat_id}/inventories/",
+                headers=headers, timeout=15
+            )
+            if list_resp.status_code != 200:
+                print(f"[inv-lookup] List failed for catalog {cat_id}: {list_resp.status_code}")
+                return cat_id, []
+
+            devices = list_resp.json()
+            if not isinstance(devices, list):
+                return cat_id, []
+
+            # Filter out non-physical storage
+            physical = [d for d in devices if d.get("StorageDevice", {}).get("Name", "") not in SKIP_NAMES]
+
+            # Step 2: Get detail (with InventoryCount) for each device — parallel
+            locations = []
+
+            def get_device_detail(device_info):
+                sd = device_info.get("StorageDevice", {})
+                sd_id = sd.get("ID")
+                sd_name = sd.get("Name", f"Storage {sd_id}")
+                if not sd_id:
+                    return None
+                try:
+                    t = get_simpro_token()
+                    h = {"Authorization": f"Bearer {t}"}
+                    r = requests.get(
+                        f"{SIMPRO_BASE_URL}/companies/{COMPANY_ID}/catalogs/{cat_id}/inventories/{sd_id}",
+                        headers=h, timeout=10
+                    )
+                    if r.status_code == 200:
+                        data = r.json()
+                        qty = data.get("InventoryCount", 0)
+                        if qty and qty > 0:
+                            return {"storageId": sd_id, "storageName": sd_name, "availableQty": qty}
+                except Exception as e:
+                    print(f"[inv-lookup] Detail error cat={cat_id} dev={sd_id}: {e}")
+                return None
+
+            # Use threads for parallel detail calls
+            with concurrent.futures.ThreadPoolExecutor(max_workers=15) as detail_exec:
+                detail_futures = [detail_exec.submit(get_device_detail, d) for d in physical]
+                for f in concurrent.futures.as_completed(detail_futures, timeout=30):
+                    try:
+                        loc = f.result(timeout=10)
+                        if loc:
+                            locations.append(loc)
+                    except:
+                        pass
+
+            return cat_id, locations
+        except Exception as e:
+            print(f"[inv-lookup] Error for catalog {cat_id}: {e}")
+            return cat_id, []
+
+    # Parallel lookup for all catalog items
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        futures = [executor.submit(lookup_single_item, cid) for cid in catalog_ids]
+        for future in concurrent.futures.as_completed(futures, timeout=120):
+            try:
+                cat_id, locations = future.result(timeout=30)
+                if locations:
+                    result[cat_id] = locations
+            except Exception as e:
+                print(f"[inv-lookup] Future error: {e}")
+
+    elapsed = _time.time() - start
+    total_locs = sum(len(v) for v in result.values())
+    print(f"[inv-lookup] Looked up {len(catalog_ids)} items in {elapsed:.1f}s — {len(result)} have stock across {total_locs} locations")
+    return result
+
+
 # ============ END STOCK CACHE ============
 from datetime import datetime, timedelta
 from functools import wraps
@@ -3302,14 +3394,9 @@ def job_stock_search():
         # Build catalog IDs we need to find
         needed_catalog_ids = set(m["catalogId"] for m in job_materials)
 
-        # 5. Use stock cache instead of scanning all devices every time
-        print(f"[job-stock-search] Looking up {len(needed_catalog_ids)} catalog items in stock cache...")
-        stock_cache = _get_stock_cache()
-        
-        catalog_stock_map = {}
-        for cat_id in needed_catalog_ids:
-            if cat_id in stock_cache:
-                catalog_stock_map[cat_id] = stock_cache[cat_id]
+        # 5. Use targeted inventories API instead of full device scan
+        print(f"[job-stock-search] Looking up {len(needed_catalog_ids)} catalog items via inventories API...")
+        catalog_stock_map = _lookup_stock_for_items(list(needed_catalog_ids))
 
         # 6. Match job materials with available stock
         matched_items = []
