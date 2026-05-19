@@ -1579,9 +1579,9 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
 
     async _showPdfLabels(labels, items, poNumber) {
         try {
-            const response = await this.authFetch('/api/label-pdf', {
+            const response = await fetch('/api/label-pdf', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${this.token}` },
                 body: JSON.stringify({ labels })
             });
             
@@ -1681,7 +1681,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         }
 
         try {
-            const response = await this.authFetch('/api/label-pdf', {
+            const response = await fetch('/api/label-pdf', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ labels: allLabels })
