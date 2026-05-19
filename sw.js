@@ -1,4 +1,4 @@
-const CACHE_NAME = 'po-receiving-v119'; // v86 allocate-from-awaiting: awaiting items now show Allocate from Stock button
+const CACHE_NAME = 'po-receiving-v120'; // v86 allocate-from-awaiting: awaiting items now show Allocate from Stock button
 const urlsToCache = [
   '/styles.css',
   '/storage-locations.json',

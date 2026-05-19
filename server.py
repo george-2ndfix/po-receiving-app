@@ -3372,10 +3372,12 @@ def allocate_from_stock_v2():
                 # Step 1: Stock transfer (if source != destination)
                 if str(src_id) != str(dest_storage_id):
                     transfer_payload = {
-                        "Catalog": int(cat_id),
-                        "FromStorage": int(src_id),
-                        "ToStorage": int(dest_storage_id),
-                        "Quantity": int(quantity)
+                        "SourceStorageDeviceID": int(src_id),
+                        "Items": [{
+                            "CatalogID": int(cat_id),
+                            "Quantity": int(quantity),
+                            "DestinationStorageDeviceID": int(dest_storage_id)
+                        }]
                     }
                     print(f"  Transferring {quantity}x {part_no} from {src_name} ({src_id}) to {dest_storage_name} ({dest_storage_id})")
                     transfer_resp = simpro_request("POST", f"/companies/{COMPANY_ID}/stockTransfer/", json=transfer_payload)
