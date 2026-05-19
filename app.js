@@ -1505,13 +1505,10 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             return;
         }
         
-        if (isAndroid) {
-            // Android: HTML labels with CSS @page for Chrome print dialog
-            this._showAndroidLabels(labels, items, poNumber);
-        } else {
-            // iPhone/Desktop: PDF labels via server (v95 gold standard)
-            this._showPdfLabels(labels, items, poNumber);
-        }
+        // All devices use server-side PDF (v95 gold standard, 38mm x 200mm)
+        // Android HTML @page CSS was not respected by Chrome print dialog (blank pages)
+        // PDF has correct page dimensions baked in — works with QL-810W on all platforms
+        this._showPdfLabels(labels, items, poNumber);
     },
 
     _showAndroidLabels(labels, items, poNumber) {
