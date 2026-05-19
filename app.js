@@ -1551,9 +1551,9 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             const printWindow = window.open('', '_blank');
             printWindow.document.write(`
                 <html><head><style>
-                    @page { size: 38mm 120mm; margin: 0; }
+                    @page { size: 120mm 38mm; margin: 0; }
                     body { margin: 0; padding: 0; }
-                    .label { width:38mm; height:120mm; box-sizing:border-box; padding:3mm 2mm; display:flex; flex-direction:column; justify-content:center; font-family:Helvetica,Arial,sans-serif; overflow:hidden; page-break-after:always; writing-mode:vertical-rl; text-orientation:mixed; transform:rotate(180deg); }
+                    .label { width:120mm; height:38mm; box-sizing:border-box; padding:2mm 3mm; display:flex; flex-direction:column; justify-content:center; font-family:Helvetica,Arial,sans-serif; overflow:hidden; page-break-after:always; }
                     .l1 { font-size:14pt; font-weight:bold; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
                     .l2 { font-size:12pt; font-weight:bold; margin-top:1mm; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
                     .l3 { font-size:10pt; margin-top:1mm; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
