@@ -1450,90 +1450,276 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
     },
 
     async generateAndShowLabels(items, poNumber) {
-        const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
-        
-        if (isIOS) {
-            // iPhone: Use PDF labels via server (gold standard - proven working)
-            try {
-                const resp = await fetch('/api/label-pdf', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ items, poNumber })
-                });
-                if (!resp.ok) throw new Error('Label PDF generation failed');
-                const blob = await resp.blob();
-                const url = URL.createObjectURL(blob);
-                // Open PDF - iOS Safari shows it with AirPrint option
-                const printWindow = window.open(url, '_blank');
-                if (!printWindow) {
-                    // Popup blocked - use iframe approach
-                    const link = document.createElement('a');
-                    link.href = url;
-                    link.target = '_blank';
-                    link.click();
-                }
-            } catch (err) {
-                console.error('PDF label error:', err);
-                alert('Label generation failed: ' + err.message);
-            }
-            return;
-        }
-        
-        // Android/other: HTML labels with window.print()
         const today = new Date().toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        const isAndroid = /Android/i.test(navigator.userAgent);
         
-        let labelsHtml = '';
+        // Build label data (shared between PDF and HTML paths)
+        const labels = [];
         for (const item of items) {
             const qty = item.quantity || 1;
             const jobNum = item.jobNumber ? `Job ${item.jobNumber}` : '';
             const customer = item.customerName || '';
-            const partCode = item.partCode || item.catalogCode || '';
+            const partCode = item.partCode || item.catalogCode || item.partNo || '';
             const desc = item.description || item.name || '';
             const location = item.storageLocation || item.storageName || '';
             
+            const line1 = [jobNum, customer].filter(Boolean).join(' \u00b7 ');
+            const line2 = [partCode, desc].filter(Boolean).join(' \u00b7 ');
+            const line3 = [`Qty: ${qty}`, location, today, `PO ${poNumber}`].filter(Boolean).join(' \u00b7 ');
+            
             for (let i = 0; i < qty; i++) {
-                labelsHtml += `
-                    <div class="print-label">
-                        <div class="label-line1">
-                            ${jobNum ? `<span class="label-job">${jobNum}</span>` : ''}
-                            ${customer ? `<span class="label-customer">${customer}</span>` : ''}
-                            ${partCode ? `<span class="label-partcode"><strong>${partCode}</strong></span>` : ''}
-                            <span class="label-desc">${desc}</span>
-                        </div>
-                        <div class="label-line2">
-                            <span>Qty: ${qty}</span>
-                            ${location ? `<span>${location}</span>` : ''}
-                            <span>${today}</span>
-                            <span>PO ${poNumber}</span>
-                        </div>
-                    </div>
-                `;
+                labels.push({ line1, line2, line3 });
             }
         }
         
-        const overlay = document.createElement('div');
-        overlay.id = 'label-overlay';
+        // Add filing label at the end (for job orders only)
+        const filingJobNum = items.length > 0 ? (items[0].jobNumber || '') : '';
+        if (filingJobNum && filingJobNum !== 'N/A' && filingJobNum !== 'Stock') {
+            const filingCustomer = items[0].customerName || '';
+            const filingLocation = items[0].storageLocation || items[0].storageName || '';
+            labels.push({
+                type: 'filing',
+                line1: 'FILE: Job ' + filingJobNum + (poNumber && poNumber !== 'N/A' ? ' \u00b7 PO ' + poNumber : ''),
+                line2: filingCustomer,
+                line3: filingLocation ? ('>> ' + filingLocation) : ''
+            });
+        }
+        
+        if (labels.length === 0) {
+            alert('No labels to print.');
+            return;
+        }
+        
+        if (isAndroid) {
+            // Android: HTML labels with CSS @page for Chrome print dialog
+            this._showAndroidLabels(labels, items, poNumber);
+        } else {
+            // iPhone/Desktop: PDF labels via server (v95 gold standard)
+            this._showPdfLabels(labels, items, poNumber);
+        }
+    },
+
+    _showAndroidLabels(labels, items, poNumber) {
+        let labelsHtml = '';
+        for (const label of labels) {
+            const isFiling = label.type === 'filing';
+            labelsHtml += `
+                <div style="page-break-after:always;width:120mm;height:38mm;box-sizing:border-box;padding:2mm 3mm;display:flex;flex-direction:column;justify-content:center;font-family:Helvetica,Arial,sans-serif;overflow:hidden;">
+                    <div style="font-size:${isFiling ? '10pt' : '14pt'};font-weight:bold;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${label.line1}</div>
+                    <div style="font-size:${isFiling ? '9pt' : '12pt'};font-weight:bold;margin-top:1mm;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${label.line2}</div>
+                    <div style="font-size:${isFiling ? '8pt' : '10pt'};margin-top:1mm;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${label.line3}</div>
+                </div>
+            `;
+        }
+        
+        var overlay = document.getElementById('label-overlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'label-overlay';
+            overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:10000;display:flex;flex-direction:column;align-items:center;padding:10px;overflow-y:auto;';
+            document.body.appendChild(overlay);
+        }
+        overlay.style.display = 'flex';
         overlay.innerHTML = `
-            <div class="label-overlay-content">
-                <div class="label-overlay-header">
-                    <h2>🏷️ Labels Ready</h2>
-                    <button class="btn btn-secondary" onclick="document.getElementById('label-overlay').remove()">✕ Close</button>
-                </div>
-                <div id="label-print-area" class="label-print-area">
-                    ${labelsHtml}
-                </div>
-                <div class="label-overlay-footer">
-                    <button class="btn btn-primary btn-large" onclick="window.print()">🖨️ Print Labels</button>
-                    <p style="margin-top:8px; color:#6b7280; font-size:13px;">Select your printer from the dialog</p>
-                </div>
+            <div style="display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap;justify-content:center;">
+                <button id="android-print-btn" style="padding:12px 24px;background:#059669;color:white;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">\ud83d\udda8\ufe0f Print Labels</button>
+                <button id="print-later-btn" style="padding:12px 24px;background:#f59e0b;color:white;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">\ud83d\udce5 Print Later</button>
+                <button onclick="document.getElementById('label-overlay').style.display='none'" style="padding:12px 24px;background:#dc2626;color:white;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">\u2716 Close</button>
+            </div>
+            <div id="android-label-preview" style="background:white;border-radius:8px;padding:10px;max-width:600px;width:100%;overflow-y:auto;flex:1;">
+                ${labelsHtml}
             </div>
         `;
-        document.body.appendChild(overlay);
+        
+        // Wire Print button - opens Chrome print dialog with @page CSS
+        document.getElementById('android-print-btn').onclick = () => {
+            const printWindow = window.open('', '_blank');
+            printWindow.document.write(`
+                <html><head><style>
+                    @page { size: 120mm 38mm; margin: 0; }
+                    body { margin: 0; padding: 0; }
+                    .label { width:120mm; height:38mm; box-sizing:border-box; padding:2mm 3mm; display:flex; flex-direction:column; justify-content:center; font-family:Helvetica,Arial,sans-serif; overflow:hidden; page-break-after:always; }
+                    .l1 { font-size:14pt; font-weight:bold; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+                    .l2 { font-size:12pt; font-weight:bold; margin-top:1mm; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+                    .l3 { font-size:10pt; margin-top:1mm; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+                    .filing .l1 { font-size:10pt; } .filing .l2 { font-size:9pt; } .filing .l3 { font-size:8pt; }
+                </style></head><body>
+            `);
+            for (const label of labels) {
+                const cls = label.type === 'filing' ? 'label filing' : 'label';
+                printWindow.document.write(`<div class="${cls}"><div class="l1">${label.line1}</div><div class="l2">${label.line2}</div><div class="l3">${label.line3}</div></div>`);
+            }
+            printWindow.document.write('</body></html>');
+            printWindow.document.close();
+            printWindow.print();
+        };
+        
+        // Wire Print Later
+        const printLaterBtn = document.getElementById('print-later-btn');
+        if (printLaterBtn) {
+            printLaterBtn.onclick = () => {
+                const desc = items.length > 0 ? ('Job ' + (items[0].jobNumber || 'N/A') + ' - PO ' + poNumber) : 'Labels';
+                this.saveLabelsToPrintQueue(labels, desc);
+                document.getElementById('label-overlay').style.display = 'none';
+            };
+        }
     },
-    
+
+    async _showPdfLabels(labels, items, poNumber) {
+        try {
+            const response = await this.authFetch('/api/label-pdf', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ labels })
+            });
+            
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                throw new Error(err.error || 'Failed to generate labels');
+            }
+            
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+            
+            var overlay = document.getElementById('label-overlay');
+            if (!overlay) {
+                overlay = document.createElement('div');
+                overlay.id = 'label-overlay';
+                overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:10000;display:flex;flex-direction:column;align-items:center;padding:10px;';
+                document.body.appendChild(overlay);
+            }
+            overlay.style.display = 'flex';
+            overlay.innerHTML = `
+                <div style="display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap;justify-content:center;">
+                    <a href="${url}" download="labels.pdf" style="padding:12px 24px;background:#2563eb;color:white;border-radius:8px;text-decoration:none;font-size:16px;font-weight:600;">\u2b07\ufe0f Download PDF</a>
+                    <button onclick="window.open('${url}','_blank')" style="padding:12px 24px;background:#059669;color:white;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">\ud83d\udda8\ufe0f Open to Print</button>
+                    <button id="print-later-btn" style="padding:12px 24px;background:#f59e0b;color:white;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">\ud83d\udce5 Print Later</button>
+                    <button onclick="document.getElementById('label-overlay').style.display='none'" style="padding:12px 24px;background:#dc2626;color:white;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">\u2716 Close</button>
+                </div>
+                <iframe src="${url}" style="flex:1;width:100%;max-width:600px;border:none;border-radius:8px;background:white;"></iframe>
+            `;
+            
+            const printLaterBtn = document.getElementById('print-later-btn');
+            if (printLaterBtn) {
+                printLaterBtn.onclick = () => {
+                    const desc = items.length > 0 ? ('Job ' + (items[0].jobNumber || 'N/A') + ' - PO ' + poNumber) : 'Labels';
+                    this.saveLabelsToPrintQueue(labels, desc);
+                    document.getElementById('label-overlay').style.display = 'none';
+                };
+            }
+
+            setTimeout(() => URL.revokeObjectURL(url), 300000);
+            
+        } catch (err) {
+            console.error('Label PDF error:', err);
+            const desc = items.length > 0 ? ('Job ' + (items[0].jobNumber || 'N/A') + ' - PO ' + poNumber) : 'Labels';
+            this.saveLabelsToPrintQueue(labels, desc);
+        }
+    },
+
     // ============================================
-    // Relocate Stock
+    // Print Later Queue
     // ============================================
+    saveLabelsToPrintQueue(labels, description) {
+        const queue = JSON.parse(localStorage.getItem('label_print_queue') || '[]');
+        queue.push({
+            labels: labels,
+            description: description || 'Labels',
+            savedAt: new Date().toISOString(),
+            id: Date.now().toString(36)
+        });
+        localStorage.setItem('label_print_queue', JSON.stringify(queue));
+        this.updatePrintQueueBadge();
+        alert('\u2705 Labels saved to print queue. Tap the printer icon when you\'re back on WiFi.');
+    },
+
+    getPrintQueue() {
+        return JSON.parse(localStorage.getItem('label_print_queue') || '[]');
+    },
+
+    updatePrintQueueBadge() {
+        const queue = this.getPrintQueue();
+        let badge = document.getElementById('print-queue-badge');
+        if (!badge) {
+            badge = document.createElement('button');
+            badge.id = 'print-queue-badge';
+            badge.onclick = () => this.showPrintQueue();
+            document.body.appendChild(badge);
+        }
+        if (queue.length > 0) {
+            badge.style.display = 'flex';
+            badge.innerHTML = '\ud83d\udda8\ufe0f ' + queue.length;
+        } else {
+            badge.style.display = 'none';
+        }
+    },
+
+    async showPrintQueue() {
+        const queue = this.getPrintQueue();
+        if (queue.length === 0) {
+            alert('Print queue is empty.');
+            return;
+        }
+
+        const allLabels = [];
+        const descriptions = [];
+        for (const item of queue) {
+            allLabels.push(...item.labels);
+            descriptions.push(item.description);
+        }
+
+        try {
+            const response = await this.authFetch('/api/label-pdf', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ labels: allLabels })
+            });
+
+            if (!response.ok) {
+                throw new Error('Still offline or server error. Try again when connected to WiFi.');
+            }
+
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+
+            var overlay = document.getElementById('label-overlay');
+            if (!overlay) {
+                overlay = document.createElement('div');
+                overlay.id = 'label-overlay';
+                overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:10000;display:flex;flex-direction:column;align-items:center;padding:10px;';
+                document.body.appendChild(overlay);
+            }
+            overlay.style.display = 'flex';
+            overlay.innerHTML = `
+                <div style="display:flex;justify-content:space-between;align-items:center;width:100%;max-width:600px;margin-bottom:8px;">
+                    <div style="color:white;font-size:14px;text-align:center;flex:1;">
+                        \ud83d\udda8\ufe0f Print Queue: ${allLabels.length} label(s) from ${queue.length} job(s)
+                    </div>
+                    <button id="close-queue-btn" style="background:none;border:none;color:white;font-size:28px;cursor:pointer;padding:4px 8px;">\u2716</button>
+                </div>
+                <div style="display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap;justify-content:center;">
+                    <a href="${url}" download="print_queue_labels.pdf" style="padding:12px 24px;background:#2563eb;color:white;border-radius:8px;text-decoration:none;font-size:16px;font-weight:600;">\u2b07\ufe0f Download PDF</a>
+                    <button onclick="window.open('${url}','_blank')" style="padding:12px 24px;background:#059669;color:white;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">\ud83d\udda8\ufe0f Open to Print</button>
+                    <button id="clear-queue-btn" style="padding:12px 24px;background:#dc2626;color:white;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">\ud83d\uddd1\ufe0f Clear Queue</button>
+                </div>
+                <iframe src="${url}" style="flex:1;width:100%;max-width:600px;border:none;border-radius:8px;background:white;"></iframe>
+            `;
+            document.getElementById('close-queue-btn').onclick = () => {
+                overlay.style.display = 'none';
+            };
+            document.getElementById('clear-queue-btn').onclick = () => {
+                localStorage.setItem('label_print_queue', '[]');
+                this.updatePrintQueueBadge();
+                overlay.style.display = 'none';
+                URL.revokeObjectURL(url);
+            };
+
+            setTimeout(() => URL.revokeObjectURL(url), 300000);
+        } catch (err) {
+            alert('\u274c ' + err.message);
+        }
+    },
+
     selectRelocateSource(event) {
         const select = event.target;
         const selectedOption = select.options[select.selectedIndex];
