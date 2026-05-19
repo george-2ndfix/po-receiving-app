@@ -164,22 +164,48 @@ def _deduct_from_cache(catalog_id, storage_id, quantity):
         print(f"[stock-cache] Warning: catalog {catalog_id} / storage {storage_id} not found in cache")
 
 
+_inv_cache = {}          # {catalog_id: [{storageId, storageName, availableQty}]}
+_inv_cache_lock = threading.Lock()
+_inv_cache_built_at = {}  # {catalog_id: timestamp}
+_inv_cache_ttl = 300      # 5 minutes
+
 def _lookup_stock_for_items(catalog_ids):
     """Fast stock lookup using /catalogs/{id}/inventories/ endpoint.
     Returns dict: {catalog_id: [{storageId, storageName, availableQty}]}
-    Much faster than full device scan — only queries the items we need.
+    Uses per-item cache with 5-min TTL.
     """
     import time as _time
     start = _time.time()
     result = {}
+    now = _time.time()
+
+    # Check cache first — return cached items, only query uncached/expired ones
+    uncached_ids = []
+    with _inv_cache_lock:
+        for cat_id in catalog_ids:
+            if cat_id in _inv_cache and cat_id in _inv_cache_built_at:
+                if now - _inv_cache_built_at[cat_id] < _inv_cache_ttl:
+                    if _inv_cache[cat_id]:
+                        result[cat_id] = [loc.copy() for loc in _inv_cache[cat_id]]
+                    continue
+            uncached_ids.append(cat_id)
+
+    if not uncached_ids:
+        elapsed = _time.time() - start
+        print(f"[inv-lookup] All {len(catalog_ids)} items from cache in {elapsed:.1f}s")
+        return result
+
+    print(f"[inv-lookup] {len(catalog_ids) - len(uncached_ids)} from cache, {len(uncached_ids)} to query")
 
     SKIP_NAMES = {"Delivered to Site", "On Site", "Customer Collected", "PICK UP FROM SUPPLIER", "Delivery by Supplier"}
+
+    # Get token ONCE and share across all threads
+    shared_token = get_simpro_token()
 
     def lookup_single_item(cat_id):
         """Look up all storage locations + quantities for one catalog item."""
         try:
-            token = get_simpro_token()
-            headers = {"Authorization": f"Bearer {token}"}
+            headers = {"Authorization": f"Bearer {shared_token}"}
 
             # Step 1: Get list of storage devices for this item
             list_resp = requests.get(
@@ -207,8 +233,7 @@ def _lookup_stock_for_items(catalog_ids):
                 if not sd_id:
                     return None
                 try:
-                    t = get_simpro_token()
-                    h = {"Authorization": f"Bearer {t}"}
+                    h = {"Authorization": f"Bearer {shared_token}"}
                     r = requests.get(
                         f"{SIMPRO_BASE_URL}/companies/{COMPANY_ID}/catalogs/{cat_id}/inventories/{sd_id}",
                         headers=h, timeout=10
@@ -238,12 +263,16 @@ def _lookup_stock_for_items(catalog_ids):
             print(f"[inv-lookup] Error for catalog {cat_id}: {e}")
             return cat_id, []
 
-    # Parallel lookup for all catalog items
+    # Parallel lookup for uncached catalog items
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-        futures = [executor.submit(lookup_single_item, cid) for cid in catalog_ids]
+        futures = [executor.submit(lookup_single_item, cid) for cid in uncached_ids]
         for future in concurrent.futures.as_completed(futures, timeout=120):
             try:
                 cat_id, locations = future.result(timeout=30)
+                # Cache regardless of whether we found stock
+                with _inv_cache_lock:
+                    _inv_cache[cat_id] = locations
+                    _inv_cache_built_at[cat_id] = _time.time()
                 if locations:
                     result[cat_id] = locations
             except Exception as e:
