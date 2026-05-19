@@ -1505,10 +1505,13 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             return;
         }
         
-        // All devices use server-side PDF (v95 gold standard, 38mm x 200mm)
-        // Android HTML @page CSS was not respected by Chrome print dialog (blank pages)
-        // PDF has correct page dimensions baked in — works with QL-810W on all platforms
-        this._showPdfLabels(labels, items, poNumber);
+        // Android: HTML labels with @page CSS for Chrome print dialog
+        // iPhone/Desktop: Server-side PDF (v95 gold standard)
+        if (isAndroid) {
+            this._showAndroidLabels(labels, items, poNumber);
+        } else {
+            this._showPdfLabels(labels, items, poNumber);
+        }
     },
 
     _showAndroidLabels(labels, items, poNumber) {
@@ -1516,7 +1519,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         for (const label of labels) {
             const isFiling = label.type === 'filing';
             labelsHtml += `
-                <div style="page-break-after:always;width:120mm;height:38mm;box-sizing:border-box;padding:2mm 3mm;display:flex;flex-direction:column;justify-content:center;font-family:Helvetica,Arial,sans-serif;overflow:hidden;">
+                <div style="page-break-after:always;width:100%;max-width:300px;height:80px;box-sizing:border-box;padding:4px 8px;display:flex;flex-direction:column;justify-content:center;font-family:Helvetica,Arial,sans-serif;overflow:hidden;border:1px solid #ddd;margin-bottom:4px;border-radius:4px;">
                     <div style="font-size:${isFiling ? '10pt' : '14pt'};font-weight:bold;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${label.line1}</div>
                     <div style="font-size:${isFiling ? '9pt' : '12pt'};font-weight:bold;margin-top:1mm;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${label.line2}</div>
                     <div style="font-size:${isFiling ? '8pt' : '10pt'};margin-top:1mm;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${label.line3}</div>
@@ -1548,9 +1551,9 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             const printWindow = window.open('', '_blank');
             printWindow.document.write(`
                 <html><head><style>
-                    @page { size: 120mm 38mm; margin: 0; }
+                    @page { size: 38mm 120mm; margin: 0; }
                     body { margin: 0; padding: 0; }
-                    .label { width:120mm; height:38mm; box-sizing:border-box; padding:2mm 3mm; display:flex; flex-direction:column; justify-content:center; font-family:Helvetica,Arial,sans-serif; overflow:hidden; page-break-after:always; }
+                    .label { width:38mm; height:120mm; box-sizing:border-box; padding:3mm 2mm; display:flex; flex-direction:column; justify-content:center; font-family:Helvetica,Arial,sans-serif; overflow:hidden; page-break-after:always; writing-mode:vertical-rl; text-orientation:mixed; transform:rotate(180deg); }
                     .l1 { font-size:14pt; font-weight:bold; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
                     .l2 { font-size:12pt; font-weight:bold; margin-top:1mm; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
                     .l3 { font-size:10pt; margin-top:1mm; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
