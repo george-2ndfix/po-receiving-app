@@ -1959,40 +1959,43 @@ def allocate_items():
                 
                 group_items = items_with_stock
                 
-                transfer_items = []
+                # Transfer items one-by-one using flat format (Simpro batch bug workaround)
+                print(f"[POST-RECEIPT] Stock Transfer from {source_name} (ID:{source_id}) to {storage_name}")
+                all_transferred = True
                 for item in group_items:
                     catalog_id = item.get('catalogId')
                     quantity = item.get('quantity', 1)
                     if quantity <= 0:
                         quantity = 1
-                    transfer_items.append({
-                        'CatalogID': int(catalog_id),
-                        'DestinationStorageDeviceID': int(storage_device_id),
+                    transfer_payload = {
+                        'Catalog': int(catalog_id),
+                        'FromStorage': int(source_id),
+                        'ToStorage': int(storage_device_id),
                         'Quantity': int(quantity)
-                    })
-                
-                transfer_payload = {
-                    'SourceStorageDeviceID': int(source_id),
-                    'Items': transfer_items
-                }
-                
-                print(f"[POST-RECEIPT] Stock Transfer from {source_name} (ID:{source_id}) to {storage_name}")
-                print(f"Transfer payload: {json.dumps(transfer_payload)}")
-                
-                transfer_response = simpro_request('POST', f'/companies/{COMPANY_ID}/stockTransfer/', json=transfer_payload)
-                print(f"Stock Transfer Response: {transfer_response.status_code} - {transfer_response.text}")
-                
-                if transfer_response.status_code in (200, 201, 204):
-                    for item in group_items:
+                    }
+                    print(f"  Transfer payload: {json.dumps(transfer_payload)}")
+                    transfer_response = simpro_request('POST', f'/companies/{COMPANY_ID}/stockTransfer/', json=transfer_payload)
+                    print(f"  Response: {transfer_response.status_code} - {transfer_response.text[:200]}")
+                    if transfer_response.status_code in (200, 201, 204):
                         results.append({
-                            'catalogId': item.get('catalogId'),
+                            'catalogId': catalog_id,
                             'success': True,
-                            'quantity': item.get('quantity', 1),
+                            'quantity': quantity,
                             'verified': True,
                             'method': 'stock_transfer',
                             'message': f'Transferred from {source_name} to {storage_name}'
                         })
                         success_count += 1
+                    else:
+                        all_transferred = False
+                        results.append({
+                            'catalogId': catalog_id,
+                            'success': False,
+                            'quantity': quantity,
+                            'error': f'Transfer failed: {transfer_response.status_code} - {transfer_response.text[:200]}',
+                            'method': 'stock_transfer'
+                        })
+                        fail_count += 1
                     print(f"✅ Stock transfer successful: {len(group_items)} items moved from {source_name} to {storage_name}")
                 else:
                     error_msg = f'Stock Transfer API returned {transfer_response.status_code}'
@@ -2014,12 +2017,10 @@ def allocate_items():
                             quantity = 1
                         
                         single_payload = {
-                            'SourceStorageDeviceID': int(source_id),
-                            'Items': [{
-                                'CatalogID': int(catalog_id),
-                                'DestinationStorageDeviceID': int(storage_device_id),
-                                'Quantity': int(quantity)
-                            }]
+                            'Catalog': int(catalog_id),
+                            'FromStorage': int(source_id),
+                            'ToStorage': int(storage_device_id),
+                            'Quantity': int(quantity)
                         }
                         
                         single_resp = simpro_request('POST', f'/companies/{COMPANY_ID}/stockTransfer/', json=single_payload)
@@ -2209,18 +2210,17 @@ def relocate_items():
             quantity = item.get('quantity', 1)
             if catalog_id:
                 transfer_items.append({
-                    'CatalogID': int(catalog_id),
-                    'DestinationStorageDeviceID': int(dest_id),
+                    'Catalog': int(catalog_id),
+                    'FromStorage': int(source_id),
+                    'ToStorage': int(dest_id),
                     'Quantity': int(quantity)
                 })
         
         if not transfer_items:
             return jsonify({'error': 'No valid items to transfer'}), 400
         
-        payload = {
-            'SourceStorageDeviceID': int(source_id),
-            'Items': transfer_items
-        }
+        # Use flat format (one call per item)
+        payload = transfer_items[0] if len(transfer_items) == 1 else transfer_items[0]
         
         print(f"=== STOCK TRANSFER REQUEST ===")
         print(f"From: {source_name} (ID: {source_id}) -> To: {dest_name} (ID: {dest_id})")
