@@ -1505,13 +1505,9 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             return;
         }
         
-        // Android: HTML labels with @page CSS for Chrome print dialog
-        // iPhone/Desktop: Server-side PDF (v95 gold standard)
-        if (isAndroid) {
-            this._showAndroidLabels(labels, items, poNumber);
-        } else {
-            this._showPdfLabels(labels, items, poNumber);
-        }
+        // All devices: Server-side PDF (v95 gold standard)
+        // PDF has correct page size baked in — works on iPhone AirPrint + Android Chrome print
+        this._showPdfLabels(labels, items, poNumber);
     },
 
     _showAndroidLabels(labels, items, poNumber) {
