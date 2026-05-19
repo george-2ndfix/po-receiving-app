@@ -67,6 +67,7 @@ const app = {
         });
         document.getElementById('option-labels')?.addEventListener('click', () => this.showScreen('labels'));
         document.getElementById('option-sop')?.addEventListener('click', () => this.showScreen('sop'));
+        document.getElementById('option-test-print')?.addEventListener('click', () => this.testPrint());
         document.getElementById('label-po-input')?.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') this.lookupLabels();
         });
@@ -1431,6 +1432,20 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
     // ============================================
     // Labels
     // ============================================
+    async testPrint() {
+        const isAndroid = /Android/i.test(navigator.userAgent);
+        const device = isAndroid ? 'Android' : 'iPhone/Desktop';
+        const testItems = [{
+            jobNumber: '9999',
+            customerName: 'TEST CUSTOMER',
+            partNo: 'TEST-001',
+            description: 'Test Label — ' + device,
+            quantity: 1,
+            storageLocation: 'Test Storage'
+        }];
+        await this.generateAndShowLabels(testItems, 'TEST');
+    },
+
     async printLabels() {
         const storageLocation = this.selectedStorage?.name || this._lastStorageName || 'Unknown';
         const poNumber = this.currentPO?.poNumber || 'N/A';
