@@ -3559,15 +3559,13 @@ def allocate_from_stock_v2():
             result_entry = {"catalogId": cat_id, "name": item_name, "partNo": part_no, "success": False}
 
             try:
-                # Step 1: Stock transfer (if source != destination)
+                # Step 1: Stock transfer (if source != destination) — flat format per Known Conflict #24
                 if str(src_id) != str(dest_storage_id):
                     transfer_payload = {
-                        "SourceStorageDeviceID": int(src_id),
-                        "Items": [{
-                            "CatalogID": int(cat_id),
-                            "Quantity": int(quantity),
-                            "DestinationStorageDeviceID": int(dest_storage_id)
-                        }]
+                        "Catalog": int(cat_id),
+                        "FromStorage": int(src_id),
+                        "ToStorage": int(dest_storage_id),
+                        "Quantity": int(quantity)
                     }
                     print(f"  Transferring {quantity}x {part_no} from {src_name} ({src_id}) to {dest_storage_name} ({dest_storage_id})")
                     transfer_resp = simpro_request("POST", f"/companies/{COMPANY_ID}/stockTransfer/", json=transfer_payload)
@@ -3584,36 +3582,38 @@ def allocate_from_stock_v2():
                     result_entry["method"] = "same_storage"
                     print(f"  Source == destination for {part_no}, skipping transfer")
 
-                # Step 2: Assign to job cost centre (best-effort — Simpro API may not support this)
+                # Step 2: Assign to job cost centre (MANDATORY — must succeed)
                 assign_ok = False
                 if section_id and cc_id:
                     assign_payload = {
                         "Catalog": int(cat_id),
                         "AssignedBreakdown": [{
                             "Storage": int(dest_storage_id),
-                            "Quantity": quantity
+                            "Quantity": int(quantity)
                         }]
                     }
                     assign_url = f"/companies/{COMPANY_ID}/jobs/{job_id}/sections/{section_id}/costCenters/{cc_id}/stock/"
-                    print(f"  Assigning {quantity}x {part_no} to CC {cc_id}")
+                    print(f"  Assigning {quantity}x {part_no} to CC {cc_id} at storage {dest_storage_id}")
                     assign_resp = simpro_request("POST", assign_url, json=assign_payload)
 
                     if assign_resp.status_code in (200, 201, 204):
-                        print(f"  POST assign succeeded")
+                        print(f"  ✅ CC assign succeeded")
                         assign_ok = True
                     else:
-                        print(f"  POST assign returned {assign_resp.status_code} (known Simpro limitation) - stock transfer still valid")
-                        # Stock transfer succeeded — CC assignment is best-effort
+                        print(f"  ❌ CC assign FAILED: {assign_resp.status_code} — {assign_resp.text[:300]}")
                         assign_ok = False
                 else:
-                    assign_ok = True
+                    print(f"  ⚠️ Missing sectionId ({section_id}) or costCentreId ({cc_id}) — cannot assign to CC")
+                    assign_ok = False
 
-                # Stock transfer is the critical step — report success if transfer worked
-                result_entry["success"] = True
                 if assign_ok:
+                    result_entry["success"] = True
                     result_entry["message"] = f"Moved {quantity} from {src_name} to {dest_storage_name} and assigned to job"
                 else:
-                    result_entry["message"] = f"Moved {quantity} from {src_name} to {dest_storage_name}"
+                    # Stock may have transferred but CC assignment failed — report as failure
+                    result_entry["success"] = False
+                    result_entry["error"] = f"Stock transferred but CC assignment failed — item not assigned to job. sectionId={section_id}, ccId={cc_id}"
+                    result_entry["message"] = f"Moved stock but FAILED to assign to job"
 
                 # Update stock cache in-place (deduct from source)
                 _deduct_from_cache(int(cat_id), int(src_id), int(quantity))
