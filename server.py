@@ -1761,10 +1761,15 @@ def allocate_items():
                                     sd = alloc.get('StorageDevice', {})
                                     sd_id = sd.get('ID') if isinstance(sd, dict) else sd
                                     sd_name = sd.get('Name', 'Unknown') if isinstance(sd, dict) else 'Unknown'
+                                    assigned_to = alloc.get('AssignedTo', {})
                                     receipt_allocations[cat_id] = {
                                         'storage_id': sd_id,
                                         'storage_name': sd_name,
-                                        'quantity': alloc.get('Quantity', 0)
+                                        'quantity': alloc.get('Quantity', 0),
+                                        'cc_job': assigned_to.get('Job'),
+                                        'cc_section': assigned_to.get('Section'),
+                                        'cc_id': assigned_to.get('CostCenter', {}).get('ID') if isinstance(assigned_to.get('CostCenter'), dict) else assigned_to.get('CostCenter'),
+                                        'cc_name': assigned_to.get('CostCenter', {}).get('Name', '') if isinstance(assigned_to.get('CostCenter'), dict) else ''
                                     }
                 else:
                     print(f"No receipts found for PO {po_id} - truly not receipted")
@@ -1824,8 +1829,15 @@ def allocate_items():
                     if current_storage_id != STOCK_HOLDING_ID:
                         item['source_storage_id'] = current_storage_id
                         item['source_storage_name'] = current_storage_name
+                    # Pass CC assignment info for 3-step transfer (CC-allocated stock is invisible to storageDevices endpoint)
+                    cc_data = receipt_allocations.get(catalog_id, {})
+                    if cc_data.get('cc_job'):
+                        item['cc_job'] = cc_data['cc_job']
+                        item['cc_section'] = cc_data['cc_section']
+                        item['cc_id'] = cc_data['cc_id']
+                        item['cc_name'] = cc_data.get('cc_name', '')
                     post_receipt_items.append(item)
-                    print(f"Catalog {catalog_id}: In Stock at {current_storage_name}, using stock transfer to {storage_device_id}")
+                    print(f"Catalog {catalog_id}: In Stock at {current_storage_name}, CC={cc_data.get('cc_name','none')}, using stock transfer to {storage_device_id}")
                 else:
                     # Receipt EXISTS but ItemsReceived NOT ticked = "In Transit"
                     # CRITICAL: Do NOT use pre-receipt PUT - it doubles cost centre entries!
@@ -2034,15 +2046,20 @@ def allocate_items():
                                 source_stock = stock_data[0].get('InventoryCount', 0)
                             
                             if source_stock <= 0:
-                                print(f"⏭️ Skipping {part_no} ({desc}): 0 stock in {source_name}")
-                                results.append({
-                                    'catalogId': catalog_id,
-                                    'success': False,
-                                    'quantity': quantity,
-                                    'method': 'skipped_zero_stock',
-                                    'error': f'No stock available in {source_name} - item may not have arrived yet'
-                                })
-                                continue
+                                # Check if item has CC assignment — CC-allocated stock is invisible to storageDevices endpoint
+                                if item.get('cc_job') and item.get('cc_id'):
+                                    print(f"📦 {part_no}: 0 free stock in {source_name} BUT CC-allocated (Job {item['cc_job']}, CC {item['cc_id']}) — will use 3-step transfer")
+                                    item['needs_cc_unassign'] = True
+                                else:
+                                    print(f"⏭️ Skipping {part_no} ({desc}): 0 stock in {source_name}")
+                                    results.append({
+                                        'catalogId': catalog_id,
+                                        'success': False,
+                                        'quantity': quantity,
+                                        'method': 'skipped_zero_stock',
+                                        'error': f'No stock available in {source_name} - item may not have arrived yet'
+                                    })
+                                    continue
                             
                             print(f"📦 {part_no}: {source_stock} in {source_name}")
                             
@@ -2088,6 +2105,46 @@ def allocate_items():
                     quantity = item.get('quantity', 1)
                     if quantity <= 0:
                         quantity = 1
+                    
+                    # 3-STEP PROCESS for CC-allocated stock (Known Conflict #13 + #1)
+                    # CC-allocated stock is invisible to storageDevices AND can't be transferred directly
+                    if item.get('needs_cc_unassign'):
+                        cc_job = item['cc_job']
+                        cc_section = item['cc_section']
+                        cc_id = item['cc_id']
+                        print(f"  🔄 3-step transfer for {catalog_id}: un-assign from CC (Job {cc_job}, Section {cc_section}, CC {cc_id})")
+                        
+                        # Step 1: Un-assign from CC at source storage
+                        try:
+                            unassign_resp = simpro_request('PATCH', 
+                                f'/companies/{COMPANY_ID}/jobs/{cc_job}/sections/{cc_section}/costCenters/{cc_id}/stock/{catalog_id}/',
+                                json={'AssignedBreakdown': [{'Storage': int(source_id), 'Quantity': 0}]})
+                            print(f"  Step 1 (un-assign): {unassign_resp.status_code} - {unassign_resp.text[:200]}")
+                            if unassign_resp.status_code not in (200, 204):
+                                print(f"  ❌ Un-assign failed — skipping this item")
+                                results.append({
+                                    'catalogId': catalog_id,
+                                    'success': False,
+                                    'quantity': quantity,
+                                    'method': 'cc_unassign_failed',
+                                    'error': f'Failed to un-assign from CC: {unassign_resp.status_code}'
+                                })
+                                continue
+                        except Exception as ua_err:
+                            print(f"  ❌ Un-assign error: {ua_err}")
+                            results.append({
+                                'catalogId': catalog_id,
+                                'success': False,
+                                'quantity': quantity,
+                                'method': 'cc_unassign_error',
+                                'error': f'Un-assign error: {str(ua_err)}'
+                            })
+                            continue
+                        
+                        # Brief pause for Simpro to process
+                        import time
+                        time.sleep(1)
+                    
                     transfer_payload = {
                         'Catalog': int(catalog_id),
                         'FromStorage': int(source_id),
@@ -2098,6 +2155,23 @@ def allocate_items():
                     transfer_response = simpro_request('POST', f'/companies/{COMPANY_ID}/stockTransfer/', json=transfer_payload)
                     print(f"  Response: {transfer_response.status_code} - {transfer_response.text[:200]}")
                     if transfer_response.status_code in (200, 201, 204):
+                        # Step 3 (if CC-allocated): Re-assign to CC at destination
+                        if item.get('needs_cc_unassign'):
+                            cc_job = item['cc_job']
+                            cc_section = item['cc_section']
+                            cc_id = item['cc_id']
+                            try:
+                                reassign_resp = simpro_request('POST',
+                                    f'/companies/{COMPANY_ID}/jobs/{cc_job}/sections/{cc_section}/costCenters/{cc_id}/stock/',
+                                    json={'Catalog': int(catalog_id), 'AssignedBreakdown': [{'Storage': int(storage_device_id), 'Quantity': int(quantity)}]})
+                                print(f"  Step 3 (re-assign): {reassign_resp.status_code} - {reassign_resp.text[:200]}")
+                                if reassign_resp.status_code in (200, 201, 204):
+                                    print(f"  ✅ 3-step complete: CC re-assigned at {storage_name}")
+                                else:
+                                    print(f"  ⚠️ Re-assign returned {reassign_resp.status_code} — stock transferred but CC not updated")
+                            except Exception as ra_err:
+                                print(f"  ⚠️ Re-assign error: {ra_err} — stock transferred but CC not updated")
+                        
                         results.append({
                             'catalogId': catalog_id,
                             'success': True,
