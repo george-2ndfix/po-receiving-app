@@ -2377,101 +2377,259 @@ def get_storage_stock(storage_id):
         print(f"Error getting storage stock: {e}")
         return jsonify({'items': [], 'error': str(e)})
 
+@app.route('/api/job-materials', methods=['POST'])
+@login_required
+def job_materials():
+    """Get all materials for a job with their current storage locations from CC assignments"""
+    try:
+        data = request.get_json()
+        job_id = str(data.get("jobId", "")).strip()
+        if not job_id:
+            return jsonify({"error": "jobId is required"}), 400
+
+        print(f"[job-materials] Looking up job {job_id}")
+
+        # 1. Get job info
+        job_resp = simpro_request("GET", f"/companies/{COMPANY_ID}/jobs/?ID={job_id}&columns=ID,Name,Customer")
+        if job_resp.status_code != 200:
+            return jsonify({"error": f"Job {job_id} not found"}), 404
+        job_list = job_resp.json()
+        if not isinstance(job_list, list) or len(job_list) == 0:
+            return jsonify({"error": f"Job {job_id} not found"}), 404
+        job_data = job_list[0]
+        job_info = {
+            "id": str(job_data.get("ID", job_id)),
+            "number": job_data.get("Name", f"J{job_id}"),
+            "customer": ""
+        }
+        cust = job_data.get("Customer")
+        if cust:
+            job_info["customer"] = cust.get("CompanyName", "") or cust.get("Name", "")
+
+        # 2. Get sections
+        sections_resp = simpro_request("GET", f"/companies/{COMPANY_ID}/jobs/{job_id}/sections/")
+        if sections_resp.status_code != 200:
+            return jsonify({"error": "Failed to get job sections"}), 500
+        sections = sections_resp.json()
+        if not isinstance(sections, list):
+            sections = []
+
+        # 3. For each section -> cost centres -> stock
+        items = []
+        for section in sections:
+            sec_id = section.get("ID")
+            if not sec_id:
+                continue
+
+            cc_resp = simpro_request("GET", f"/companies/{COMPANY_ID}/jobs/{job_id}/sections/{sec_id}/costCenters/")
+            if cc_resp.status_code != 200:
+                continue
+            cost_centres = cc_resp.json()
+            if not isinstance(cost_centres, list):
+                continue
+
+            for cc in cost_centres:
+                cc_id = cc.get("ID")
+                if not cc_id:
+                    continue
+                cc_name = cc.get("Name", "")
+
+                stock_resp = simpro_request("GET", f"/companies/{COMPANY_ID}/jobs/{job_id}/sections/{sec_id}/costCenters/{cc_id}/stock/")
+                if stock_resp.status_code != 200:
+                    continue
+                stock_items = stock_resp.json()
+                if not isinstance(stock_items, list):
+                    continue
+
+                for stock_item in stock_items:
+                    catalog = stock_item.get("Catalog", {})
+                    cat_id = catalog.get("ID")
+                    if not cat_id:
+                        continue
+
+                    qty_data = stock_item.get("Quantity", {})
+                    if isinstance(qty_data, dict):
+                        required_qty = qty_data.get("Required", 0) or 0
+                        assigned_qty = qty_data.get("Assigned", 0) or 0
+                    else:
+                        required_qty = qty_data if qty_data else 0
+                        assigned_qty = 0
+
+                    # Get AssignedBreakdown for current location
+                    assigned_breakdown = stock_item.get("AssignedBreakdown", [])
+                    if not assigned_breakdown or not isinstance(assigned_breakdown, list):
+                        continue
+
+                    for ab in assigned_breakdown:
+                        storage = ab.get("Storage", {})
+                        ab_qty = ab.get("Quantity", 0)
+                        if ab_qty <= 0:
+                            continue
+
+                        storage_id = storage.get("ID") if isinstance(storage, dict) else storage
+                        storage_name = storage.get("Name", f"Storage {storage_id}") if isinstance(storage, dict) else f"Storage {storage_id}"
+
+                        items.append({
+                            "catalogId": cat_id,
+                            "name": catalog.get("Name", ""),
+                            "partNo": catalog.get("PartNo", "") or catalog.get("Sku", ""),
+                            "qty": ab_qty,
+                            "requiredQty": required_qty,
+                            "assignedQty": assigned_qty,
+                            "currentStorage": {"id": storage_id, "name": storage_name},
+                            "sectionId": sec_id,
+                            "costCentreId": cc_id,
+                            "costCentreName": cc_name
+                        })
+
+        print(f"[job-materials] Found {len(items)} assigned materials for job {job_id}")
+        return jsonify({"job": job_info, "items": items})
+
+    except Exception as e:
+        print(f"[job-materials] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/relocate', methods=['POST'])
 @login_required
 def relocate_items():
-    """Relocate items from one storage location to another using Simpro Stock Transfer API"""
+    """Relocate job-allocated items using 3-step CC process"""
     try:
         data = request.get_json()
         
-        source_id = data.get('sourceId')
-        source_name = data.get('sourceName', 'Unknown')
         dest_id = data.get('destId')
         dest_name = data.get('destName', 'Unknown')
         items = data.get('items', [])
+        job_id = data.get('jobId')
+        job_number = data.get('jobNumber', '')
+        customer = data.get('customer', '')
         staff_member = session.get('username', 'unknown')
         staff_name = session.get('display_name', staff_member)
         
-        if not source_id or not dest_id or not items:
+        if not dest_id or not items:
             return jsonify({'error': 'Missing required fields'}), 400
         
-        if source_id == dest_id:
-            return jsonify({'error': 'Source and destination cannot be the same'}), 400
+        results = []
+        success_count = 0
+        fail_count = 0
+        label_items = []
         
-        # Build Stock Transfer API payload
-        transfer_items = []
         for item in items:
             catalog_id = item.get('catalogId')
-            quantity = item.get('quantity', 1)
-            if catalog_id:
-                transfer_items.append({
-                    'Catalog': int(catalog_id),
-                    'FromStorage': int(source_id),
-                    'ToStorage': int(dest_id),
-                    'Quantity': int(quantity)
+            quantity = int(item.get('qty', 1))
+            source_id = item.get('fromStorageId')
+            source_name = item.get('fromStorageName', 'Unknown')
+            section_id = item.get('sectionId')
+            cc_id = item.get('costCentreId')
+            part_no = item.get('partNo', '')
+            name = item.get('name', '')
+            
+            if not catalog_id or not source_id:
+                results.append({'catalogId': catalog_id, 'success': False, 'error': 'Missing catalogId or source'})
+                fail_count += 1
+                continue
+            
+            # Skip if source == destination
+            if int(source_id) == int(dest_id):
+                results.append({'catalogId': catalog_id, 'success': True, 'note': 'Already in destination'})
+                success_count += 1
+                label_items.append({
+                    'partNo': part_no, 'name': name, 'qty': quantity,
+                    'storage': dest_name, 'jobNumber': job_number, 'customer': customer
                 })
+                continue
+            
+            item_success = True
+            item_error = ''
+            
+            # Step 1: Un-assign from CC at source
+            if section_id and cc_id:
+                print(f"[relocate] Step 1: Un-assign cat {catalog_id} from storage {source_id} on job {job_id}")
+                unassign_resp = simpro_request('PATCH',
+                    f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{section_id}/costCenters/{cc_id}/stock/{catalog_id}/',
+                    json={"AssignedBreakdown": [{"Storage": int(source_id), "Quantity": 0}]}
+                )
+                print(f"[relocate] Step 1 response: {unassign_resp.status_code}")
+                if unassign_resp.status_code not in (200, 204):
+                    item_success = False
+                    item_error = f'Failed to un-assign from CC: {unassign_resp.status_code}'
+                    print(f"[relocate] Step 1 FAILED: {unassign_resp.text}")
+            
+            # Step 2: Stock transfer
+            if item_success:
+                print(f"[relocate] Step 2: Transfer cat {catalog_id} from {source_id} to {dest_id}")
+                transfer_resp = simpro_request('POST',
+                    f'/companies/{COMPANY_ID}/stockTransfer/',
+                    json={
+                        "Catalog": int(catalog_id),
+                        "FromStorage": int(source_id),
+                        "ToStorage": int(dest_id),
+                        "Quantity": int(quantity)
+                    }
+                )
+                print(f"[relocate] Step 2 response: {transfer_resp.status_code}")
+                if transfer_resp.status_code not in (200, 201, 204):
+                    item_success = False
+                    item_error = f'Stock transfer failed: {transfer_resp.status_code} - {transfer_resp.text}'
+                    print(f"[relocate] Step 2 FAILED: {transfer_resp.text}")
+                    # Rollback: re-assign at source
+                    if section_id and cc_id:
+                        simpro_request('POST',
+                            f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{section_id}/costCenters/{cc_id}/stock/',
+                            json={"Catalog": int(catalog_id), "AssignedBreakdown": [{"Storage": int(source_id), "Quantity": int(quantity)}]}
+                        )
+            
+            # Step 3: Re-assign to CC at destination
+            if item_success and section_id and cc_id:
+                print(f"[relocate] Step 3: Re-assign cat {catalog_id} to storage {dest_id} on job {job_id}")
+                reassign_resp = simpro_request('POST',
+                    f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{section_id}/costCenters/{cc_id}/stock/',
+                    json={"Catalog": int(catalog_id), "AssignedBreakdown": [{"Storage": int(dest_id), "Quantity": int(quantity)}]}
+                )
+                print(f"[relocate] Step 3 response: {reassign_resp.status_code}")
+                if reassign_resp.status_code not in (200, 201):
+                    item_success = False
+                    item_error = f'CC re-assignment failed: {reassign_resp.status_code} - {reassign_resp.text}'
+                    print(f"[relocate] Step 3 FAILED: {reassign_resp.text}")
+            
+            if item_success:
+                success_count += 1
+                label_items.append({
+                    'partNo': part_no, 'name': name, 'qty': quantity,
+                    'storage': dest_name, 'jobNumber': job_number, 'customer': customer
+                })
+            else:
+                fail_count += 1
+            
+            results.append({
+                'catalogId': catalog_id, 'partNo': part_no,
+                'success': item_success, 'error': item_error if not item_success else None
+            })
         
-        if not transfer_items:
-            return jsonify({'error': 'No valid items to transfer'}), 400
-        
-        # Use flat format (one call per item)
-        payload = transfer_items[0] if len(transfer_items) == 1 else transfer_items[0]
-        
-        print(f"=== STOCK TRANSFER REQUEST ===")
-        print(f"From: {source_name} (ID: {source_id}) -> To: {dest_name} (ID: {dest_id})")
-        print(f"Items: {len(transfer_items)}")
-        print(f"Payload: {json.dumps(payload)}")
-        
-        # Execute stock transfer via Simpro API
-        response = simpro_request('POST', f'/companies/{COMPANY_ID}/stockTransfer/', json=payload)
-        print(f"Stock Transfer API Response: {response.status_code} - {response.text}")
-        
-        if response.status_code in (200, 201, 204):
-            # Log the transfer
+        # Log the transfer
+        if success_count > 0:
             staff_id = session.get('staff_id')
             log_allocation(
-                staff_id=staff_id,
-                staff_name=staff_name,
-                po_number='',
-                job_number='',
-                vendor_name='',
-                items_count=len(transfer_items),
-                storage_location=f'{source_name} → {dest_name}',
-                allocation_type='stock_transfer',
-                verified=1
+                staff_id=staff_id, staff_name=staff_name,
+                po_number='', job_number=job_number, vendor_name='',
+                items_count=success_count, storage_location=dest_name,
+                allocation_type='relocate', verified=1
             )
-            
-            print(f"=== STOCK TRANSFER COMPLETE ===")
-            print(f"Transferred {len(transfer_items)} item(s) from {source_name} to {dest_name}")
-            
-            return jsonify({
-                'success': True,
-                'message': f'Successfully transferred {len(transfer_items)} item(s) from {source_name} to {dest_name}',
-                'transferredCount': len(transfer_items),
-                'transferredBy': staff_name
-            })
-        else:
-            error_msg = f'Simpro API returned {response.status_code}'
-            try:
-                error_detail = response.json()
-                if isinstance(error_detail, dict) and 'Message' in error_detail:
-                    error_msg = error_detail['Message']
-            except:
-                error_msg = response.text or error_msg
-            
-            print(f"=== STOCK TRANSFER FAILED ===")
-            print(f"Error: {error_msg}")
-            
-            return jsonify({
-                'success': False,
-                'error': error_msg
-            }), 400
+        
+        return jsonify({
+            'success': fail_count == 0, 'successCount': success_count,
+            'failCount': fail_count, 'results': results,
+            'labelItems': label_items, 'movedBy': staff_name
+        })
         
     except Exception as e:
-        print(f"Error executing stock transfer: {e}")
+        print(f"[relocate] Error: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
 
 @app.route('/api/pending-relocations', methods=['GET'])
 @login_required

@@ -28,12 +28,14 @@ const app = {
     individualPhotos: [], // [{itemIndex, description, base64}]
     
     // Relocate state
-    relocateSourceId: null,
-    relocateSourceName: null,
+    relocateJobId: null,
+    relocateJobNumber: null,
+    relocateCustomer: null,
     relocateItems: [],
     relocateSelectedItems: [],
     relocateDestId: null,
     relocateDestName: null,
+    relocateLabelItems: [],
     
     // ============================================
     // Initialization
@@ -74,12 +76,12 @@ const app = {
         document.getElementById('label-lookup-btn')?.addEventListener('click', () => this.lookupLabels());
         
         // Relocate flow
-        document.getElementById('relocate-source-dropdown')?.addEventListener('change', (e) => this.selectRelocateSource(e));
-        document.getElementById('load-source-items-btn')?.addEventListener('click', () => this.loadRelocateItems());
-        document.getElementById('relocate-select-all')?.addEventListener('change', (e) => this.toggleRelocateSelectAll(e));
+        document.getElementById('relocate-job-lookup-btn')?.addEventListener('click', () => this.relocateLookupJob());
+        document.getElementById('relocate-job-number')?.addEventListener('keypress', (e) => { if (e.key === 'Enter') this.relocateLookupJob(); });
         document.getElementById('to-relocate-dest-btn')?.addEventListener('click', () => this.showRelocateDestScreen());
         document.getElementById('relocate-dest-dropdown')?.addEventListener('change', (e) => this.selectRelocateDest(e));
         document.getElementById('execute-relocate-btn')?.addEventListener('click', () => this.executeRelocate());
+        document.getElementById('relocate-print-labels-btn')?.addEventListener('click', () => this.relocatePrintLabels());
         document.getElementById('relocate-another-btn')?.addEventListener('click', () => this.startNewRelocate());
         document.getElementById('relocate-home-btn')?.addEventListener('click', () => this.showHomeScreen());
         
@@ -1734,147 +1736,113 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         }
     },
 
-    selectRelocateSource(event) {
-        const select = event.target;
-        const selectedOption = select.options[select.selectedIndex];
-        
-        if (select.value) {
-            this.relocateSourceId = parseInt(select.value);
-            this.relocateSourceName = selectedOption.textContent;
-            document.getElementById('load-source-items-btn').disabled = false;
-        } else {
-            this.relocateSourceId = null;
-            this.relocateSourceName = null;
-            document.getElementById('load-source-items-btn').disabled = true;
-        }
-    },
-    
-    async loadRelocateItems() {
-        if (!this.relocateSourceId) return;
-        
-        this.showStatus('relocate-source-status', 'Loading items from storage...', 'loading');
-        
+    async relocateLookupJob() {
+        const jobInput = document.getElementById('relocate-job-number');
+        const jobId = jobInput.value.trim();
+        if (!jobId) return;
+
+        const statusEl = document.getElementById('relocate-job-status');
+        statusEl.className = 'status-message loading';
+        statusEl.textContent = 'Looking up job materials...';
+        statusEl.classList.remove('hidden');
+        document.getElementById('relocate-job-info').classList.add('hidden');
+        document.getElementById('relocate-materials-list').innerHTML = '';
+        document.getElementById('relocate-selection-summary').classList.add('hidden');
+        document.getElementById('to-relocate-dest-btn').disabled = true;
+
         try {
-            const response = await fetch(`/api/storage/${this.relocateSourceId}/stock`);
+            const response = await fetch('/api/job-materials', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({jobId: jobId})
+            });
             const data = await response.json();
-            
+
             if (data.error) {
-                this.showStatus('relocate-source-status', data.error, 'error');
+                statusEl.className = 'status-message error';
+                statusEl.textContent = data.error;
                 return;
             }
-            
+
+            this.relocateJobId = data.job.id;
+            this.relocateJobNumber = data.job.number;
+            this.relocateCustomer = data.job.customer;
             this.relocateItems = data.items || [];
             this.relocateSelectedItems = [];
-            
+
+            document.getElementById('relocate-job-title').textContent = `Job ${data.job.number} — ${data.job.customer}`;
+            document.getElementById('relocate-job-customer').textContent = `${this.relocateItems.length} material(s) with assigned storage locations`;
+            document.getElementById('relocate-job-info').classList.remove('hidden');
+
             if (this.relocateItems.length === 0) {
-                this.showStatus('relocate-source-status', 'No items found in this location', 'error');
+                statusEl.className = 'status-message error';
+                statusEl.textContent = 'No assigned materials found on this job';
                 return;
             }
-            
-            this.showRelocateItemsScreen();
-            
+
+            statusEl.classList.add('hidden');
+            this.renderRelocateItems();
+
         } catch (error) {
-            console.error('Load storage items error:', error);
-            this.showStatus('relocate-source-status', 'Failed to load items', 'error');
+            console.error('Relocate lookup error:', error);
+            statusEl.className = 'status-message error';
+            statusEl.textContent = 'Failed to look up job';
         }
     },
-    
-    showRelocateItemsScreen() {
-        document.getElementById('relocate-source-title').textContent = `From: ${this.relocateSourceName}`;
-        document.getElementById('relocate-item-count-info').textContent = `${this.relocateItems.length} item(s) in location`;
-        
-        const itemsList = document.getElementById('relocate-items-list');
-        
-        itemsList.innerHTML = this.relocateItems.map((item, index) => {
-            return `
-                <div class="item-card" data-index="${index}">
-                    <label class="item-checkbox">
-                        <input type="checkbox" onchange="app.toggleRelocateItem(${index})">
-                        <span class="checkmark"></span>
-                    </label>
+
+    renderRelocateItems() {
+        const listEl = document.getElementById('relocate-materials-list');
+        listEl.innerHTML = this.relocateItems.map((item, index) => `
+            <div class="item-card">
+                <label class="checkbox-label">
+                    <input type="checkbox" onchange="app.toggleRelocateItem(${index})">
+                    <span class="checkmark"></span>
                     <div class="item-details">
-                        <div class="item-name">${item.description || item.name || 'Unknown Item'}</div>
-                        <div class="item-meta">
-                            ${item.partNo ? `<span class="item-part">${item.partNo}</span>` : ''}
-                            <span class="item-qty">Qty: ${item.quantity}</span>
-                            ${item.jobNumber ? `<span class="item-job">Job: ${item.jobNumber}</span>` : ''}
-                        </div>
+                        <strong>${item.partNo || 'No Part#'}</strong>
+                        <span class="item-desc">${item.name || ''}</span>
+                        <span class="item-location" style="color: #2196F3; font-weight: 600;">📍 ${item.currentStorage?.name || 'Unknown'} — Qty: ${item.qty}</span>
+                        <span class="item-cc" style="color: #666; font-size: 12px;">CC: ${item.costCentreName || ''}</span>
                     </div>
-                </div>
-            `;
-        }).join('');
-        
+                </label>
+            </div>
+        `).join('');
+
+        document.getElementById('relocate-selection-summary').classList.remove('hidden');
         this.updateRelocateSelectionCount();
-        this.showScreen('relocate-items');
     },
-    
+
     toggleRelocateItem(index) {
         const item = this.relocateItems[index];
-        const idx = this.relocateSelectedItems.findIndex(i => i.index === index);
-        
+        const idx = this.relocateSelectedItems.findIndex(i => i._index === index);
         if (idx >= 0) {
             this.relocateSelectedItems.splice(idx, 1);
         } else {
-            this.relocateSelectedItems.push({
-                index,
-                ...item
-            });
+            this.relocateSelectedItems.push({...item, _index: index});
         }
-        
         this.updateRelocateSelectionCount();
     },
-    
-    toggleRelocateSelectAll(event) {
-        const checked = event.target.checked;
-        const checkboxes = document.querySelectorAll('#relocate-items-list input[type="checkbox"]');
-        
-        this.relocateSelectedItems = [];
-        
-        checkboxes.forEach((cb, index) => {
-            cb.checked = checked;
-            if (checked && this.relocateItems[index]) {
-                this.relocateSelectedItems.push({
-                    index,
-                    ...this.relocateItems[index]
-                });
-            }
-        });
-        
-        this.updateRelocateSelectionCount();
-    },
-    
+
     updateRelocateSelectionCount() {
         const count = this.relocateSelectedItems.length;
         const total = this.relocateItems.length;
-        
         document.getElementById('relocate-selection-count').textContent = `${count} of ${total} items selected`;
         document.getElementById('to-relocate-dest-btn').disabled = count === 0;
     },
-    
+
     showRelocateDestScreen() {
         document.getElementById('relocate-dest-item-count').textContent = this.relocateSelectedItems.length;
-        document.getElementById('relocate-from-name').textContent = this.relocateSourceName;
+        document.getElementById('relocate-dest-job-name').textContent = `Job ${this.relocateJobNumber}`;
         document.getElementById('relocate-dest-dropdown').value = '';
         document.getElementById('execute-relocate-btn').disabled = true;
         document.getElementById('relocate-dest-warning').classList.add('hidden');
-        
         this.showScreen('relocate-dest');
     },
-    
+
     selectRelocateDest(event) {
         const select = event.target;
         const selectedOption = select.options[select.selectedIndex];
-        
         if (select.value) {
             const destId = parseInt(select.value);
-            
-            // Check if same as source
-            if (destId === this.relocateSourceId) {
-                document.getElementById('relocate-dest-warning').classList.remove('hidden');
-                document.getElementById('execute-relocate-btn').disabled = true;
-                return;
-            }
-            
             document.getElementById('relocate-dest-warning').classList.add('hidden');
             this.relocateDestId = destId;
             this.relocateDestName = selectedOption.textContent;
@@ -1885,92 +1853,107 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             document.getElementById('execute-relocate-btn').disabled = true;
         }
     },
-    
+
     async executeRelocate() {
         if (!this.relocateDestId || this.relocateSelectedItems.length === 0) {
             alert('Please select items and a destination');
             return;
         }
-        
+
         this.showScreen('processing');
-        document.getElementById('processing-status').textContent = 'Relocating items...';
-        document.getElementById('processing-detail').textContent = `Moving to ${this.relocateDestName}`;
-        
+        document.getElementById('processing-detail').textContent = `Moving ${this.relocateSelectedItems.length} item(s) to ${this.relocateDestName}`;
+
         try {
             const response = await fetch('/api/relocate', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
-                    sourceId: this.relocateSourceId,
-                    sourceName: this.relocateSourceName,
+                    jobId: this.relocateJobId,
+                    jobNumber: this.relocateJobNumber,
+                    customer: this.relocateCustomer,
                     destId: this.relocateDestId,
                     destName: this.relocateDestName,
                     items: this.relocateSelectedItems.map(item => ({
-                        stockId: item.stockId,
                         catalogId: item.catalogId,
-                        quantity: item.quantity,
-                        partNo: item.partNo || '',
-                        description: item.description || item.name,
-                        jobId: item.jobId
+                        qty: item.qty,
+                        fromStorageId: item.currentStorage?.id,
+                        fromStorageName: item.currentStorage?.name,
+                        sectionId: item.sectionId,
+                        costCentreId: item.costCentreId,
+                        partNo: item.partNo,
+                        name: item.name
                     }))
                 })
             });
-            
+
             const data = await response.json();
-            
-            if (data.success) {
-                this.showRelocateSuccess(data);
-            } else {
-                alert('Relocation failed: ' + (data.error || 'Unknown error'));
+
+            if (data.error && !data.successCount) {
+                alert('Relocate failed: ' + data.error);
                 this.showScreen('relocate-dest');
+                return;
             }
-            
+
+            this.relocateLabelItems = data.labelItems || [];
+
+            document.getElementById('relocate-success-summary').textContent =
+                `${data.successCount || 0} item(s) moved successfully` + (data.failCount ? ` (${data.failCount} failed)` : '');
+            document.getElementById('relocate-success-from').textContent = `Job: ${this.relocateJobNumber}`;
+            document.getElementById('relocate-success-to').textContent = `To: ${this.relocateDestName}`;
+            document.getElementById('relocate-staff-name').textContent = data.movedBy || this.currentStaff?.displayName || 'Staff';
+
+            this.showScreen('relocate-success');
+
         } catch (error) {
             console.error('Relocate error:', error);
-            alert('Relocation failed: ' + error.message);
+            alert('Relocate failed: ' + error.message);
             this.showScreen('relocate-dest');
         }
     },
-    
-    showRelocateSuccess(data) {
-        // Handle queued response (browser automation required)
-        if (data.requiresBrowserAutomation) {
-            document.getElementById('relocate-success-summary').textContent = 
-                `${data.queuedCount || this.relocateSelectedItems.length} item(s) queued for transfer`;
-            document.getElementById('relocate-success-from').textContent = `From: ${this.relocateSourceName}`;
-            document.getElementById('relocate-success-to').textContent = `To: ${this.relocateDestName}`;
-            document.getElementById('relocate-staff-name').textContent = this.currentStaff?.displayName || 'Staff';
-            
-            // Add note about browser automation
-            const noteEl = document.getElementById('relocate-success-note');
-            if (noteEl) {
-                noteEl.textContent = data.note || 'Transfer will be processed automatically.';
-                noteEl.classList.remove('hidden');
-            }
-        } else {
-            document.getElementById('relocate-success-summary').textContent = 
-                `${data.successCount || this.relocateSelectedItems.length} item(s) moved`;
-            document.getElementById('relocate-success-from').textContent = `From: ${this.relocateSourceName}`;
-            document.getElementById('relocate-success-to').textContent = `To: ${this.relocateDestName}`;
-            document.getElementById('relocate-staff-name').textContent = data.movedBy || this.currentStaff?.displayName || 'Staff';
+
+    async relocatePrintLabels() {
+        if (!this.relocateLabelItems || this.relocateLabelItems.length === 0) {
+            alert('No label data available');
+            return;
         }
-        
-        this.showScreen('relocate-success');
+
+        const labels = this.relocateLabelItems.map(item => ({
+            jobNumber: item.jobNumber || this.relocateJobNumber,
+            customerName: item.customer || this.relocateCustomer,
+            partCode: item.partNo,
+            description: item.name,
+            quantity: item.qty,
+            storage: item.storage || this.relocateDestName,
+            poNumber: 'RELOCATE',
+            date: new Date().toLocaleDateString('en-AU')
+        }));
+
+        const isAndroid = /android/i.test(navigator.userAgent);
+
+        if (isAndroid) {
+            this._showAndroidLabels(labels, this.relocateLabelItems, 'RELOCATE');
+        } else {
+            this._showPdfLabels(labels, this.relocateLabelItems, 'RELOCATE');
+        }
     },
-    
+
     startNewRelocate() {
-        this.relocateSourceId = null;
-        this.relocateSourceName = null;
+        this.relocateJobId = null;
+        this.relocateJobNumber = null;
+        this.relocateCustomer = null;
         this.relocateItems = [];
         this.relocateSelectedItems = [];
         this.relocateDestId = null;
         this.relocateDestName = null;
-        
-        document.getElementById('relocate-source-dropdown').value = '';
-        document.getElementById('load-source-items-btn').disabled = true;
-        document.getElementById('relocate-select-all').checked = false;
-        document.getElementById('relocate-source-status').classList.add('hidden');
-        
+        this.relocateLabelItems = [];
+
+        const jobInput = document.getElementById('relocate-job-number');
+        if (jobInput) jobInput.value = '';
+        document.getElementById('relocate-job-info')?.classList.add('hidden');
+        document.getElementById('relocate-job-status')?.classList.add('hidden');
+        document.getElementById('relocate-materials-list').innerHTML = '';
+        document.getElementById('relocate-selection-summary')?.classList.add('hidden');
+
         this.showScreen('relocate-source');
     },
     
