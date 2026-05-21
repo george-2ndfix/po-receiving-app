@@ -2314,23 +2314,43 @@ def allocate_items():
         all_verified = all(r.get('verified', False) for r in results if r.get('success'))
         
         # ============================================
-        # Set "Goods Received" status (Status ID 239)
-        # This marks the PO as physically received BEFORE financial receipting
-        # Only set if at least one item was successfully allocated AND there are pre-receipt items
+        # Set PO status based on whether ALL items are now received
+        # 239 = Goods Received (all items done) — triggers Kelly's KPro to receipt & archive
+        # 109 = Not Completely Supplied (partial delivery) — keeps PO open for remaining items
         # ============================================
         goods_received_set = False
         if success_count > 0 and pre_receipt_items:
             try:
-                print(f"=== SETTING GOODS RECEIVED STATUS for PO {po_id} ===")
-                gr_response = simpro_request('PATCH', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}', json={'Status': 239})
-                print(f"Goods Received API Response: {gr_response.status_code}")
+                # Check if ALL PO items are now fully received
+                cat_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/catalogs/')
+                all_received = True
+                if cat_resp.status_code == 200:
+                    po_items = cat_resp.json()
+                    for pi in po_items:
+                        qty = pi.get('Quantity', {})
+                        ordered = qty.get('Ordered', 0) if isinstance(qty, dict) else 0
+                        received = qty.get('Received', 0) if isinstance(qty, dict) else 0
+                        if ordered > 0 and received < ordered:
+                            all_received = False
+                            print(f"  Item {pi.get('Catalog', {}).get('ID','?')}: ordered={ordered}, received={received} — still outstanding")
+                else:
+                    # Can't determine — default to partial to be safe
+                    all_received = False
+                    print(f"⚠️ Could not fetch PO items to check completion: {cat_resp.status_code}")
+                
+                new_status = 239 if all_received else 109
+                status_label = "GOODS RECEIVED" if all_received else "NOT COMPLETELY SUPPLIED (partial)"
+                print(f"=== SETTING {status_label} STATUS ({new_status}) for PO {po_id} ===")
+                
+                gr_response = simpro_request('PATCH', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}', json={'Status': new_status})
+                print(f"Status API Response: {gr_response.status_code}")
                 if gr_response.status_code == 204:
                     goods_received_set = True
-                    print(f"✅ Goods Received status set successfully for PO {po_id}")
+                    print(f"✅ {status_label} status set successfully for PO {po_id}")
                 else:
-                    print(f"⚠️ Goods Received status update returned: {gr_response.status_code} - {gr_response.text}")
+                    print(f"⚠️ Status update returned: {gr_response.status_code} - {gr_response.text}")
             except Exception as gr_err:
-                print(f"⚠️ Failed to set Goods Received status: {gr_err}")
+                print(f"⚠️ Failed to set PO status: {gr_err}")
         
         # Determine allocation type for logging
         if post_receipt_items and pre_receipt_items:
