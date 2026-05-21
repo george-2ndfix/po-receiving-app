@@ -4244,6 +4244,7 @@ def collection_job_lookup():
 
         job_id = job_data.get('ID', job_data.get('id'))
         job_name = job_data.get('Name', '')
+        job_input = str(job_id)  # backwards compat
 
         # Get customer details
         customer_ref = job_data.get('Customer', {})
