@@ -1767,6 +1767,7 @@ def allocate_items():
         
         results = []
         success_count = 0
+        fail_count = 0
         
         # ============================================
         # Server-side receipt check (don't trust front-end status alone)
