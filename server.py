@@ -3951,7 +3951,13 @@ def collection_job_lookup():
                             if stkresp.status_code == 200:
                                 for item in stkresp.json():
                                     cat = item.get('Catalog', {})
-                                    assigned = item.get('Assigned', 0)
+                                    qty_obj = item.get('Quantity', {})
+                                    if isinstance(qty_obj, dict):
+                                        assigned = qty_obj.get('Assigned', 0)
+                                        required = qty_obj.get('Required', 0)
+                                    else:
+                                        assigned = qty_obj or 0
+                                        required = assigned
                                     if assigned <= 0:
                                         continue
                                     storage_name = 'Unknown'
@@ -3966,7 +3972,7 @@ def collection_job_lookup():
                                         'catalogId': cat.get('ID'),
                                         'partCode': cat.get('PartNo', ''),
                                         'description': cat.get('Name', ''),
-                                        'quantity': item.get('Quantity', 0),
+                                        'quantity': required,
                                         'assigned': assigned,
                                         'storage': storage_name,
                                         'storageId': storage_id,
