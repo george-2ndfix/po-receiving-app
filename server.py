@@ -588,6 +588,49 @@ def init_db():
                 created_at TIMESTAMP DEFAULT NOW()
             )
         ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS collections (
+                    id SERIAL PRIMARY KEY,
+                    job_number VARCHAR(50) NOT NULL,
+                    job_id INTEGER,
+                    job_name VARCHAR(255),
+                    customer_name VARCHAR(255),
+                    customer_email VARCHAR(255),
+                    customer_phone VARCHAR(100),
+                    site_address TEXT,
+                    collected_by VARCHAR(255) NOT NULL,
+                    staff_id INTEGER NOT NULL,
+                    staff_name VARCHAR(100),
+                    signature_data TEXT,
+                    notes TEXT,
+                    vehicle_rego VARCHAR(50),
+                    status VARCHAR(50) DEFAULT 'completed',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS collection_items (
+                    id SERIAL PRIMARY KEY,
+                    collection_id INTEGER NOT NULL REFERENCES collections(id),
+                    catalog_id INTEGER,
+                    part_code VARCHAR(100),
+                    description TEXT,
+                    quantity INTEGER NOT NULL,
+                    storage_location VARCHAR(255),
+                    storage_id INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS collection_photos (
+                    id SERIAL PRIMARY KEY,
+                    collection_id INTEGER NOT NULL REFERENCES collections(id),
+                    photo_data TEXT NOT NULL,
+                    caption VARCHAR(255),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+
         
         print("PostgreSQL tables initialized")
     else:
@@ -3820,6 +3863,350 @@ if USE_POSTGRES:
     print("\u2705 Using PostgreSQL database (persistent)")
 else:
     print("\u26a0\ufe0f Using SQLite database (ephemeral)")
+
+
+
+# ============================================================
+# COLLECTION API ENDPOINTS
+# ============================================================
+
+@app.route('/api/collection/job-lookup', methods=['GET'])
+@login_required
+def collection_job_lookup():
+    """Look up job for collection - returns customer info, materials, history"""
+    job_input = request.args.get('job', '').strip()
+    if not job_input:
+        return jsonify({'error': 'Job number required'}), 400
+
+    try:
+        token = get_simpro_token()
+        if not token:
+            return jsonify({'error': 'Could not get Simpro token'}), 500
+
+        base_url = 'https://2ndfix.simprosuite.com/api/v1.0'
+        headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+
+        # Try direct job lookup by ID
+        job_data = None
+        if job_input.isdigit():
+            resp = requests.get(f'{base_url}/companies/3/jobs/{job_input}/', headers=headers)
+            if resp.status_code == 200:
+                job_data = resp.json()
+
+        if not job_data:
+            return jsonify({'error': f'Job {job_input} not found'}), 404
+
+        job_id = job_data.get('ID', job_data.get('id'))
+        job_name = job_data.get('Name', '')
+
+        # Get customer details
+        customer_ref = job_data.get('Customer', {})
+        customer_id = customer_ref.get('ID')
+        customer = {'name': customer_ref.get('CompanyName', ''), 'email': '', 'phone': '', 'mobile': '', 'address': ''}
+
+        if customer_id:
+            try:
+                cresp = requests.get(f'{base_url}/companies/3/customers/{customer_id}/', headers=headers)
+                if cresp.status_code == 200:
+                    cd = cresp.json()
+                    cname = cd.get('CompanyName', '')
+                    if not cname:
+                        cname = (cd.get('GivenName', '') + ' ' + cd.get('FamilyName', '')).strip()
+                    customer['name'] = cname or customer_ref.get('CompanyName', '')
+                    customer['email'] = cd.get('Email', '')
+                    customer['phone'] = cd.get('Phone', cd.get('WorkPhone', ''))
+                    customer['mobile'] = cd.get('CellPhone', cd.get('Mobile', ''))
+                    if not customer['phone'] and customer['mobile']:
+                        customer['phone'] = customer['mobile']
+                    addr = cd.get('Address', {})
+                    if isinstance(addr, dict):
+                        parts = [addr.get('Address', ''), addr.get('City', ''), addr.get('State', ''), addr.get('PostCode', '')]
+                        customer['address'] = ', '.join(p for p in parts if p)
+                    elif isinstance(addr, str):
+                        customer['address'] = addr
+            except Exception as e:
+                print(f"Warning: Could not fetch customer details: {e}")
+
+        # Site address fallback
+        if not customer['address']:
+            site = job_data.get('Site', {})
+            if site and site.get('Name'):
+                customer['address'] = site.get('Name', '')
+
+        # Get job materials from CC data
+        materials = []
+        try:
+            sresp = requests.get(f'{base_url}/companies/3/jobs/{job_id}/sections/', headers=headers)
+            if sresp.status_code == 200:
+                for section in sresp.json():
+                    section_id = section.get('ID')
+                    ccresp = requests.get(f'{base_url}/companies/3/jobs/{job_id}/sections/{section_id}/costCenters/', headers=headers)
+                    if ccresp.status_code == 200:
+                        for cc in ccresp.json():
+                            cc_id = cc.get('ID')
+                            cc_name = cc.get('Name', '')
+                            stkresp = requests.get(f'{base_url}/companies/3/jobs/{job_id}/sections/{section_id}/costCenters/{cc_id}/stock/', headers=headers)
+                            if stkresp.status_code == 200:
+                                for item in stkresp.json():
+                                    cat = item.get('Catalog', {})
+                                    assigned = item.get('Assigned', 0)
+                                    if assigned <= 0:
+                                        continue
+                                    storage_name = 'Unknown'
+                                    storage_id = None
+                                    for bd in item.get('AssignedBreakdown', []):
+                                        if bd.get('Quantity', 0) > 0:
+                                            st = bd.get('Storage', {})
+                                            storage_name = st.get('Name', 'Unknown')
+                                            storage_id = st.get('ID')
+                                            break
+                                    materials.append({
+                                        'catalogId': cat.get('ID'),
+                                        'partCode': cat.get('PartNo', ''),
+                                        'description': cat.get('Name', ''),
+                                        'quantity': item.get('Quantity', 0),
+                                        'assigned': assigned,
+                                        'storage': storage_name,
+                                        'storageId': storage_id,
+                                        'sectionId': section_id,
+                                        'costCentreId': cc_id,
+                                        'costCentreName': cc_name
+                                    })
+        except Exception as e:
+            print(f"Warning: Could not fetch materials: {e}")
+
+        # Get collection history from DB
+        history = []
+        try:
+            db = get_db()
+            cursor = db.cursor()
+            cursor.execute(
+                'SELECT id, collected_by, staff_name, created_at, notes, vehicle_rego, status '
+                'FROM collections WHERE job_number = %s ORDER BY created_at DESC',
+                (str(job_input),)
+            )
+            for col in cursor.fetchall():
+                col_id = col['id']
+                cursor.execute(
+                    'SELECT part_code, description, quantity, storage_location '
+                    'FROM collection_items WHERE collection_id = %s', (col_id,)
+                )
+                items_rows = [dict(r) for r in cursor.fetchall()]
+                history.append({
+                    'id': col_id,
+                    'collectedBy': col['collected_by'],
+                    'staffName': col['staff_name'],
+                    'date': col['created_at'].isoformat() if col['created_at'] else '',
+                    'notes': col['notes'],
+                    'vehicleRego': col['vehicle_rego'],
+                    'status': col['status'],
+                    'items': items_rows
+                })
+        except Exception as e:
+            print(f"Warning: Could not fetch collection history: {e}")
+
+        # Calculate collected quantities
+        collected_qty = {}
+        for h in history:
+            if h.get('status') == 'completed':
+                for it in h.get('items', []):
+                    key = it.get('part_code', '')
+                    collected_qty[key] = collected_qty.get(key, 0) + (it.get('quantity', 0))
+        for m in materials:
+            m['collected'] = collected_qty.get(m['partCode'], 0)
+            m['remaining'] = max(0, m['assigned'] - m['collected'])
+
+        return jsonify({
+            'job': {'id': job_id, 'number': job_input, 'name': job_name},
+            'customer': customer,
+            'materials': materials,
+            'history': history
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/collection/complete', methods=['POST'])
+@login_required
+def collection_complete():
+    """Save a completed collection with signature, photos, and send confirmation"""
+    data = request.json or {}
+
+    job_number = data.get('jobNumber')
+    job_id = data.get('jobId')
+    job_name = data.get('jobName', '')
+    collected_by = data.get('collectedBy', '').strip()
+    items = data.get('items', [])
+    signature_data = data.get('signatureData', '')
+
+    if not job_number or not collected_by or not items or not signature_data:
+        return jsonify({'error': 'Missing required fields (job, name, items, signature)'}), 400
+
+    staff_id = session.get('staff_id', 0)
+    staff_name = session.get('staff_name', 'Unknown')
+
+    db = get_db()
+    cursor = db.cursor()
+
+    try:
+        cursor.execute(
+            'INSERT INTO collections (job_number, job_id, job_name, customer_name, customer_email, '
+            'customer_phone, site_address, collected_by, staff_id, staff_name, signature_data, '
+            'notes, vehicle_rego, status) '
+            'VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id',
+            (job_number, job_id, job_name,
+             data.get('customerName',''), data.get('customerEmail',''),
+             data.get('customerPhone',''), data.get('siteAddress',''),
+             collected_by, staff_id, staff_name, signature_data,
+             data.get('notes',''), data.get('vehicleRego',''), 'completed')
+        )
+        collection_id = cursor.fetchone()['id']
+
+        for it in items:
+            cursor.execute(
+                'INSERT INTO collection_items (collection_id, catalog_id, part_code, '
+                'description, quantity, storage_location, storage_id) '
+                'VALUES (%s,%s,%s,%s,%s,%s,%s)',
+                (collection_id, it.get('catalogId'), it.get('partCode',''),
+                 it.get('description',''), it.get('quantity',0),
+                 it.get('storage',''), it.get('storageId'))
+            )
+
+        for photo in data.get('photos', []):
+            if photo:
+                cursor.execute(
+                    'INSERT INTO collection_photos (collection_id, photo_data) VALUES (%s,%s)',
+                    (collection_id, photo)
+                )
+
+        db.commit()
+
+        # Upload signature to Simpro job as attachment
+        if job_id and signature_data:
+            try:
+                b64 = signature_data.split(',')[1] if ',' in signature_data else signature_data
+                from datetime import datetime
+                ts = datetime.now().strftime('%Y%m%d_%H%M')
+                simpro_request('POST', f'/companies/3/jobs/{job_id}/attachments/files/', json={
+                    'Filename': f'Collection_Signature_{job_number}_{ts}.png',
+                    'Base64Data': b64,
+                    'Public': True
+                })
+            except Exception as e:
+                print(f"Warning: Simpro signature upload failed: {e}")
+
+        # Send confirmation email via Graph API
+        customer_email = data.get('customerEmail', '').strip()
+        if customer_email:
+            try:
+                _send_collection_confirmation(
+                    customer_name=data.get('customerName', ''),
+                    customer_email=customer_email,
+                    job_number=job_number,
+                    job_name=job_name,
+                    items=items,
+                    collected_by=collected_by,
+                    collection_id=collection_id
+                )
+            except Exception as e:
+                print(f"Warning: Confirmation email failed: {e}")
+
+        log_allocation(staff_id, staff_name, '', job_number, '', len(items), 'Customer Collection', 'collection', True)
+
+        return jsonify({'success': True, 'collectionId': collection_id})
+
+    except Exception as e:
+        db.rollback()
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+def _send_collection_confirmation(customer_name, customer_email, job_number, job_name, items, collected_by, collection_id):
+    """Send collection confirmation email via Microsoft Graph API from orders@2ndfix.com.au"""
+    import os as _os
+    from datetime import datetime
+
+    client_id = _os.environ.get('GRAPH_CLIENT_ID', '')
+    client_secret = _os.environ.get('GRAPH_CLIENT_SECRET', '')
+    tenant_id = _os.environ.get('GRAPH_TENANT_ID', '')
+
+    if not client_id or not client_secret or not tenant_id:
+        print("Graph API credentials not configured - skipping email")
+        return
+
+    token_resp = requests.post(
+        f'https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token',
+        data={
+            'client_id': client_id, 'client_secret': client_secret,
+            'scope': 'https://graph.microsoft.com/.default',
+            'grant_type': 'client_credentials'
+        }
+    )
+    if token_resp.status_code != 200:
+        print(f"Graph token error: {token_resp.text}")
+        return
+    access_token = token_resp.json().get('access_token')
+
+    now = datetime.now().strftime('%d/%m/%Y at %I:%M %p')
+    items_html = ''.join(f'<li>{it.get("description","")} &mdash; Qty: {it.get("quantity",0)}</li>' for it in items)
+
+    html_body = f"""
+    <p>Hi {customer_name or 'there'},</p>
+    <p>This confirms collection of the following items from <strong>2nd Fix Doors &amp; Hardware</strong>:</p>
+    <ul>{items_html}</ul>
+    <p><strong>Collected on:</strong> {now}<br>
+    <strong>Job Number:</strong> {job_number}<br>
+    <strong>Collected by:</strong> {collected_by}</p>
+    <hr>
+    <p>If there are any issues with your order, please contact us immediately on <strong>1300 263 349</strong>.</p>
+    <p>Thank you,<br><strong>2nd Fix Doors &amp; Hardware</strong><br>
+    251 Churchill Road, Prospect SA 5082<br>1300 263 349</p>
+    """
+
+    send_resp = requests.post(
+        'https://graph.microsoft.com/v1.0/users/orders@2ndfix.com.au/sendMail',
+        headers={'Authorization': f'Bearer {access_token}', 'Content-Type': 'application/json'},
+        json={
+            'message': {
+                'subject': f'Collection Confirmation - Job {job_number}',
+                'body': {'contentType': 'HTML', 'content': html_body},
+                'toRecipients': [{'emailAddress': {'address': customer_email, 'name': customer_name or ''}}]
+            }
+        }
+    )
+    if send_resp.status_code in (200, 202):
+        print(f"Collection confirmation email sent to {customer_email}")
+    else:
+        print(f"Email send failed: {send_resp.status_code} {send_resp.text}")
+
+
+@app.route('/api/collection/history', methods=['GET'])
+@login_required
+def collection_history_api():
+    """Get collection history, optionally filtered by job"""
+    job = request.args.get('job', '').strip()
+    db = get_db()
+    cursor = db.cursor()
+    if job:
+        cursor.execute('SELECT * FROM collections WHERE job_number = %s ORDER BY created_at DESC', (job,))
+    else:
+        cursor.execute('SELECT * FROM collections ORDER BY created_at DESC LIMIT 50')
+    rows = cursor.fetchall()
+    result = []
+    for r in rows:
+        result.append({
+            'id': r['id'], 'jobNumber': r['job_number'], 'jobName': r.get('job_name',''),
+            'customerName': r['customer_name'], 'collectedBy': r['collected_by'],
+            'staffName': r['staff_name'], 'date': r['created_at'].isoformat() if r['created_at'] else '',
+            'notes': r['notes'], 'status': r['status']
+        })
+    return jsonify(result)
+
+
 
 if __name__ == '__main__':
     print("Starting PO Receiving App server...")
