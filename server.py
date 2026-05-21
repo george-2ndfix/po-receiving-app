@@ -3886,12 +3886,14 @@ def collection_job_lookup():
         base_url = 'https://2ndfix.simprosuite.com/api/v1.0'
         headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
 
-        # Try direct job lookup by ID
+        # Use list endpoint with ID filter - direct lookup returns 404 on this Simpro instance
         job_data = None
         if job_input.isdigit():
-            resp = requests.get(f'{base_url}/companies/3/jobs/{job_input}/', headers=headers)
+            resp = requests.get(f'{base_url}/companies/3/jobs/?ID={job_input}&columns=ID,Name,Customer,Site', headers=headers)
             if resp.status_code == 200:
-                job_data = resp.json()
+                job_list = resp.json()
+                if isinstance(job_list, list) and len(job_list) > 0:
+                    job_data = job_list[0]
 
         if not job_data:
             return jsonify({'error': f'Job {job_input} not found'}), 404
