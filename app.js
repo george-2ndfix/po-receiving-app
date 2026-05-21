@@ -2537,7 +2537,7 @@ document.addEventListener('DOMContentLoaded', () => app.init());
             cState.history = data.history;
             status.style.display = 'none';
             renderCollectionDetails();
-            if (window.app) app.showScreen('collection-details');
+            app.showScreen('collection-details');
         } catch(e) {
             status.className = 'status-message error';
             status.textContent = e.message;
@@ -2637,7 +2637,7 @@ document.addEventListener('DOMContentLoaded', () => app.init());
         });
         if (!cState.selectedItems.length) return;
         renderConfirm();
-        if (window.app) app.showScreen('collection-confirm');
+        app.showScreen('collection-confirm');
         setTimeout(initSigCanvas, 100);
     });
 
@@ -2765,7 +2765,7 @@ document.addEventListener('DOMContentLoaded', () => app.init());
                 + (payload.customerEmail ? '<div class="ss-line" style="margin-top:8px">Confirmation email sent to ' + escH(payload.customerEmail) + '</div>' : '')
                 + '<div class="ss-line" style="margin-top:8px;color:#888">Collection #' + data.collectionId + '</div>'
                 + '</div>';
-            if (window.app) app.showScreen('collection-success');
+            app.showScreen('collection-success');
         } catch(e) {
             alert('Error: ' + e.message);
             btn.disabled = false;
