@@ -1848,7 +1848,10 @@ def allocate_items():
                     print(f"Fixed quantity for catalog {catalog_id}: defaulting to 1 (no quantityOrdered available)")
             
             # Server-side receipt detection (overrides front-end if we have data)
-            is_receipted = po_is_receipted or receipt_status == 'fully_receipted'
+            # Per-item receipt check: item is only receipted if it actually appears on a receipt
+            # (not just because the PO has ANY receipt — receipts may only cover some items)
+            item_is_on_receipt = catalog_id in receipt_allocations or catalog_id in catalog_receipt_id
+            is_receipted = item_is_on_receipt or receipt_status == 'fully_receipted'
             
             if is_receipted and catalog_id in receipt_allocations:
                 current_alloc = receipt_allocations[catalog_id]
