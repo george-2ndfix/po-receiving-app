@@ -1948,33 +1948,51 @@ def allocate_items():
             
             allocation_url = f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/catalogs/{catalog_id}/allocations/'
             
-            # Fetch existing allocations to get quantity if needed
+            # Fetch existing allocations — MUST preserve AssignedTo and multi-job splits!
+            # PUT replaces ALL allocations, so we must include every existing entry with its AssignedTo.
+            # Only change StorageDevice. Without this, multi-job POs collapse to one job.
+            existing_allocs = []
             try:
                 existing_resp = simpro_request('GET', allocation_url)
                 if existing_resp.status_code == 200:
                     existing_allocs = existing_resp.json()
-                    print(f"[PRE-RECEIPT] Existing allocations for catalog {catalog_id}: {existing_allocs}")
-                    if existing_allocs and len(existing_allocs) > 0:
-                        # Use the existing quantity if ours seems wrong
-                        if quantity <= 0:
-                            for existing_alloc in existing_allocs:
-                                eq = existing_alloc.get('Quantity', 0)
-                                if eq > 0:
-                                    quantity = eq
-                                    print(f"[PRE-RECEIPT] Using existing quantity: {quantity}")
-                                    break
+                    print(f"[PRE-RECEIPT] Existing allocations for catalog {catalog_id}: {len(existing_allocs)} entries")
+                    for ea in existing_allocs:
+                        ea_assigned = ea.get('AssignedTo', {})
+                        ea_job = ea_assigned.get('Job', '?') if isinstance(ea_assigned, dict) else '?'
+                        ea_qty = ea.get('Quantity', {})
+                        ea_total = ea_qty.get('Total', 0) if isinstance(ea_qty, dict) else ea_qty
+                        print(f"  Existing: Job={ea_job}, Qty={ea_total}, AssignedTo.ID={ea_assigned.get('ID','?') if isinstance(ea_assigned, dict) else '?'}")
             except Exception as ae:
                 print(f"[PRE-RECEIPT] Error fetching existing allocations: {ae}")
             
-            # Build payload - Simpro API requires an ARRAY of allocations
-            # NOTE: Do NOT include AssignedTo - it's read-only and causes 422 errors
-            # Simpro preserves existing AssignedTo/CostCenter when only StorageDevice is changed
-            alloc_entry = {
-                'StorageDevice': int(storage_device_id),
-                'Quantity': int(quantity)
-            }
-            
-            payload = [alloc_entry]
+            # Build payload preserving existing job splits
+            if existing_allocs and len(existing_allocs) > 0:
+                # Preserve EVERY existing allocation entry — just update StorageDevice
+                payload = []
+                for existing_alloc in existing_allocs:
+                    ea_qty = existing_alloc.get('Quantity', {})
+                    ea_total = ea_qty.get('Total', 0) if isinstance(ea_qty, dict) else (ea_qty if isinstance(ea_qty, (int, float)) else 0)
+                    if ea_total <= 0:
+                        ea_total = int(quantity)
+                    
+                    entry = {
+                        'StorageDevice': int(storage_device_id),
+                        'Quantity': int(ea_total)
+                    }
+                    # CRITICAL: Preserve AssignedTo to maintain job/CC assignment
+                    ea_assigned = existing_alloc.get('AssignedTo', {})
+                    if isinstance(ea_assigned, dict) and ea_assigned.get('ID'):
+                        entry['AssignedTo'] = ea_assigned['ID']
+                        print(f"  Preserving AssignedTo={ea_assigned['ID']} (Job {ea_assigned.get('Job','?')})")
+                    payload.append(entry)
+                print(f"[PRE-RECEIPT] Preserved {len(payload)} allocation entries with job splits")
+            else:
+                # No existing allocations — simple single allocation
+                payload = [{
+                    'StorageDevice': int(storage_device_id),
+                    'Quantity': int(quantity)
+                }]
             
             print(f"[PRE-RECEIPT] PUT {allocation_url} with payload: {payload}")
             response = simpro_request('PUT', allocation_url, json=payload)
