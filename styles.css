@@ -3126,7 +3126,7 @@ footer {
     font-size: 18px;
     font-weight: 700;
     box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-    z-index: 900;
+    z-index: 9999;
     display: none;
     align-items: center;
     gap: 6px;
@@ -3139,3 +3139,48 @@ footer {
 }
 
 
+/* ===== COLLECTION STYLES ===== */
+.collection-select-all { padding: 8px 0; font-size: 14px; }
+.collection-select-all label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.collection-item { background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 12px; margin-bottom: 8px; display: flex; align-items: flex-start; gap: 10px; }
+.collection-item.collected { opacity: 0.5; background: #f0f0f0; }
+.collection-item .ci-check { margin-top: 4px; width: 20px; height: 20px; }
+.collection-item .ci-info { flex: 1; }
+.collection-item .ci-part { font-weight: 700; font-size: 14px; color: #333; }
+.collection-item .ci-desc { font-size: 13px; color: #666; margin: 2px 0; }
+.collection-item .ci-loc { font-size: 12px; color: #888; }
+.collection-item .ci-qty { text-align: right; min-width: 80px; }
+.collection-item .ci-qty-input { width: 60px; padding: 4px; text-align: center; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
+.collection-item .ci-qty-label { font-size: 11px; color: #888; display: block; margin-top: 2px; }
+.collection-item .ci-badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+.collection-item .ci-badge.available { background: #e8f5e9; color: #2e7d32; }
+.collection-item .ci-badge.partial { background: #fff3e0; color: #ef6c00; }
+.collection-item .ci-badge.done { background: #e0e0e0; color: #666; }
+.collection-history-item { background: #f5f5f5; border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
+.collection-history-item .ch-header { display: flex; justify-content: space-between; font-size: 13px; font-weight: 600; }
+.collection-history-item .ch-items { font-size: 12px; color: #555; margin-top: 4px; }
+.collection-history-item .ch-notes { font-size: 12px; color: #888; font-style: italic; margin-top: 4px; }
+
+/* Signature */
+.sig-wrapper { position: relative; margin-bottom: 12px; }
+.sig-wrapper canvas { width: 100%; height: 150px; border: 2px solid #333; border-radius: 8px; background: #fff; touch-action: none; }
+.sig-disclaimer { font-size: 12px; color: #666; font-style: italic; margin-bottom: 8px; }
+#sig-clear-btn { position: absolute; top: 8px; right: 8px; font-size: 11px; padding: 4px 10px; }
+
+/* Collection photos */
+.photo-row { display: flex; gap: 8px; margin-bottom: 10px; }
+.photo-btn { font-size: 12px !important; }
+.photo-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.photo-grid img { width: 70px; height: 70px; object-fit: cover; border-radius: 6px; border: 1px solid #ddd; }
+.photo-grid .photo-remove { position: absolute; top: -6px; right: -6px; background: #e53935; color: #fff; border: none; border-radius: 50%; width: 20px; height: 20px; font-size: 12px; cursor: pointer; }
+.photo-grid .photo-thumb { position: relative; display: inline-block; }
+
+/* Confirm screen items */
+.confirm-item { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee; font-size: 13px; }
+.confirm-item:last-child { border-bottom: none; }
+
+/* Success */
+.success-icon { text-align: center; font-size: 64px; margin: 20px 0; }
+.success-summary { background: #e8f5e9; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+.success-summary h3 { margin: 0 0 8px; color: #2e7d32; }
+.success-summary .ss-line { font-size: 13px; margin: 4px 0; }

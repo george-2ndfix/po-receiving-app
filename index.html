@@ -125,6 +125,15 @@
                     <div class="option-arrow">→</div>
                 </button>
                 
+                                <button class="home-option" id="option-collection">
+                    <div class="option-icon">📤</div>
+                    <div class="option-content">
+                        <div class="option-title">Customer Collection</div>
+                        <div class="option-desc">Pickup &amp; collection tracking</div>
+                    </div>
+                    <div class="option-arrow">→</div>
+                </button>
+
                 <button class="home-option" id="option-mystery">
                     <div class="option-icon">🔍</div>
                     <div class="option-content">
@@ -893,6 +902,94 @@
     </div>
 
     <!-- Mystery Box Search Screen -->
+    <!-- ===== COLLECTION SCREENS ===== -->
+    <div id="screen-collection" class="screen">
+        <div class="screen-header">
+            <button class="back-btn" onclick="showScreen('home')">←</button>
+            <h2>📤 Customer Collection</h2>
+        </div>
+        <div class="screen-body">
+            <div class="input-group">
+                <label for="collection-job-input">Job Number</label>
+                <input type="text" id="collection-job-input" placeholder="Enter job number" inputmode="numeric">
+            </div>
+            <button class="btn btn-primary btn-block" id="collection-lookup-btn">🔍 Look Up Job</button>
+            <div id="collection-status" class="status-message" style="display:none"></div>
+        </div>
+    </div>
+
+    <div id="screen-collection-details" class="screen">
+        <div class="screen-header">
+            <button class="back-btn" onclick="showScreen('collection')">←</button>
+            <h2>📤 Collection Details</h2>
+        </div>
+        <div class="screen-body">
+            <div id="collection-customer-card" class="info-card"></div>
+            <h3 class="section-title">📦 Materials for Collection</h3>
+            <div class="collection-select-all">
+                <label><input type="checkbox" id="collection-select-all-cb"> Select All Available</label>
+            </div>
+            <div id="collection-materials-list"></div>
+            <div id="collection-history-section" style="display:none">
+                <h3 class="section-title">📜 Previous Collections</h3>
+                <div id="collection-history-list"></div>
+            </div>
+            <button class="btn btn-primary btn-block" id="collection-next-btn" disabled>✅ Collect Selected Items →</button>
+        </div>
+    </div>
+
+    <div id="screen-collection-confirm" class="screen">
+        <div class="screen-header">
+            <button class="back-btn" onclick="showScreen('collection-details')">←</button>
+            <h2>✍️ Confirm &amp; Sign</h2>
+        </div>
+        <div class="screen-body">
+            <h3 class="section-title">Items Being Collected</h3>
+            <div id="collection-confirm-items"></div>
+            <div class="input-group">
+                <label for="collection-person">Person Collecting *</label>
+                <input type="text" id="collection-person" placeholder="Customer / driver name" required>
+            </div>
+            <div class="input-group">
+                <label for="collection-vehicle">Vehicle Rego (optional)</label>
+                <input type="text" id="collection-vehicle" placeholder="e.g. ABC 123" style="text-transform:uppercase">
+            </div>
+            <div class="input-group">
+                <label for="collection-notes">Notes (optional)</label>
+                <textarea id="collection-notes" rows="2" placeholder="Any notes about this collection"></textarea>
+            </div>
+            <h3 class="section-title">✍️ Customer Signature</h3>
+            <p class="sig-disclaimer">I confirm I have received the listed items in good condition.</p>
+            <div class="sig-wrapper">
+                <canvas id="sig-canvas"></canvas>
+                <button class="btn btn-sm btn-outline" id="sig-clear-btn">Clear</button>
+            </div>
+            <h3 class="section-title">📷 Photos (optional)</h3>
+            <div class="photo-row">
+                <label class="btn btn-sm btn-outline photo-btn">📷 Take Photo
+                    <input type="file" id="collection-photo-input" accept="image/*" capture="environment" multiple hidden>
+                </label>
+                <label class="btn btn-sm btn-outline photo-btn">🖼️ Choose Photo
+                    <input type="file" id="collection-photo-library" accept="image/*" multiple hidden>
+                </label>
+            </div>
+            <div id="collection-photo-previews" class="photo-grid"></div>
+            <button class="btn btn-primary btn-block" id="collection-complete-btn" disabled>✅ Complete Collection</button>
+        </div>
+    </div>
+
+    <div id="screen-collection-success" class="screen">
+        <div class="screen-header">
+            <h2>✅ Collection Complete</h2>
+        </div>
+        <div class="screen-body">
+            <div class="success-icon">🎉</div>
+            <div id="collection-success-summary"></div>
+            <button class="btn btn-primary btn-block" onclick="showScreen('home')">🏠 Home</button>
+            <button class="btn btn-block btn-outline" onclick="showScreen('collection')">📤 New Collection</button>
+        </div>
+    </div>
+
     <div id="screen-mystery" class="screen">
         <header>
             <button class="back-btn" onclick="app.showHomeScreen()">← Back</button>
@@ -974,6 +1071,7 @@
                         <li><a href="#sop-labels">Label Printing</a></li>
                         <li><a href="#sop-allocatefrom">Allocate from Stock</a></li>
                         <li><a href="#sop-relocate">Relocate Job Materials</a></li>
+                        <li><a href="#sop-collection">Customer Collection</a></li>
                         <li><a href="#sop-jobintel">Job Intel</a></li>
                         <li><a href="#sop-faults">Fault Reporting</a></li>
                         <li><a href="#sop-orders">Orders Email</a></li>
@@ -1149,8 +1247,34 @@
 
                 <hr>
 
+
+                <hr>
+
+                <section id="sop-collection">
+                    <h3>10. Customer Collection</h3>
+                    <p>Track customer pickups with signature and photo evidence.</p>
+                    <ol>
+                        <li>Tap <strong>Customer Collection</strong> on home screen</li>
+                        <li>Enter the <strong>job number</strong> and tap <strong>Look Up</strong></li>
+                        <li>Review customer info and materials &mdash; tick items being collected</li>
+                        <li>Adjust quantities if partial collection</li>
+                        <li>Tap <strong>Collect Selected Items</strong></li>
+                        <li>Enter collector&rsquo;s name and optional vehicle rego</li>
+                        <li>Customer signs on screen</li>
+                        <li>Optionally take photos of loaded goods</li>
+                        <li>Tap <strong>Complete Collection</strong></li>
+                    </ol>
+                    <p><strong>What happens automatically:</strong></p>
+                    <ul>
+                        <li>&#10004; Collection saved with full audit trail</li>
+                        <li>&#10004; Signature uploaded to Simpro job</li>
+                        <li>&#10004; Confirmation email sent to customer</li>
+                        <li>&#10004; Partial collections tracked &mdash; remaining items shown next visit</li>
+                    </ul>
+                </section>
+
                 <section id="sop-jobintel">
-                    <h3>10. Job Intel</h3>
+                    <h3>11. Job Intel</h3>
                     <p>Quickly look up job info without opening Simpro.</p>
                     <ol>
                         <li>Tap <strong>Job Intel</strong> or enter a job number</li>
@@ -1162,7 +1286,7 @@
                 <hr>
 
                 <section id="sop-faults">
-                    <h3>11. Fault Reporting</h3>
+                    <h3>12. Fault Reporting</h3>
                     <ol>
                         <li>Tap <strong>Report Fault</strong> from the menu</li>
                         <li>Name and email auto-filled from your login</li>
@@ -1176,7 +1300,7 @@
                 <hr>
 
                 <section id="sop-orders">
-                    <h3>12. Orders Email (orders@2ndfix.com.au)</h3>
+                    <h3>13. Orders Email (orders@2ndfix.com.au)</h3>
                     <p>Shared mailbox for all PO/supplier communications. All damage reports and back order notifications go from this address.</p>
                     <p><strong>Access in Outlook:</strong> Profile icon → Open another mailbox → type <code>orders@2ndfix.com.au</code></p>
                     <ul>
@@ -1190,7 +1314,7 @@
                 <hr>
 
                 <section id="sop-cache">
-                    <h3>13. Clearing Your Cache</h3>
+                    <h3>14. Clearing Your Cache</h3>
                     <h4>iPhone (Safari)</h4>
                     <p>Settings → Safari → Clear History and Website Data → Confirm → Reopen app</p>
                     <h4>iPhone (Chrome)</h4>
@@ -1204,7 +1328,7 @@
                 <hr>
 
                 <section id="sop-troubleshooting">
-                    <h3>14. Troubleshooting</h3>
+                    <h3>15. Troubleshooting</h3>
                     <table>
                         <thead><tr><th>Problem</th><th>Solution</th></tr></thead>
                         <tbody>
@@ -1223,7 +1347,7 @@
                 <hr>
 
                 <section id="sop-quickref">
-                    <h3>15. Quick Reference</h3>
+                    <h3>16. Quick Reference</h3>
                     <table>
                         <thead><tr><th>Item</th><th>Detail</th></tr></thead>
                         <tbody>

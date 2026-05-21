@@ -64,6 +64,7 @@ const app = {
         document.getElementById('option-picklist')?.addEventListener('click', () => this.showPicklist());
         document.getElementById('option-relocate')?.addEventListener('click', () => this.showScreen('relocate-source'));
         document.getElementById('option-mystery')?.addEventListener('click', () => this.showScreen('mystery'));
+        document.getElementById('option-collection')?.addEventListener('click', () => this.showScreen('collection'));
         document.getElementById('mystery-search')?.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') this.searchMysteryBox();
         });
@@ -2494,3 +2495,281 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
 
 // Initialize on DOM ready
 document.addEventListener('DOMContentLoaded', () => app.init());
+
+
+// ============================================================
+// CUSTOMER COLLECTION MODULE
+// ============================================================
+(function() {
+    const cState = {
+        jobNumber: null, jobId: null, jobName: '',
+        customer: {}, materials: [], history: [],
+        selectedItems: [], photos: [], signatureData: null
+    };
+    let sigCtx = null, sigDrawing = false, sigHasData = false;
+
+    // --- LOOKUP ---
+    document.getElementById('collection-lookup-btn')?.addEventListener('click', collectionLookup);
+    document.getElementById('collection-job-input')?.addEventListener('keydown', e => {
+        if (e.key === 'Enter') collectionLookup();
+    });
+
+    async function collectionLookup() {
+        const input = document.getElementById('collection-job-input');
+        const status = document.getElementById('collection-status');
+        const jobNum = input.value.trim();
+        if (!jobNum) { input.focus(); return; }
+
+        status.style.display = 'block';
+        status.className = 'status-message info';
+        status.textContent = 'Looking up job...';
+
+        try {
+            const resp = await fetch(`/api/collection/job-lookup?job=${encodeURIComponent(jobNum)}`);
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || 'Lookup failed');
+
+            cState.jobNumber = jobNum;
+            cState.jobId = data.job.id;
+            cState.jobName = data.job.name;
+            cState.customer = data.customer;
+            cState.materials = data.materials;
+            cState.history = data.history;
+            status.style.display = 'none';
+            renderCollectionDetails();
+            if (window.app) app.showScreen('collection-details');
+        } catch(e) {
+            status.className = 'status-message error';
+            status.textContent = e.message;
+        }
+    }
+
+    function escH(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    function renderCollectionDetails() {
+        const c = cState.customer;
+        document.getElementById('collection-customer-card').innerHTML = `
+            <div style="font-weight:700;font-size:16px;margin-bottom:4px">${escH(cState.jobName)}</div>
+            <div style="font-size:14px;color:#333">${escH(c.name || 'Unknown Customer')}</div>
+            ${c.phone ? '<div style="font-size:13px;color:#666">Ph: ' + escH(c.phone) + '</div>' : ''}
+            ${c.email ? '<div style="font-size:13px;color:#666">Email: ' + escH(c.email) + '</div>' : ''}
+            ${c.address ? '<div style="font-size:13px;color:#888">' + escH(c.address) + '</div>' : ''}
+            <div style="font-size:12px;color:#888;margin-top:4px">Job ${escH(cState.jobNumber)}</div>
+        `;
+
+        const list = document.getElementById('collection-materials-list');
+        if (!cState.materials.length) {
+            list.innerHTML = '<p style="color:#888;text-align:center">No materials found on this job</p>';
+            document.getElementById('collection-next-btn').disabled = true;
+            return;
+        }
+
+        list.innerHTML = cState.materials.map((m, i) => {
+            const remaining = m.remaining != null ? m.remaining : m.assigned;
+            const collected = m.collected || 0;
+            const fullyDone = remaining <= 0;
+            const badgeCls = fullyDone ? 'done' : collected > 0 ? 'partial' : 'available';
+            const badgeTxt = fullyDone ? 'Collected' : collected > 0 ? collected + ' collected' : 'Available';
+            return '<div class="collection-item ' + (fullyDone ? 'collected' : '') + '">'
+                + '<input type="checkbox" class="ci-check" data-idx="' + i + '"' + (fullyDone ? ' disabled' : '') + '>'
+                + '<div class="ci-info">'
+                + '<div class="ci-part">' + escH(m.partCode) + '</div>'
+                + '<div class="ci-desc">' + escH(m.description) + '</div>'
+                + '<div class="ci-loc">' + escH(m.storage || 'Unknown') + (m.costCentreName ? ' | ' + escH(m.costCentreName) : '') + '</div>'
+                + '<span class="ci-badge ' + badgeCls + '">' + badgeTxt + '</span>'
+                + '</div>'
+                + '<div class="ci-qty">'
+                + '<input type="number" class="ci-qty-input" data-idx="' + i + '" value="' + remaining + '" min="1" max="' + remaining + '"' + (fullyDone ? ' disabled' : '') + '>'
+                + '<span class="ci-qty-label">of ' + m.assigned + '</span>'
+                + '</div></div>';
+        }).join('');
+
+        list.querySelectorAll('.ci-check').forEach(cb => cb.addEventListener('change', updateSel));
+
+        const selAll = document.getElementById('collection-select-all-cb');
+        if (selAll) {
+            selAll.checked = false;
+            selAll.onchange = function() {
+                list.querySelectorAll('.ci-check:not(:disabled)').forEach(cb => { cb.checked = this.checked; });
+                updateSel();
+            };
+        }
+
+        // History
+        const histSec = document.getElementById('collection-history-section');
+        const histList = document.getElementById('collection-history-list');
+        if (cState.history.length) {
+            histSec.style.display = 'block';
+            histList.innerHTML = cState.history.map(h => {
+                const d = h.date ? new Date(h.date) : null;
+                const ds = d ? d.toLocaleDateString('en-AU', {day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
+                const its = (h.items||[]).map(it => it.description + ' x' + it.quantity).join(', ');
+                return '<div class="collection-history-item">'
+                    + '<div class="ch-header"><span>' + escH(h.collectedBy) + '</span><span>' + ds + '</span></div>'
+                    + '<div class="ch-items">' + escH(its) + '</div>'
+                    + (h.notes ? '<div class="ch-notes">' + escH(h.notes) + '</div>' : '')
+                    + '<div style="font-size:11px;color:#aaa">Staff: ' + escH(h.staffName||'') + (h.vehicleRego ? ' | Rego: ' + escH(h.vehicleRego) : '') + '</div>'
+                    + '</div>';
+            }).join('');
+        } else {
+            histSec.style.display = 'none';
+        }
+        updateSel();
+    }
+
+    function updateSel() {
+        const checks = document.querySelectorAll('#collection-materials-list .ci-check:checked');
+        const btn = document.getElementById('collection-next-btn');
+        btn.disabled = checks.length === 0;
+        btn.textContent = checks.length ? 'Collect ' + checks.length + ' Item' + (checks.length > 1 ? 's' : '') + ' \u2192' : 'Collect Selected Items \u2192';
+    }
+
+    // --- NEXT: CONFIRM SCREEN ---
+    document.getElementById('collection-next-btn')?.addEventListener('click', () => {
+        const checks = document.querySelectorAll('#collection-materials-list .ci-check:checked');
+        cState.selectedItems = [];
+        checks.forEach(cb => {
+            const idx = parseInt(cb.dataset.idx);
+            const m = cState.materials[idx];
+            const qtyInput = document.querySelector('.ci-qty-input[data-idx="' + idx + '"]');
+            const qty = parseInt(qtyInput.value) || 0;
+            if (qty > 0) cState.selectedItems.push(Object.assign({}, m, { collectQty: qty }));
+        });
+        if (!cState.selectedItems.length) return;
+        renderConfirm();
+        if (window.app) app.showScreen('collection-confirm');
+        setTimeout(initSigCanvas, 100);
+    });
+
+    function renderConfirm() {
+        document.getElementById('collection-confirm-items').innerHTML = cState.selectedItems.map(it =>
+            '<div class="confirm-item"><span>' + escH(it.partCode) + ' \u2014 ' + escH(it.description) + '</span><strong>x' + it.collectQty + '</strong></div>'
+        ).join('');
+        cState.photos = [];
+        document.getElementById('collection-photo-previews').innerHTML = '';
+        document.getElementById('collection-person').value = '';
+        document.getElementById('collection-vehicle').value = '';
+        document.getElementById('collection-notes').value = '';
+        validateComplete();
+    }
+
+    // --- SIGNATURE ---
+    function initSigCanvas() {
+        const canvas = document.getElementById('sig-canvas');
+        if (!canvas) return;
+        const rect = canvas.parentElement.getBoundingClientRect();
+        canvas.width = Math.floor(rect.width - 4) * 2;
+        canvas.height = 300;
+        canvas.style.height = '150px';
+        sigCtx = canvas.getContext('2d');
+        sigCtx.strokeStyle = '#000';
+        sigCtx.lineWidth = 2;
+        sigCtx.lineCap = 'round';
+        sigCtx.lineJoin = 'round';
+        sigHasData = false;
+        sigDrawing = false;
+        sigCtx.clearRect(0, 0, canvas.width, canvas.height);
+
+        function gp(e) {
+            const r = canvas.getBoundingClientRect();
+            const sx = canvas.width / r.width, sy = canvas.height / r.height;
+            const t = e.touches ? e.touches[0] : e;
+            return { x: (t.clientX - r.left) * sx, y: (t.clientY - r.top) * sy };
+        }
+        function sd(e) { e.preventDefault(); sigDrawing = true; const p = gp(e); sigCtx.beginPath(); sigCtx.moveTo(p.x, p.y); }
+        function md(e) { if (!sigDrawing) return; e.preventDefault(); const p = gp(e); sigCtx.lineTo(p.x, p.y); sigCtx.stroke(); sigHasData = true; validateComplete(); }
+        function ed() { sigDrawing = false; }
+
+        canvas.onmousedown = sd; canvas.onmousemove = md; canvas.onmouseup = ed; canvas.onmouseleave = ed;
+        canvas.ontouchstart = sd; canvas.ontouchmove = md; canvas.ontouchend = ed;
+
+        document.getElementById('sig-clear-btn').onclick = () => {
+            sigCtx.clearRect(0, 0, canvas.width, canvas.height);
+            sigHasData = false; validateComplete();
+        };
+    }
+
+    // --- PHOTOS ---
+    function handlePhotos(e) {
+        Array.from(e.target.files).forEach(file => {
+            const reader = new FileReader();
+            reader.onload = ev => { cState.photos.push(ev.target.result); renderThumbs(); };
+            reader.readAsDataURL(file);
+        });
+        e.target.value = '';
+    }
+    document.getElementById('collection-photo-input')?.addEventListener('change', handlePhotos);
+    document.getElementById('collection-photo-library')?.addEventListener('change', handlePhotos);
+
+    function renderThumbs() {
+        const el = document.getElementById('collection-photo-previews');
+        el.innerHTML = cState.photos.map((p, i) =>
+            '<div class="photo-thumb"><img src="' + p + '"><button class="photo-remove" data-idx="' + i + '">&times;</button></div>'
+        ).join('');
+        el.querySelectorAll('.photo-remove').forEach(btn => {
+            btn.onclick = () => { cState.photos.splice(parseInt(btn.dataset.idx), 1); renderThumbs(); };
+        });
+    }
+
+    // --- VALIDATE ---
+    function validateComplete() {
+        const name = document.getElementById('collection-person')?.value.trim();
+        document.getElementById('collection-complete-btn').disabled = !(name && sigHasData);
+    }
+    document.getElementById('collection-person')?.addEventListener('input', validateComplete);
+
+    // --- COMPLETE ---
+    document.getElementById('collection-complete-btn')?.addEventListener('click', doComplete);
+
+    async function doComplete() {
+        const btn = document.getElementById('collection-complete-btn');
+        btn.disabled = true; btn.textContent = 'Saving...';
+
+        const canvas = document.getElementById('sig-canvas');
+        cState.signatureData = canvas.toDataURL('image/png');
+
+        const payload = {
+            jobNumber: cState.jobNumber, jobId: cState.jobId, jobName: cState.jobName,
+            customerName: cState.customer.name || '',
+            customerEmail: cState.customer.email || '',
+            customerPhone: cState.customer.phone || '',
+            siteAddress: cState.customer.address || '',
+            collectedBy: document.getElementById('collection-person').value.trim(),
+            vehicleRego: document.getElementById('collection-vehicle').value.trim(),
+            notes: document.getElementById('collection-notes').value.trim(),
+            signatureData: cState.signatureData,
+            items: cState.selectedItems.map(it => ({
+                catalogId: it.catalogId, partCode: it.partCode,
+                description: it.description, quantity: it.collectQty,
+                storage: it.storage, storageId: it.storageId
+            })),
+            photos: cState.photos
+        };
+
+        try {
+            const resp = await fetch('/api/collection/complete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || 'Failed');
+
+            document.getElementById('collection-success-summary').innerHTML =
+                '<div class="success-summary">'
+                + '<h3>Job ' + escH(payload.jobNumber) + ' \u2014 ' + escH(payload.jobName) + '</h3>'
+                + '<div class="ss-line"><strong>Collected by:</strong> ' + escH(payload.collectedBy) + '</div>'
+                + (payload.vehicleRego ? '<div class="ss-line"><strong>Vehicle:</strong> ' + escH(payload.vehicleRego) + '</div>' : '')
+                + '<div class="ss-line"><strong>Items:</strong></div>'
+                + payload.items.map(it => '<div class="ss-line">\u2022 ' + escH(it.description) + ' \u00d7 ' + it.quantity + '</div>').join('')
+                + (payload.customerEmail ? '<div class="ss-line" style="margin-top:8px">Confirmation email sent to ' + escH(payload.customerEmail) + '</div>' : '')
+                + '<div class="ss-line" style="margin-top:8px;color:#888">Collection #' + data.collectionId + '</div>'
+                + '</div>';
+            if (window.app) app.showScreen('collection-success');
+        } catch(e) {
+            alert('Error: ' + e.message);
+            btn.disabled = false;
+            btn.textContent = 'Complete Collection';
+        }
+    }
+})();
