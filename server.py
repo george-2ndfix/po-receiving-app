@@ -588,48 +588,48 @@ def init_db():
                 created_at TIMESTAMP DEFAULT NOW()
             )
         ''')
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS collections (
-                    id SERIAL PRIMARY KEY,
-                    job_number VARCHAR(50) NOT NULL,
-                    job_id INTEGER,
-                    job_name VARCHAR(255),
-                    customer_name VARCHAR(255),
-                    customer_email VARCHAR(255),
-                    customer_phone VARCHAR(100),
-                    site_address TEXT,
-                    collected_by VARCHAR(255) NOT NULL,
-                    staff_id INTEGER NOT NULL,
-                    staff_name VARCHAR(100),
-                    signature_data TEXT,
-                    notes TEXT,
-                    vehicle_rego VARCHAR(50),
-                    status VARCHAR(50) DEFAULT 'completed',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS collection_items (
-                    id SERIAL PRIMARY KEY,
-                    collection_id INTEGER NOT NULL REFERENCES collections(id),
-                    catalog_id INTEGER,
-                    part_code VARCHAR(100),
-                    description TEXT,
-                    quantity INTEGER NOT NULL,
-                    storage_location VARCHAR(255),
-                    storage_id INTEGER,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS collection_photos (
-                    id SERIAL PRIMARY KEY,
-                    collection_id INTEGER NOT NULL REFERENCES collections(id),
-                    photo_data TEXT NOT NULL,
-                    caption VARCHAR(255),
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS collections (
+                id SERIAL PRIMARY KEY,
+                job_number VARCHAR(50) NOT NULL,
+                job_id INTEGER,
+                job_name VARCHAR(255),
+                customer_name VARCHAR(255),
+                customer_email VARCHAR(255),
+                customer_phone VARCHAR(100),
+                site_address TEXT,
+                collected_by VARCHAR(255) NOT NULL,
+                staff_id INTEGER NOT NULL,
+                staff_name VARCHAR(100),
+                signature_data TEXT,
+                notes TEXT,
+                vehicle_rego VARCHAR(50),
+                status VARCHAR(50) DEFAULT 'completed',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS collection_items (
+                id SERIAL PRIMARY KEY,
+                collection_id INTEGER NOT NULL REFERENCES collections(id),
+                catalog_id INTEGER,
+                part_code VARCHAR(100),
+                description TEXT,
+                quantity INTEGER NOT NULL,
+                storage_location VARCHAR(255),
+                storage_id INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS collection_photos (
+                id SERIAL PRIMARY KEY,
+                collection_id INTEGER NOT NULL REFERENCES collections(id),
+                photo_data TEXT NOT NULL,
+                caption VARCHAR(255),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
 
         
         print("PostgreSQL tables initialized")
