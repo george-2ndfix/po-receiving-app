@@ -1735,6 +1735,196 @@ def get_po_details(po_number):
         print(f"Error getting PO: {e}")
         return jsonify({'error': str(e)}), 500
 
+
+# ============================================
+# Merged PO Detection & Auto-Correction
+# ============================================
+
+def get_po_merge_mapping(po_id):
+    """
+    Reads audit logs to detect merged POs and trace each item back to its original job/CC.
+    Returns: {catalog_id: {"job": "5600", "section": "31512", "cc": "31512", "original_po": "21227"}} 
+    or empty dict if not a merged PO.
+    """
+    import re
+    
+    # Step 1: Get audit logs for this PO
+    resp = simpro_request('GET', f'/companies/{COMPANY_ID}/logs/vendorOrders/?VendorOrderID={po_id}')
+    if resp.status_code != 200:
+        print(f"Merge check: Could not get logs for PO {po_id}: {resp.status_code}")
+        return {}
+    
+    logs = resp.json()
+    
+    # Step 2: Find "Merged in PO #XXXXX" entries
+    merged_po_numbers = []
+    for log in logs:
+        msg = log.get('Message', '')
+        match = re.search(r'Merged in PO #(\d+)', msg)
+        if match:
+            merged_po_numbers.append(match.group(1))
+    
+    if not merged_po_numbers:
+        print(f"Merge check: PO {po_id} is not a merged PO")
+        return {}
+    
+    print(f"Merge check: PO {po_id} has {len(merged_po_numbers)} merged POs: {merged_po_numbers}")
+    
+    # Step 3: Get the host PO's original job/CC from its "Created purchase order" log
+    host_job = None
+    host_cc = None
+    host_items = []
+    for log in logs:
+        msg = log.get('Message', '')
+        create_match = re.search(r'Created purchase order.*with job no\. (\d+)-(\d+)', msg)
+        if create_match:
+            host_job = create_match.group(1)
+            host_cc = create_match.group(2)
+        if 'Added Item:' in msg and log.get('CatalogID'):
+            # Items added before any merge are host PO items
+            host_items.append(log['CatalogID'])
+    
+    # Build mapping - start with empty
+    catalog_to_job = {}
+    
+    # Step 4: For each merged PO, get its logs to find its job/CC and items
+    for merged_po in merged_po_numbers:
+        m_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/logs/vendorOrders/?VendorOrderID={merged_po}')
+        if m_resp.status_code != 200:
+            print(f"  Could not get logs for merged PO {merged_po}: {m_resp.status_code}")
+            continue
+        
+        m_logs = m_resp.json()
+        m_job = None
+        m_cc = None
+        m_items = []
+        
+        for log in m_logs:
+            msg = log.get('Message', '')
+            create_match = re.search(r'Created purchase order.*with job no\. (\d+)-(\d+)', msg)
+            if create_match:
+                m_job = create_match.group(1)
+                m_cc = create_match.group(2)
+            if 'Added Item:' in msg and log.get('CatalogID'):
+                m_items.append(log['CatalogID'])
+        
+        if m_job and m_cc:
+            print(f"  Merged PO {merged_po}: Job {m_job}, CC {m_cc}, Items: {m_items}")
+            # Look up the section ID for this job
+            section_id = get_section_for_job(m_job, m_cc)
+            for cat_id in m_items:
+                catalog_to_job[cat_id] = {
+                    'job': m_job,
+                    'cc': m_cc,
+                    'section': section_id,
+                    'original_po': merged_po
+                }
+        else:
+            print(f"  Merged PO {merged_po}: Could not determine job/CC")
+    
+    print(f"Merge mapping complete: {len(catalog_to_job)} items mapped to non-host jobs")
+    return catalog_to_job
+
+
+def get_section_for_job(job_number, cc_id):
+    """Look up the section ID for a job's cost centre."""
+    resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/?ID={job_number}')
+    if resp.status_code == 200:
+        jobs = resp.json()
+        if jobs:
+            job_id = jobs[0]['ID']
+            sec_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/')
+            if sec_resp.status_code == 200:
+                sections = sec_resp.json()
+                for section in sections:
+                    sec_id = section['ID']
+                    cc_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{sec_id}/costCenters/')
+                    if cc_resp.status_code == 200:
+                        for cc in cc_resp.json():
+                            if str(cc['ID']) == str(cc_id):
+                                return str(sec_id)
+    return None
+
+
+def correct_merged_po_allocations(po_id, host_job, host_section, host_cc, storage_device_id, allocated_items):
+    """
+    After receipt, check if PO is merged and move items to their correct job CCs.
+    allocated_items: list of {catalog_id, quantity} that were just allocated.
+    Returns list of corrections made.
+    """
+    merge_map = get_po_merge_mapping(po_id)
+    if not merge_map:
+        return []  # Not a merged PO, nothing to do
+    
+    corrections = []
+    
+    for item in allocated_items:
+        catalog_id = item.get('catalog_id')
+        qty = item.get('quantity', 1)
+        
+        if catalog_id not in merge_map:
+            continue  # This item belongs to the host PO's job - no move needed
+        
+        target = merge_map[catalog_id]
+        target_job = target['job']
+        target_cc = target['cc']
+        target_section = target.get('section')
+        
+        if not target_section:
+            print(f"  SKIP catalog {catalog_id}: could not find section for Job {target_job} CC {target_cc}")
+            corrections.append({'catalog_id': catalog_id, 'status': 'error', 'reason': 'section_not_found'})
+            continue
+        
+        print(f"  MOVING catalog {catalog_id} (qty {qty}): Job {host_job} CC {host_cc} -> Job {target_job} CC {target_cc}")
+        
+        try:
+            # Step 1: Un-assign from host job CC
+            unassign_url = f'/companies/{COMPANY_ID}/jobs/{host_job}/sections/{host_section}/costCenters/{host_cc}/stock/{catalog_id}/'
+            unassign_resp = simpro_request('PATCH', unassign_url, json={
+                "AssignedBreakdown": [{"Storage": int(storage_device_id), "Quantity": 0}]
+            })
+            print(f"    Step 1 un-assign: {unassign_resp.status_code}")
+            
+            if unassign_resp.status_code not in (200, 204):
+                print(f"    Un-assign failed: {unassign_resp.text[:200]}")
+                corrections.append({'catalog_id': catalog_id, 'status': 'error', 'reason': f'unassign_failed_{unassign_resp.status_code}'})
+                continue
+            
+            # Step 2: Re-assign to correct job CC (no transfer needed - same storage device)
+            reassign_url = f'/companies/{COMPANY_ID}/jobs/{target_job}/sections/{target_section}/costCenters/{target_cc}/stock/'
+            reassign_resp = simpro_request('POST', reassign_url, json={
+                "Catalog": catalog_id,
+                "AssignedBreakdown": [{"Storage": int(storage_device_id), "Quantity": qty}]
+            })
+            print(f"    Step 2 re-assign to Job {target_job}: {reassign_resp.status_code}")
+            
+            if reassign_resp.status_code in (200, 201):
+                print(f"    OK: catalog {catalog_id} moved to Job {target_job}")
+                corrections.append({
+                    'catalog_id': catalog_id, 
+                    'status': 'success',
+                    'from_job': host_job,
+                    'to_job': target_job,
+                    'to_cc': target_cc
+                })
+            else:
+                print(f"    Re-assign failed: {reassign_resp.text[:200]}")
+                # Rollback: re-assign back to host
+                rollback_url = f'/companies/{COMPANY_ID}/jobs/{host_job}/sections/{host_section}/costCenters/{host_cc}/stock/'
+                simpro_request('POST', rollback_url, json={
+                    "Catalog": catalog_id,
+                    "AssignedBreakdown": [{"Storage": int(storage_device_id), "Quantity": qty}]
+                })
+                corrections.append({'catalog_id': catalog_id, 'status': 'error', 'reason': f'reassign_failed_{reassign_resp.status_code}'})
+        
+        except Exception as e:
+            print(f"    Error moving catalog {catalog_id}: {e}")
+            corrections.append({'catalog_id': catalog_id, 'status': 'error', 'reason': str(e)})
+    
+    return corrections
+
+
+
 @app.route('/api/allocate', methods=['POST'])
 @login_required
 def allocate_items():
@@ -2314,6 +2504,70 @@ def allocate_items():
         all_verified = all(r.get('verified', False) for r in results if r.get('success'))
         
         # ============================================
+        # Merged PO auto-correction
+        # If this PO absorbed other POs, move items to their correct job CCs
+        # ============================================
+        merge_corrections = []
+        if success_count > 0:
+            try:
+                # Build list of successfully allocated items
+                allocated_items_for_merge = []
+                for r in results:
+                    if r.get('success') and r.get('catalogId'):
+                        allocated_items_for_merge.append({
+                            'catalog_id': r['catalogId'],
+                            'quantity': r.get('quantity', 1)
+                        })
+                
+                if allocated_items_for_merge:
+                    # Get host job info from PO
+                    po_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/')
+                    if po_resp.status_code == 200:
+                        po_data_full = po_resp.json()
+                        host_job_id = None
+                        host_section_id = None
+                        host_cc_id = None
+                        
+                        # Extract job/section/CC from PO data
+                        job_info = po_data_full.get('Job', {})
+                        if job_info:
+                            host_job_id = str(job_info.get('ID', ''))
+                        
+                        if host_job_id:
+                            # Look up section and CC
+                            sec_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{host_job_id}/sections/')
+                            if sec_resp.status_code == 200:
+                                for sec in sec_resp.json():
+                                    sec_id = sec['ID']
+                                    cc_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/jobs/{host_job_id}/sections/{sec_id}/costCenters/')
+                                    if cc_resp.status_code == 200:
+                                        for cc in cc_resp.json():
+                                            host_section_id = str(sec_id)
+                                            host_cc_id = str(cc['ID'])
+                                            break
+                                    if host_cc_id:
+                                        break
+                        
+                        if host_job_id and host_section_id and host_cc_id:
+                            print(f"=== MERGE CHECK: PO {po_id}, Host Job {host_job_id}, Section {host_section_id}, CC {host_cc_id} ===")
+                            merge_corrections = correct_merged_po_allocations(
+                                po_id, host_job_id, host_section_id, host_cc_id,
+                                storage_device_id, allocated_items_for_merge
+                            )
+                            if merge_corrections:
+                                moved = [c for c in merge_corrections if c['status'] == 'success']
+                                failed = [c for c in merge_corrections if c['status'] == 'error']
+                                print(f"=== MERGE CORRECTIONS: {len(moved)} moved, {len(failed)} failed ===")
+                        else:
+                            print(f"Merge check: Could not determine host job info for PO {po_id}")
+                    else:
+                        print(f"Merge check: Could not fetch PO {po_id}: {po_resp.status_code}")
+            except Exception as merge_err:
+                print(f"Merge correction error (non-fatal): {merge_err}")
+                import traceback
+                traceback.print_exc()
+        
+        # ============================================
         # Set PO status based on whether ALL items are now received
         # 239 = Goods Received (all items done) — triggers Kelly's KPro to receipt & archive
         # 109 = Not Completely Supplied (partial delivery) — keeps PO open for remaining items
@@ -2392,6 +2646,7 @@ def allocate_items():
             'goodsReceivedSet': goods_received_set,
             'preReceiptCount': len(pre_receipt_items),
             'stockTransferCount': len(post_receipt_items),
+            'mergeCorrections': merge_corrections,
             'error': error_summary
         })
         
