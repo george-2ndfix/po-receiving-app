@@ -904,27 +904,32 @@
     <!-- Mystery Box Search Screen -->
     <!-- ===== COLLECTION SCREENS ===== -->
     <div id="screen-collection" class="screen">
-        <div class="screen-header">
-            <button class="back-btn" onclick="showScreen('home')">←</button>
-            <h2>📤 Customer Collection</h2>
-        </div>
-        <div class="screen-body">
-            <div class="input-group">
-                <label for="collection-job-input">Job Number</label>
-                <input type="text" id="collection-job-input" placeholder="Enter job number" inputmode="numeric">
+        <header>
+            <button class="back-btn" data-screen="home">← Back</button>
+            <h1>📤 Customer Collection</h1>
+        </header>
+        
+        <main>
+            <div class="po-input-group">
+                <input type="text" id="collection-job-input" placeholder="Job number, customer name, or phone..." class="po-input">
+                <button class="btn btn-primary" id="collection-lookup-btn">Look Up</button>
             </div>
-            <button class="btn btn-primary btn-block" id="collection-lookup-btn">🔍 Look Up Job</button>
-            <div id="collection-status" class="status-message" style="display:none"></div>
-        </div>
+            
+            <div id="collection-status" class="status-message hidden"></div>
+            
+            <div id="collection-search-results" class="items-list hidden">
+            </div>
+        </main>
     </div>
 
     <div id="screen-collection-details" class="screen">
-        <div class="screen-header">
-            <button class="back-btn" onclick="showScreen('collection')">←</button>
-            <h2>📤 Collection Details</h2>
-        </div>
-        <div class="screen-body">
-            <div id="collection-customer-card" class="info-card"></div>
+        <header>
+            <button class="back-btn" data-screen="collection">← Back</button>
+            <h1>📤 Collection Details</h1>
+        </header>
+        
+        <main>
+            <div id="collection-customer-card" class="po-info"></div>
             <h3 class="section-title">📦 Materials for Collection</h3>
             <div class="collection-select-all">
                 <label><input type="checkbox" id="collection-select-all-cb"> Select All Available</label>
@@ -934,16 +939,20 @@
                 <h3 class="section-title">📜 Previous Collections</h3>
                 <div id="collection-history-list"></div>
             </div>
-            <button class="btn btn-primary btn-block" id="collection-next-btn" disabled>✅ Collect Selected Items →</button>
-        </div>
+        </main>
+        
+        <footer>
+            <button class="btn btn-primary btn-block" id="collection-next-btn" disabled>✅ Collect Selected Items</button>
+        </footer>
     </div>
 
     <div id="screen-collection-confirm" class="screen">
-        <div class="screen-header">
-            <button class="back-btn" onclick="showScreen('collection-details')">←</button>
-            <h2>✍️ Confirm &amp; Sign</h2>
-        </div>
-        <div class="screen-body">
+        <header>
+            <button class="back-btn" data-screen="collection-details">← Back</button>
+            <h1>✍️ Confirm &amp; Sign</h1>
+        </header>
+        
+        <main>
             <h3 class="section-title">Items Being Collected</h3>
             <div id="collection-confirm-items"></div>
             <div class="input-group">
@@ -967,27 +976,34 @@
             <h3 class="section-title">📷 Photos (optional)</h3>
             <div class="photo-row">
                 <label class="btn btn-sm btn-outline photo-btn">📷 Take Photo
-                    <input type="file" id="collection-photo-input" accept="image/*" capture="environment" multiple hidden>
+                    <input type="file" id="collection-photo-input" accept="image/*" multiple hidden>
                 </label>
                 <label class="btn btn-sm btn-outline photo-btn">🖼️ Choose Photo
                     <input type="file" id="collection-photo-library" accept="image/*" multiple hidden>
                 </label>
             </div>
             <div id="collection-photo-previews" class="photo-grid"></div>
+        </main>
+        
+        <footer>
             <button class="btn btn-primary btn-block" id="collection-complete-btn" disabled>✅ Complete Collection</button>
-        </div>
+        </footer>
     </div>
 
     <div id="screen-collection-success" class="screen">
-        <div class="screen-header">
-            <h2>✅ Collection Complete</h2>
-        </div>
-        <div class="screen-body">
+        <header>
+            <h1>✅ Collection Complete</h1>
+        </header>
+        
+        <main>
             <div class="success-icon">🎉</div>
             <div id="collection-success-summary"></div>
+        </main>
+        
+        <footer>
             <button class="btn btn-primary btn-block" onclick="showScreen('home')">🏠 Home</button>
             <button class="btn btn-block btn-outline" onclick="showScreen('collection')">📤 New Collection</button>
-        </div>
+        </footer>
     </div>
 
     <div id="screen-mystery" class="screen">

@@ -285,6 +285,7 @@ def _lookup_stock_for_items(catalog_ids):
 
 
 # ============ END STOCK CACHE ============
+import re
 from datetime import datetime, timedelta
 from functools import wraps
 from flask import Flask, request, jsonify, send_from_directory, send_file, session
@@ -4170,10 +4171,10 @@ else:
 @app.route('/api/collection/job-lookup', methods=['GET'])
 @login_required
 def collection_job_lookup():
-    """Look up job for collection - returns customer info, materials, history"""
-    job_input = request.args.get('job', '').strip()
-    if not job_input:
-        return jsonify({'error': 'Job number required'}), 400
+    """Look up job for collection - search by job number, customer name, or phone"""
+    query = request.args.get('q', request.args.get('job', '')).strip()
+    if not query:
+        return jsonify({'error': 'Search term required'}), 400
 
     try:
         token = get_simpro_token()
@@ -4183,17 +4184,63 @@ def collection_job_lookup():
         base_url = 'https://2ndfix.simprosuite.com/api/v1.0'
         headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
 
-        # Use list endpoint with ID filter - direct lookup returns 404 on this Simpro instance
         job_data = None
-        if job_input.isdigit():
-            resp = requests.get(f'{base_url}/companies/3/jobs/?ID={job_input}&columns=ID,Name,Customer,Site', headers=headers)
+        is_job_number = query.isdigit()
+        is_phone = bool(re.match(r'^[\d\s\+\-\(\)]{6,}$', query))
+
+        if is_job_number:
+            # Direct job number lookup
+            resp = requests.get(f'{base_url}/companies/3/jobs/?ID={query}&columns=ID,Name,Customer,Site', headers=headers)
             if resp.status_code == 200:
                 job_list = resp.json()
                 if isinstance(job_list, list) and len(job_list) > 0:
                     job_data = job_list[0]
+        else:
+            # Search by customer name or phone
+            customers = []
+            if is_phone:
+                phone_clean = re.sub(r'[\s\-\(\)]', '', query)
+                cr = requests.get(f'{base_url}/companies/3/customers/?Phone={phone_clean}&columns=ID,CompanyName,GivenName,FamilyName,Phone&pageSize=20', headers=headers)
+                if cr.status_code == 200 and isinstance(cr.json(), list):
+                    customers.extend(cr.json())
+            else:
+                # Search name across CompanyName, FamilyName, GivenName
+                cr = requests.get(f'{base_url}/companies/3/customers/?search=any&CompanyName={query}&FamilyName={query}&GivenName={query}&columns=ID,CompanyName,GivenName,FamilyName,Phone&pageSize=20', headers=headers)
+                if cr.status_code == 200 and isinstance(cr.json(), list):
+                    customers.extend(cr.json())
+
+            if not customers:
+                return jsonify({'error': f'No customers found for "{query}"'}), 404
+
+            # Find jobs for matching customers
+            matching_jobs = []
+            for cust in customers[:10]:
+                cust_id = cust.get('ID')
+                cust_name = cust.get('CompanyName') or ((cust.get('GivenName', '') + ' ' + cust.get('FamilyName', '')).strip())
+                cust_phone = cust.get('Phone', '')
+                jr = requests.get(f'{base_url}/companies/3/jobs/?Customer={cust_id}&columns=ID,Name,Customer,Site&pageSize=20', headers=headers)
+                if jr.status_code == 200 and isinstance(jr.json(), list):
+                    for j in jr.json():
+                        matching_jobs.append({
+                            'id': j['ID'], 'name': j.get('Name', ''),
+                            'customer_name': cust_name, 'customer_phone': cust_phone
+                        })
+
+            if not matching_jobs:
+                return jsonify({'error': f'No jobs found for "{query}"'}), 404
+
+            if len(matching_jobs) == 1:
+                # Single match - load directly
+                resp = requests.get(f'{base_url}/companies/3/jobs/?ID={matching_jobs[0]["id"]}&columns=ID,Name,Customer,Site', headers=headers)
+                if resp.status_code == 200:
+                    jl = resp.json()
+                    if isinstance(jl, list) and len(jl) > 0:
+                        job_data = jl[0]
+            else:
+                return jsonify({'multiple': True, 'jobs': matching_jobs})
 
         if not job_data:
-            return jsonify({'error': f'Job {job_input} not found'}), 404
+            return jsonify({'error': f'Job not found for "{query}"'}), 404
 
         job_id = job_data.get('ID', job_data.get('id'))
         job_name = job_data.get('Name', '')

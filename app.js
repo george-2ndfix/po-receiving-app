@@ -2517,25 +2517,40 @@ document.addEventListener('DOMContentLoaded', () => app.init());
     async function collectionLookup() {
         const input = document.getElementById('collection-job-input');
         const status = document.getElementById('collection-status');
-        const jobNum = input.value.trim();
-        if (!jobNum) { input.focus(); return; }
+        const resultsDiv = document.getElementById('collection-search-results');
+        const query = input.value.trim();
+        if (!query) { input.focus(); return; }
 
-        status.style.display = 'block';
+        status.classList.remove('hidden');
         status.className = 'status-message info';
-        status.textContent = 'Looking up job...';
+        status.textContent = 'Searching...';
+        resultsDiv.classList.add('hidden');
+        resultsDiv.innerHTML = '';
 
         try {
-            const resp = await fetch(`/api/collection/job-lookup?job=${encodeURIComponent(jobNum)}`);
+            const resp = await fetch(`/api/collection/job-lookup?q=${encodeURIComponent(query)}`);
             const data = await resp.json();
             if (!resp.ok) throw new Error(data.error || 'Lookup failed');
 
-            cState.jobNumber = jobNum;
+            if (data.multiple) {
+                status.classList.add('hidden');
+                resultsDiv.classList.remove('hidden');
+                resultsDiv.innerHTML = '<h3 class="section-title">Select a Job</h3>' +
+                    data.jobs.map(j => `<div class="po-item" style="cursor:pointer;padding:12px" onclick="window._selectCollectionJob(${j.id})">
+                        <div style="font-weight:700;font-size:15px">Job ${j.id} - ${escH(j.name)}</div>
+                        <div style="font-size:13px;color:#666">${escH(j.customer_name)}</div>
+                        ${j.customer_phone ? '<div style="font-size:12px;color:#888">Ph: ' + escH(j.customer_phone) + '</div>' : ''}
+                    </div>`).join('');
+                return;
+            }
+
+            cState.jobNumber = String(data.job.id);
             cState.jobId = data.job.id;
             cState.jobName = data.job.name;
             cState.customer = data.customer;
             cState.materials = data.materials;
             cState.history = data.history;
-            status.style.display = 'none';
+            status.classList.add('hidden');
             renderCollectionDetails();
             app.showScreen('collection-details');
         } catch(e) {
@@ -2544,17 +2559,42 @@ document.addEventListener('DOMContentLoaded', () => app.init());
         }
     }
 
+    window._selectCollectionJob = async function(jobId) {
+        const status = document.getElementById('collection-status');
+        const resultsDiv = document.getElementById('collection-search-results');
+        status.classList.remove('hidden');
+        status.className = 'status-message info';
+        status.textContent = 'Loading job details...';
+        resultsDiv.classList.add('hidden');
+        try {
+            const resp = await fetch(`/api/collection/job-lookup?q=${jobId}`);
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || 'Lookup failed');
+            cState.jobNumber = String(data.job.id);
+            cState.jobId = data.job.id;
+            cState.jobName = data.job.name;
+            cState.customer = data.customer;
+            cState.materials = data.materials;
+            cState.history = data.history;
+            status.classList.add('hidden');
+            renderCollectionDetails();
+            app.showScreen('collection-details');
+        } catch(e) {
+            status.className = 'status-message error';
+            status.textContent = e.message;
+        }
+    };
+
     function escH(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
     function renderCollectionDetails() {
         const c = cState.customer;
         document.getElementById('collection-customer-card').innerHTML = `
-            <div style="font-weight:700;font-size:16px;margin-bottom:4px">${escH(cState.jobName)}</div>
-            <div style="font-size:14px;color:#333">${escH(c.name || 'Unknown Customer')}</div>
-            ${c.phone ? '<div style="font-size:13px;color:#666">Ph: ' + escH(c.phone) + '</div>' : ''}
-            ${c.email ? '<div style="font-size:13px;color:#666">Email: ' + escH(c.email) + '</div>' : ''}
-            ${c.address ? '<div style="font-size:13px;color:#888">' + escH(c.address) + '</div>' : ''}
-            <div style="font-size:12px;color:#888;margin-top:4px">Job ${escH(cState.jobNumber)}</div>
+            <h2>Job ${escH(cState.jobNumber)}</h2>
+            <p class="vendor-name">${escH(cState.jobName)}</p>
+            <p class="vendor-name">${escH(c.name || 'Unknown Customer')}</p>
+            ${c.phone ? '<p style="font-size:13px;color:#666;margin:2px 0">Ph: ' + escH(c.phone) + '</p>' : ''}
+            ${c.address ? '<p style="font-size:13px;color:#888;margin:2px 0">' + escH(c.address) + '</p>' : ''}
         `;
 
         const list = document.getElementById('collection-materials-list');
