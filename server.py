@@ -1549,10 +1549,27 @@ def serve_static(filename):
 @app.route('/api/storage-locations', methods=['GET'])
 @login_required
 def get_storage_locations():
-    """Get storage locations from JSON file"""
+    """Get storage locations from Simpro API (cached 10 min)"""
+    return get_storage_devices_cached()
+
+_storage_devices_cache = {"data": None, "time": 0}
+
+def get_storage_devices_cached():
+    """Fetch all storage devices from Simpro with 10-minute cache"""
+    import time as _time
+    now = _time.time()
+    if _storage_devices_cache["data"] and (now - _storage_devices_cache["time"]) < 600:
+        return jsonify(_storage_devices_cache["data"])
     try:
-        with open(os.path.join(os.path.dirname(__file__), 'storage-locations.json'), 'r') as f:
-            return jsonify(json.load(f))
+        resp = simpro_request('GET', f'/companies/{COMPANY_ID}/storageDevices/?pageSize=250')
+        if resp.status_code != 200:
+            return jsonify({'error': f'Simpro API error: {resp.status_code}'}), 500
+        devices = resp.json()
+        result = [{"id": d["ID"], "name": d.get("Name", f"Device {d['ID']}")} for d in devices]
+        result.sort(key=lambda x: x["name"])
+        _storage_devices_cache["data"] = result
+        _storage_devices_cache["time"] = now
+        return jsonify(result)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

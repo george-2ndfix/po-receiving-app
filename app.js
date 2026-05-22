@@ -2298,29 +2298,48 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             html += `<div class="card" style="padding:12px;margin-top:12px;">
                 <h3 style="margin:0 0 8px;">Destination Storage</h3>
                 <select id="stock-dest-storage" style="width:100%;padding:10px;border:1px solid #ccc;border-radius:6px;font-size:15px;">
-                    <option value="">-- Select Destination --</option>
-                    <optgroup label="Special Locations">
-                        <option value="4" data-name="Customer Cupboard">Customer Cupboard</option>
-                        <option value="21" data-name="Builders Cupboard">Builders Cupboard</option>
-                    </optgroup>
-                    <optgroup label="Container 1">
-                        <option value="5" data-name="1.01">1.01</option>
-                        <option value="6" data-name="1.02">1.02</option>
-                        <option value="7" data-name="1.03">1.03</option>
-                        <option value="8" data-name="1.04">1.04</option>
-                    </optgroup>
-                    <optgroup label="Container 2">
-                        <option value="13" data-name="2.01">2.01</option>
-                        <option value="14" data-name="2.02">2.02</option>
-                        <option value="15" data-name="2.03">2.03</option>
-                        <option value="16" data-name="2.04">2.04</option>
-                    </optgroup>
-                    <optgroup label="Container 3">
-                        <option value="22" data-name="3.01">3.01</option>
-                        <option value="23" data-name="3.02">3.02</option>
-                    </optgroup>
+                    <option value="">Loading storage locations...</option>
                 </select>
             </div>`;
+
+            // Dynamically load storage locations from Simpro
+            fetch('/api/storage-locations').then(r => r.json()).then(locations => {
+                const sel = document.getElementById('stock-dest-storage');
+                if (!sel || !Array.isArray(locations)) return;
+                sel.innerHTML = '<option value="">-- Select Destination --</option>';
+                const groups = {
+                    'Special': [4, 21, 38, 153, 69, 149, 151, 219, 260],
+                    'Container 1': [], 'Container 2': [], 'Container 3': [], 'Container 4': [], 'Container 5': [],
+                    'Back Room (BR)': [], 'Showroom Racks': [], 'Stock Areas': [], 'Other': []
+                };
+                locations.forEach(loc => {
+                    const n = loc.name;
+                    if (groups['Special'].includes(loc.id)) return;
+                    if (n.startsWith('1.0')) groups['Container 1'].push(loc);
+                    else if (n.startsWith('2.0')) groups['Container 2'].push(loc);
+                    else if (n.startsWith('3.0')) groups['Container 3'].push(loc);
+                    else if (n.startsWith('4.0')) groups['Container 4'].push(loc);
+                    else if (n.startsWith('5.0')) groups['Container 5'].push(loc);
+                    else if (n.startsWith('BR.')) groups['Back Room (BR)'].push(loc);
+                    else if (n.startsWith('S0')) groups['Showroom Racks'].push(loc);
+                    else if (n.startsWith('Stock')) groups['Stock Areas'].push(loc);
+                    else groups['Other'].push(loc);
+                });
+                // Special locations first
+                const specials = locations.filter(l => groups['Special'].includes(l.id));
+                if (specials.length) {
+                    const og = document.createElement('optgroup'); og.label = 'Special Locations';
+                    specials.forEach(l => { const o = document.createElement('option'); o.value = l.id; o.dataset.name = l.name; o.textContent = l.name; og.appendChild(o); });
+                    sel.appendChild(og);
+                }
+                ['Container 1','Container 2','Container 3','Container 4','Container 5','Back Room (BR)','Showroom Racks','Stock Areas','Other'].forEach(gn => {
+                    if (groups[gn].length) {
+                        const og = document.createElement('optgroup'); og.label = gn;
+                        groups[gn].forEach(l => { const o = document.createElement('option'); o.value = l.id; o.dataset.name = l.name; o.textContent = l.name; og.appendChild(o); });
+                        sel.appendChild(og);
+                    }
+                });
+            }).catch(() => {});
             
             html += `<button id="stock-allocate-btn" class="btn btn-primary" style="width:100%;margin-top:12px;padding:14px;font-size:16px;">
                 Allocate Selected Items
