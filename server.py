@@ -3979,10 +3979,12 @@ def job_stock_search():
                         "sectionId": sec_id,
                         "sectionName": sec_name,
                         "costCentreId": cc_id,
-                        "costCentreName": cc_name
+                        "costCentreName": cc_name,
+                        "assignedBreakdown": item.get("AssignedBreakdown", [])
                     })
 
         # Resolve catalog names (CC stock doesn't include them)
+        # For pre-build/one-off items, catalog endpoint returns 404 — try storage device stock as fallback
         for mat in job_materials:
             if not mat.get("name"):
                 cat_resp = simpro_request("GET", f"/companies/{COMPANY_ID}/catalogs/{mat['catalogId']}/")
@@ -3990,6 +3992,25 @@ def job_stock_search():
                     cat_data = cat_resp.json()
                     mat["name"] = cat_data.get("Name", "") or cat_data.get("Description", "")
                     mat["partNo"] = cat_data.get("PartNo", "") or mat.get("partNo", "")
+                elif cat_resp.status_code == 404:
+                    # Pre-build/one-off item — try storage device stock for name
+                    for bd in mat.get("assignedBreakdown", []):
+                        s = bd.get("Storage", {})
+                        s_id = s.get("ID") if isinstance(s, dict) else s
+                        if s_id:
+                            try:
+                                sd_resp = simpro_request("GET", f"/companies/{COMPANY_ID}/storageDevices/{s_id}/stock/?Catalog.ID={mat['catalogId']}&pageSize=5")
+                                if sd_resp.status_code == 200:
+                                    for sd_item in sd_resp.json():
+                                        sd_cat = sd_item.get("Catalog", {})
+                                        if isinstance(sd_cat, dict) and sd_cat.get("ID") == mat['catalogId']:
+                                            mat["name"] = sd_cat.get("Name", "") or ""
+                                            mat["partNo"] = sd_cat.get("PartNumber", "") or ""
+                                            break
+                                    if mat.get("name"):
+                                        break
+                            except Exception:
+                                pass
 
         if not job_materials:
             return jsonify({"job": job_info, "items": [], "message": "No unassigned materials found on this job"})
@@ -4003,7 +4024,7 @@ def job_stock_search():
         print(f"[job-stock-search] Looking up {len(needed_catalog_ids)} catalog items via inventories API...")
         catalog_stock_map = _lookup_stock_for_items(list(needed_catalog_ids))
 
-        # 6. Match job materials with available stock
+        # 6. Match job materials with available stock (with AssignedBreakdown fallback for pre-build items)
         matched_items = []
         for mat in job_materials:
             cat_id = mat["catalogId"]
@@ -4013,6 +4034,41 @@ def job_stock_search():
                 locations.sort(key=lambda x: x["availableQty"], reverse=True)
                 mat["stockLocations"] = locations
                 matched_items.append(mat)
+            else:
+                # Fallback: check AssignedBreakdown InStock for pre-build/one-off items
+                # where /catalogs/{id}/inventories/ returns nothing
+                breakdown = mat.get("assignedBreakdown", [])
+                fallback_locations = []
+                for bd in breakdown:
+                    in_stock = bd.get("InStock", 0)
+                    if in_stock and in_stock > 0:
+                        storage = bd.get("Storage", {})
+                        s_id = storage.get("ID") if isinstance(storage, dict) else storage
+                        s_name = storage.get("Name", f"Storage {s_id}") if isinstance(storage, dict) else f"Storage {s_id}"
+                        fallback_locations.append({
+                            "storageId": s_id,
+                            "storageName": s_name,
+                            "availableQty": in_stock
+                        })
+                        # Also try to get name from storage device stock if catalog name is missing
+                        if not mat.get("name"):
+                            try:
+                                sd_resp = simpro_request("GET", f"/companies/{COMPANY_ID}/storageDevices/{s_id}/stock/?Catalog.ID={cat_id}&pageSize=5")
+                                if sd_resp.status_code == 200:
+                                    sd_items = sd_resp.json()
+                                    for sd_item in sd_items:
+                                        sd_cat = sd_item.get("Catalog", {})
+                                        if isinstance(sd_cat, dict) and sd_cat.get("ID") == cat_id:
+                                            mat["name"] = sd_cat.get("Name", "") or sd_cat.get("Description", "")
+                                            mat["partNo"] = sd_cat.get("PartNumber", "") or mat.get("partNo", "")
+                                            break
+                            except Exception:
+                                pass
+                if fallback_locations:
+                    print(f"[job-stock-search] Fallback: catalog {cat_id} found {len(fallback_locations)} locations via AssignedBreakdown InStock")
+                    fallback_locations.sort(key=lambda x: x["availableQty"], reverse=True)
+                    mat["stockLocations"] = fallback_locations
+                    matched_items.append(mat)
 
         print(f"[job-stock-search] {len(matched_items)} items have stock available")
 
