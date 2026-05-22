@@ -243,6 +243,17 @@ def _lookup_stock_for_items(catalog_ids):
                         qty = data.get("InventoryCount", 0)
                         if qty and qty > 0:
                             return {"storageId": sd_id, "storageName": sd_name, "availableQty": qty}
+                    # Fallback: inventories detail returns 0 for pre-build/one-off items
+                    # Check storage device stock endpoint directly
+                    r2 = requests.get(
+                        f"{SIMPRO_BASE_URL}/companies/{COMPANY_ID}/storageDevices/{sd_id}/stock/?Catalog.ID={cat_id}&pageSize=5",
+                        headers=h, timeout=10
+                    )
+                    if r2.status_code == 200:
+                        for st in r2.json():
+                            ic = st.get("InventoryCount", 0)
+                            if ic and ic > 0:
+                                return {"storageId": sd_id, "storageName": sd_name, "availableQty": ic}
                 except Exception as e:
                     print(f"[inv-lookup] Detail error cat={cat_id} dev={sd_id}: {e}")
                 return None
