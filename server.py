@@ -259,6 +259,7 @@ def _lookup_stock_for_items(catalog_ids):
                 return None
 
             # Use threads for parallel detail calls
+            checked_device_ids = set(d.get("StorageDevice", {}).get("ID") for d in physical)
             with concurrent.futures.ThreadPoolExecutor(max_workers=15) as detail_exec:
                 detail_futures = [detail_exec.submit(get_device_detail, d) for d in physical]
                 for f in concurrent.futures.as_completed(detail_futures, timeout=30):
@@ -268,6 +269,27 @@ def _lookup_stock_for_items(catalog_ids):
                             locations.append(loc)
                     except:
                         pass
+
+            # If no stock found, check extra common storage devices not in inventories list
+            # Simpro bug: inventories list can be incomplete for pre-build/one-off items
+            if not locations:
+                EXTRA_DEVICES = [
+                    (149, "Back Room"), (153, "Reception"), (38, "Stock Holding"),
+                    (69, "Shed"), (4, "Customer Cupboard"), (21, "Builders Cupboard"),
+                    (219, "Boardroom"), (260, "Hall - Entrance"), (52, "Stock - Seal Room"),
+                    (67, "Stock Shelves"), (146, "Showroom Display"),
+                ]
+                extra = [{"StorageDevice": {"ID": did, "Name": dn}} for did, dn in EXTRA_DEVICES if did not in checked_device_ids]
+                if extra:
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as extra_exec:
+                        extra_futures = [extra_exec.submit(get_device_detail, d) for d in extra]
+                        for f in concurrent.futures.as_completed(extra_futures, timeout=20):
+                            try:
+                                loc = f.result(timeout=10)
+                                if loc:
+                                    locations.append(loc)
+                            except:
+                                pass
 
             return cat_id, locations
         except Exception as e:
