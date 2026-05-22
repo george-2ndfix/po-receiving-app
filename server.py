@@ -2576,43 +2576,22 @@ def allocate_items():
         goods_received_set = False
         if success_count > 0 and pre_receipt_items:
             try:
-                # Check if ALL PO items are now fully received
-                # NOTE: vendorOrders catalogs endpoint does NOT return Quantity data
-                # So we compare items being allocated (from request) vs total PO items
+                # Check if ALL PO items were ticked by the user
+                # NOTE: Simpro Received counter only updates when Kelly receipts — NOT when we allocate
+                # So we compare items the user ticked (in this request) vs total items on the PO
                 cat_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/catalogs/')
                 all_received = False  # Default to partial (safe)
                 if cat_resp.status_code == 200:
                     po_items = cat_resp.json()
                     total_po_items = len(po_items)
-                    items_being_allocated = len(items)  # items in this POST request
+                    items_being_allocated = len(items)  # items user ticked in this request
                     
-                    # Also check each item's allocation for Received vs Total
-                    all_items_received = True
-                    for pi in po_items:
-                        cat_id = pi.get('Catalog', {}).get('ID')
-                        if not cat_id:
-                            continue
-                        alloc_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/catalogs/{cat_id}/allocations/')
-                        if alloc_resp.status_code == 200:
-                            allocs = alloc_resp.json()
-                            for a in allocs:
-                                qty = a.get('Quantity', {})
-                                received = qty.get('Received', 0) if isinstance(qty, dict) else 0
-                                total = qty.get('Total', 0) if isinstance(qty, dict) else 0
-                                if total > 0 and received < total:
-                                    all_items_received = False
-                                    print(f"  Item {cat_id}: received={received}/{total} — still outstanding")
-                                    break
-                        if not all_items_received:
-                            break
-                    
-                    # Both conditions must be true: user allocated all items AND all show fully received
-                    if items_being_allocated >= total_po_items and all_items_received:
+                    if items_being_allocated >= total_po_items:
                         all_received = True
-                        print(f"All {total_po_items} items allocated and received — full delivery")
+                        print(f"All {total_po_items} items ticked by user — full delivery → 239")
                     else:
                         all_received = False
-                        print(f"Partial: {items_being_allocated}/{total_po_items} items allocated, all_items_received={all_items_received}")
+                        print(f"Partial: user ticked {items_being_allocated}/{total_po_items} items → 109")
                 else:
                     all_received = False
                     print(f"⚠️ Could not fetch PO items to check completion: {cat_resp.status_code}")
