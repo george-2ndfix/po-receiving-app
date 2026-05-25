@@ -4093,31 +4093,53 @@ def job_stock_search():
             else:
                 need_scan_ids.append(cat_id)
 
-        # 6. For items without InStock data, do a quick check of key storage devices only
-        # Full inventories scan is too slow (30 devices × N items × 2 calls each)
+        # 6. For items without InStock data, bulk-scan ALL storage devices (one pass, not per-item)
         if need_scan_ids:
-            print(f"[job-stock-search] Quick-scanning {len(need_scan_ids)} items in key storage devices...")
-            KEY_DEVICES = [
-                (38, "Stock Holding"), (149, "Back Room"), (153, "Reception"),
-                (69, "Shed"), (4, "Customer Cupboard"), (21, "Builders Cupboard"),
-                (52, "Stock - Seal Room"), (67, "Stock Shelves"),
-            ]
+            print(f"[job-stock-search] Bulk-scanning ALL storage devices for {len(need_scan_ids)} items...")
+            # Get full device list
+            dev_resp = simpro_request("GET", f"/companies/{COMPANY_ID}/storageDevices/?pageSize=250")
+            all_devices = []
+            if dev_resp.status_code == 200:
+                all_devices = [(d["ID"], d.get("Name", f"Device {d['ID']}")) for d in dev_resp.json()]
+            print(f"[job-stock-search] Scanning {len(all_devices)} storage devices...")
+
             quick_map = {}
-            for dev_id, dev_name in KEY_DEVICES:
+            need_scan_set = set(need_scan_ids)
+
+            def _scan_device(dev_tuple):
+                dev_id, dev_name = dev_tuple
+                found = []
                 try:
-                    sd_resp = simpro_request("GET", f"/companies/{COMPANY_ID}/storageDevices/{dev_id}/stock/?pageSize=500")
-                    if sd_resp.status_code == 200:
-                        for st_item in sd_resp.json():
+                    page = 1
+                    while True:
+                        sd_resp = simpro_request("GET", f"/companies/{COMPANY_ID}/storageDevices/{dev_id}/stock/?pageSize=250&page={page}")
+                        if sd_resp.status_code != 200:
+                            break
+                        items = sd_resp.json()
+                        if not items:
+                            break
+                        for st_item in items:
                             sc = st_item.get("Catalog", {})
                             sc_id = sc.get("ID")
-                            if sc_id in need_scan_ids:
+                            if sc_id in need_scan_set:
                                 ic = st_item.get("InventoryCount", 0)
                                 if ic and ic > 0:
-                                    if sc_id not in quick_map:
-                                        quick_map[sc_id] = []
-                                    quick_map[sc_id].append({"storageId": dev_id, "storageName": dev_name, "availableQty": ic})
+                                    found.append((sc_id, dev_id, dev_name, ic))
+                        if len(items) < 250:
+                            break
+                        page += 1
                 except Exception:
                     pass
+                return found
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                results = executor.map(_scan_device, all_devices)
+                for device_results in results:
+                    for cat_id, dev_id, dev_name, qty in device_results:
+                        if cat_id not in quick_map:
+                            quick_map[cat_id] = []
+                        quick_map[cat_id].append({"storageId": dev_id, "storageName": dev_name, "availableQty": qty})
+
             for mat in job_materials:
                 cat_id = mat["catalogId"]
                 if cat_id in quick_map and not mat.get("stockLocations"):
@@ -4125,7 +4147,7 @@ def job_stock_search():
                     locations.sort(key=lambda x: x["availableQty"], reverse=True)
                     mat["stockLocations"] = locations
                     matched_items.append(mat)
-            print(f"[job-stock-search] Quick scan found {len(quick_map)} items with stock")
+            print(f"[job-stock-search] Bulk scan found {len(quick_map)} items with stock across {len(all_devices)} devices")
 
         print(f"[job-stock-search] {len(matched_items)} items have stock available")
 
