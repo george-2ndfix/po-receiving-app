@@ -4093,17 +4093,39 @@ def job_stock_search():
             else:
                 need_scan_ids.append(cat_id)
 
-        # 6. For items without InStock data, do targeted inventories scan (limited)
+        # 6. For items without InStock data, do a quick check of key storage devices only
+        # Full inventories scan is too slow (30 devices × N items × 2 calls each)
         if need_scan_ids:
-            print(f"[job-stock-search] Scanning {len(need_scan_ids)} items via inventories API...")
-            catalog_stock_map = _lookup_stock_for_items(need_scan_ids)
+            print(f"[job-stock-search] Quick-scanning {len(need_scan_ids)} items in key storage devices...")
+            KEY_DEVICES = [
+                (38, "Stock Holding"), (149, "Back Room"), (153, "Reception"),
+                (69, "Shed"), (4, "Customer Cupboard"), (21, "Builders Cupboard"),
+                (52, "Stock - Seal Room"), (67, "Stock Shelves"),
+            ]
+            quick_map = {}
+            for dev_id, dev_name in KEY_DEVICES:
+                try:
+                    sd_resp = simpro_request("GET", f"/companies/{COMPANY_ID}/storageDevices/{dev_id}/stock/?pageSize=500")
+                    if sd_resp.status_code == 200:
+                        for st_item in sd_resp.json():
+                            sc = st_item.get("Catalog", {})
+                            sc_id = sc.get("ID")
+                            if sc_id in need_scan_ids:
+                                ic = st_item.get("InventoryCount", 0)
+                                if ic and ic > 0:
+                                    if sc_id not in quick_map:
+                                        quick_map[sc_id] = []
+                                    quick_map[sc_id].append({"storageId": dev_id, "storageName": dev_name, "availableQty": ic})
+                except Exception:
+                    pass
             for mat in job_materials:
                 cat_id = mat["catalogId"]
-                if cat_id in catalog_stock_map and not mat.get("stockLocations"):
-                    locations = catalog_stock_map[cat_id]
+                if cat_id in quick_map and not mat.get("stockLocations"):
+                    locations = quick_map[cat_id]
                     locations.sort(key=lambda x: x["availableQty"], reverse=True)
                     mat["stockLocations"] = locations
                     matched_items.append(mat)
+            print(f"[job-stock-search] Quick scan found {len(quick_map)} items with stock")
 
         print(f"[job-stock-search] {len(matched_items)} items have stock available")
 
