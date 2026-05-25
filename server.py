@@ -4167,16 +4167,25 @@ def allocate_from_stock_v2():
             result_entry = {"catalogId": cat_id, "name": item_name, "partNo": part_no, "success": False}
 
             try:
-                # Step 1: Stock transfer (if source != destination) — flat format per Known Conflict #24
+                # Step 1: Stock transfer (if source != destination)
                 if str(src_id) != str(dest_storage_id):
+                    print(f"  Transferring {quantity}x {part_no} from {src_name} ({src_id}) to {dest_storage_name} ({dest_storage_id})")
+                    # Try flat format first (works for regular catalog items)
                     transfer_payload = {
                         "Catalog": int(cat_id),
                         "FromStorage": int(src_id),
                         "ToStorage": int(dest_storage_id),
                         "Quantity": int(quantity)
                     }
-                    print(f"  Transferring {quantity}x {part_no} from {src_name} ({src_id}) to {dest_storage_name} ({dest_storage_id})")
                     transfer_resp = simpro_request("POST", f"/companies/{COMPANY_ID}/stockTransfer/", json=transfer_payload)
+                    if transfer_resp.status_code not in (200, 201, 204):
+                        # Fallback: SourceStorageDeviceID + Items format (works for pre-build/one-off items)
+                        print(f"  Flat format failed ({transfer_resp.status_code}), trying SourceStorageDeviceID format...")
+                        alt_payload = {
+                            "SourceStorageDeviceID": int(src_id),
+                            "Items": [{"CatalogID": int(cat_id), "Quantity": int(quantity), "DestinationStorageDeviceID": int(dest_storage_id)}]
+                        }
+                        transfer_resp = simpro_request("POST", f"/companies/{COMPANY_ID}/stockTransfer/", json=alt_payload)
                     if transfer_resp.status_code not in (200, 201, 204):
                         error_text = transfer_resp.text[:300]
                         print(f"  Transfer FAILED: {transfer_resp.status_code} {error_text}")
