@@ -4614,7 +4614,7 @@ def collection_complete():
             except Exception as e:
                 print(f"Warning: Confirmation email failed: {e}")
 
-        log_allocation(staff_id, staff_name, '', job_number, '', len(items), 'Customer Collection', 'collection', True)
+        log_allocation(staff_id, staff_name, '', job_number, '', len(items), 'Customer Collection', 'collection', 1)
 
         return jsonify({'success': True, 'collectionId': collection_id})
 
