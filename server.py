@@ -258,9 +258,9 @@ def _lookup_stock_for_items(catalog_ids):
                     print(f"[inv-lookup] Detail error cat={cat_id} dev={sd_id}: {e}")
                 return None
 
-            # Use threads for parallel detail calls
+            # Use threads for parallel detail calls (limit to 5 to avoid Simpro rate limits)
             checked_device_ids = set(d.get("StorageDevice", {}).get("ID") for d in physical)
-            with concurrent.futures.ThreadPoolExecutor(max_workers=15) as detail_exec:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as detail_exec:
                 detail_futures = [detail_exec.submit(get_device_detail, d) for d in physical]
                 for f in concurrent.futures.as_completed(detail_futures, timeout=30):
                     try:
@@ -296,8 +296,8 @@ def _lookup_stock_for_items(catalog_ids):
             print(f"[inv-lookup] Error for catalog {cat_id}: {e}")
             return cat_id, []
 
-    # Parallel lookup for uncached catalog items
-    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+    # Parallel lookup for uncached catalog items (limit to 3 to avoid Simpro rate limits)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
         futures = [executor.submit(lookup_single_item, cid) for cid in uncached_ids]
         for future in concurrent.futures.as_completed(futures, timeout=120):
             try:
@@ -4070,54 +4070,39 @@ def job_stock_search():
         # Build catalog IDs we need to find
         needed_catalog_ids = set(m["catalogId"] for m in job_materials)
 
-        # 5. Use targeted inventories API instead of full device scan
-        print(f"[job-stock-search] Looking up {len(needed_catalog_ids)} catalog items via inventories API...")
-        catalog_stock_map = _lookup_stock_for_items(list(needed_catalog_ids))
-
-        # 6. Match job materials with available stock (with AssignedBreakdown fallback for pre-build items)
+        # 5. Check AssignedBreakdown InStock FIRST (instant — no API calls)
+        # Then only scan inventories for items with no breakdown data
         matched_items = []
+        need_scan_ids = []
         for mat in job_materials:
             cat_id = mat["catalogId"]
-            if cat_id in catalog_stock_map:
-                locations = catalog_stock_map[cat_id]
-                # Sort by available qty descending
-                locations.sort(key=lambda x: x["availableQty"], reverse=True)
-                mat["stockLocations"] = locations
+            breakdown = mat.get("assignedBreakdown", [])
+            bd_locations = []
+            for bd in breakdown:
+                in_stock = bd.get("InStock", 0)
+                if in_stock and in_stock > 0:
+                    storage = bd.get("Storage", {})
+                    s_id = storage.get("ID") if isinstance(storage, dict) else storage
+                    s_name = storage.get("Name", f"Storage {s_id}") if isinstance(storage, dict) else f"Storage {s_id}"
+                    bd_locations.append({"storageId": s_id, "storageName": s_name, "availableQty": in_stock})
+            if bd_locations:
+                bd_locations.sort(key=lambda x: x["availableQty"], reverse=True)
+                mat["stockLocations"] = bd_locations
                 matched_items.append(mat)
+                print(f"[job-stock-search] InStock hit: catalog {cat_id} — {len(bd_locations)} locations via AssignedBreakdown")
             else:
-                # Fallback: check AssignedBreakdown InStock for pre-build/one-off items
-                # where /catalogs/{id}/inventories/ returns nothing
-                breakdown = mat.get("assignedBreakdown", [])
-                fallback_locations = []
-                for bd in breakdown:
-                    in_stock = bd.get("InStock", 0)
-                    if in_stock and in_stock > 0:
-                        storage = bd.get("Storage", {})
-                        s_id = storage.get("ID") if isinstance(storage, dict) else storage
-                        s_name = storage.get("Name", f"Storage {s_id}") if isinstance(storage, dict) else f"Storage {s_id}"
-                        fallback_locations.append({
-                            "storageId": s_id,
-                            "storageName": s_name,
-                            "availableQty": in_stock
-                        })
-                        # Also try to get name from storage device stock if catalog name is missing
-                        if not mat.get("name"):
-                            try:
-                                sd_resp = simpro_request("GET", f"/companies/{COMPANY_ID}/storageDevices/{s_id}/stock/?Catalog.ID={cat_id}&pageSize=5")
-                                if sd_resp.status_code == 200:
-                                    sd_items = sd_resp.json()
-                                    for sd_item in sd_items:
-                                        sd_cat = sd_item.get("Catalog", {})
-                                        if isinstance(sd_cat, dict) and sd_cat.get("ID") == cat_id:
-                                            mat["name"] = sd_cat.get("Name", "") or sd_cat.get("Description", "")
-                                            mat["partNo"] = sd_cat.get("PartNumber", "") or mat.get("partNo", "")
-                                            break
-                            except Exception:
-                                pass
-                if fallback_locations:
-                    print(f"[job-stock-search] Fallback: catalog {cat_id} found {len(fallback_locations)} locations via AssignedBreakdown InStock")
-                    fallback_locations.sort(key=lambda x: x["availableQty"], reverse=True)
-                    mat["stockLocations"] = fallback_locations
+                need_scan_ids.append(cat_id)
+
+        # 6. For items without InStock data, do targeted inventories scan (limited)
+        if need_scan_ids:
+            print(f"[job-stock-search] Scanning {len(need_scan_ids)} items via inventories API...")
+            catalog_stock_map = _lookup_stock_for_items(need_scan_ids)
+            for mat in job_materials:
+                cat_id = mat["catalogId"]
+                if cat_id in catalog_stock_map and not mat.get("stockLocations"):
+                    locations = catalog_stock_map[cat_id]
+                    locations.sort(key=lambda x: x["availableQty"], reverse=True)
+                    mat["stockLocations"] = locations
                     matched_items.append(mat)
 
         print(f"[job-stock-search] {len(matched_items)} items have stock available")
