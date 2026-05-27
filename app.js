@@ -520,24 +520,41 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
 
     async _loadStorageDropdowns() {
         try {
-            const resp = await fetch('/api/storage-devices');
+            const resp = await fetch('/api/storage-locations');
             if (!resp.ok) throw new Error('Failed to load storage devices');
-            const groups = await resp.json();
+            const locations = await resp.json();
+            if (!Array.isArray(locations)) return;
+            const specialIds = [4, 21, 38, 153, 69, 149, 151, 219, 260];
+            const groupDefs = {
+                'Special Locations': [], 'Container 1': [], 'Container 2': [], 'Container 3': [],
+                'Container 4': [], 'Container 5': [], 'Back Room (BR)': [], 'Showroom Racks': [],
+                'Stock Areas': [], 'Other': []
+            };
+            const specials = locations.filter(l => specialIds.includes(l.id));
+            groupDefs['Special Locations'] = specials;
+            locations.forEach(loc => {
+                if (specialIds.includes(loc.id)) return;
+                const n = loc.name;
+                if (n.startsWith('1.0')) groupDefs['Container 1'].push(loc);
+                else if (n.startsWith('2.0')) groupDefs['Container 2'].push(loc);
+                else if (n.startsWith('3.0')) groupDefs['Container 3'].push(loc);
+                else if (n.startsWith('4.0')) groupDefs['Container 4'].push(loc);
+                else if (n.startsWith('5.0')) groupDefs['Container 5'].push(loc);
+                else if (n.startsWith('BR.')) groupDefs['Back Room (BR)'].push(loc);
+                else if (n.startsWith('S0')) groupDefs['Showroom Racks'].push(loc);
+                else if (n.startsWith('Stock')) groupDefs['Stock Areas'].push(loc);
+                else groupDefs['Other'].push(loc);
+            });
             const dropdownIds = ['storage-dropdown', 'relocate-dest-dropdown'];
             for (const id of dropdownIds) {
                 const dd = document.getElementById(id);
                 if (!dd) continue;
                 dd.innerHTML = '<option value="">-- Select Storage Location --</option>';
-                for (const group of groups) {
-                    const optgroup = document.createElement('optgroup');
-                    optgroup.label = group.label;
-                    for (const loc of group.options) {
-                        const opt = document.createElement('option');
-                        opt.value = loc.id;
-                        opt.textContent = loc.name;
-                        optgroup.appendChild(opt);
-                    }
-                    dd.appendChild(optgroup);
+                for (const [gn, items] of Object.entries(groupDefs)) {
+                    if (!items.length) continue;
+                    const og = document.createElement('optgroup'); og.label = gn;
+                    items.forEach(l => { const o = document.createElement('option'); o.value = l.id; o.dataset.name = l.name; o.textContent = l.name; og.appendChild(o); });
+                    dd.appendChild(og);
                 }
             }
             this._storageLoaded = true;
