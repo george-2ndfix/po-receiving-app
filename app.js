@@ -502,6 +502,48 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
         document.getElementById(`screen-${screenId}`)?.classList.add('active');
         this.currentScreen = screenId;
+        // Dynamic storage dropdown loading
+        if (screenId === 'storage' || screenId === 'relocate-dest') {
+            this._ensureStorageDropdowns();
+        }
+    },
+
+    _storageLoaded: false,
+    _storageLoadingPromise: null,
+
+    async _ensureStorageDropdowns() {
+        if (this._storageLoaded) return;
+        if (this._storageLoadingPromise) return this._storageLoadingPromise;
+        this._storageLoadingPromise = this._loadStorageDropdowns();
+        await this._storageLoadingPromise;
+    },
+
+    async _loadStorageDropdowns() {
+        try {
+            const resp = await fetch('/api/storage-devices');
+            if (!resp.ok) throw new Error('Failed to load storage devices');
+            const groups = await resp.json();
+            const dropdownIds = ['storage-dropdown', 'relocate-dest-dropdown'];
+            for (const id of dropdownIds) {
+                const dd = document.getElementById(id);
+                if (!dd) continue;
+                dd.innerHTML = '<option value="">-- Select Storage Location --</option>';
+                for (const group of groups) {
+                    const optgroup = document.createElement('optgroup');
+                    optgroup.label = group.label;
+                    for (const loc of group.options) {
+                        const opt = document.createElement('option');
+                        opt.value = loc.id;
+                        opt.textContent = loc.name;
+                        optgroup.appendChild(opt);
+                    }
+                    dd.appendChild(optgroup);
+                }
+            }
+            this._storageLoaded = true;
+        } catch (e) {
+            console.error('Storage dropdown load error:', e);
+        }
     },
     
     goHome() {
