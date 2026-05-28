@@ -4529,6 +4529,124 @@ def collection_job_lookup():
         return jsonify({'error': str(e)}), 500
 
 
+def generate_collection_pdf(collection_data):
+    """Generate a Collection Receipt PDF using ReportLab. Returns PDF bytes."""
+    import io
+    import base64
+    from datetime import datetime
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=20*mm, bottomMargin=20*mm,
+                            leftMargin=15*mm, rightMargin=15*mm)
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle('ReceiptTitle', parent=styles['Title'], fontSize=18,
+                                  spaceAfter=6, textColor=colors.HexColor('#1a237e'))
+    subtitle_style = ParagraphStyle('Subtitle', parent=styles['Normal'], fontSize=11,
+                                     textColor=colors.grey, spaceAfter=12)
+    normal = styles['Normal']
+    bold_style = ParagraphStyle('BoldNormal', parent=normal, fontName='Helvetica-Bold')
+
+    elements = []
+
+    # Header
+    elements.append(Paragraph("2nd Fix Doors & Hardware", title_style))
+    elements.append(Paragraph("Collection Receipt", subtitle_style))
+    elements.append(Spacer(1, 4*mm))
+
+    # Job info
+    job_number = collection_data.get('job_number', '')
+    customer_name = collection_data.get('customer_name', '')
+    site_address = collection_data.get('site_address', '')
+    collected_by = collection_data.get('collected_by', '')
+    staff_name = collection_data.get('staff_name', '')
+    collection_id = collection_data.get('collection_id', '')
+    now_str = datetime.now().strftime('%d/%m/%Y at %I:%M %p')
+
+    info_data = [
+        ['Job Number:', str(job_number), 'Date/Time:', now_str],
+        ['Customer:', str(customer_name), 'Collected By:', str(collected_by)],
+        ['Site Address:', str(site_address), 'Processed By:', str(staff_name)],
+    ]
+    info_table = Table(info_data, colWidths=[80, 170, 80, 170])
+    info_table.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+    ]))
+    elements.append(info_table)
+    elements.append(Spacer(1, 8*mm))
+
+    # Items table
+    elements.append(Paragraph("Items Collected", bold_style))
+    elements.append(Spacer(1, 3*mm))
+
+    items = collection_data.get('items', [])
+    table_data = [['Part Code', 'Description', 'Qty', 'Storage Location']]
+    for it in items:
+        table_data.append([
+            str(it.get('partCode', it.get('part_code', ''))),
+            str(it.get('description', '')),
+            str(it.get('quantity', 0)),
+            str(it.get('storage', it.get('storage_location', '')))
+        ])
+
+    items_table = Table(table_data, colWidths=[90, 230, 40, 140])
+    items_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a237e')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('ALIGN', (2, 0), (2, -1), 'CENTER'),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f5f5f5')]),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+    ]))
+    elements.append(items_table)
+    elements.append(Spacer(1, 10*mm))
+
+    # Declaration
+    elements.append(Paragraph(
+        "<b>Declaration:</b> I confirm I have received the above items in good condition.",
+        normal
+    ))
+    elements.append(Spacer(1, 8*mm))
+
+    # Signature
+    sig_data = collection_data.get('signature_data', '')
+    if sig_data:
+        try:
+            sig_b64 = sig_data.split(',')[1] if ',' in sig_data else sig_data
+            sig_bytes = base64.b64decode(sig_b64)
+            sig_buf = io.BytesIO(sig_bytes)
+            sig_img = RLImage(sig_buf, width=180, height=60)
+            elements.append(Paragraph("Signature:", bold_style))
+            elements.append(Spacer(1, 2*mm))
+            elements.append(sig_img)
+        except Exception as e:
+            print(f"Warning: Could not embed signature in PDF: {e}")
+
+    elements.append(Spacer(1, 6*mm))
+
+    # Footer
+    elements.append(Paragraph(
+        f"<font size=8 color='grey'>Collection ID: {collection_id} | Generated: {now_str} | "
+        f"251 Churchill Road, Prospect SA 5082 | 1300 263 349</font>",
+        normal
+    ))
+
+    doc.build(elements)
+    return buf.getvalue()
+
+
 @app.route('/api/collection/complete', methods=['POST'])
 @login_required
 def collection_complete():
@@ -4597,6 +4715,120 @@ def collection_complete():
                 })
             except Exception as e:
                 print(f"Warning: Simpro signature upload failed: {e}")
+
+        # Upload photos to Simpro job
+        if job_id:
+            photos_list = data.get('photos', [])
+            from datetime import datetime as _dt
+            date_str = _dt.now().strftime('%Y%m%d_%H%M')
+            for idx, photo in enumerate(photos_list, 1):
+                if photo:
+                    try:
+                        photo_b64 = photo.split(',')[1] if ',' in photo else photo
+                        simpro_request('POST', f'/companies/3/jobs/{job_id}/attachments/files/', json={
+                            'Filename': f'Collection_{collection_id}_Photo_{idx}_{date_str}.jpg',
+                            'Base64Data': photo_b64,
+                            'Public': True
+                        })
+                        print(f"Uploaded photo {idx} to Simpro job {job_id}")
+                    except Exception as e:
+                        print(f"Warning: Simpro photo upload {idx} failed: {e}")
+
+        # Generate and upload Collection Receipt PDF to Simpro job
+        if job_id:
+            try:
+                import base64 as _b64
+                from datetime import datetime as _dt2
+                pdf_bytes = generate_collection_pdf({
+                    'job_number': job_number,
+                    'customer_name': data.get('customerName', ''),
+                    'site_address': data.get('siteAddress', ''),
+                    'collected_by': collected_by,
+                    'staff_name': staff_name,
+                    'collection_id': collection_id,
+                    'items': items,
+                    'signature_data': signature_data
+                })
+                pdf_b64 = _b64.b64encode(pdf_bytes).decode('utf-8')
+                pdf_date = _dt2.now().strftime('%Y%m%d_%H%M')
+                simpro_request('POST', f'/companies/3/jobs/{job_id}/attachments/files/', json={
+                    'Filename': f'Collection_Receipt_{job_number}_{pdf_date}.pdf',
+                    'Base64Data': pdf_b64,
+                    'Public': True
+                })
+                print(f"Uploaded Collection Receipt PDF to Simpro job {job_id}")
+            except Exception as e:
+                print(f"Warning: PDF generation/upload failed: {e}")
+                import traceback; traceback.print_exc()
+
+        # Set job status based on partial/full collection
+        if job_id:
+            try:
+                # Get total required materials for job from Simpro
+                token = get_simpro_token()
+                headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+                base_url = 'https://2ndfix.simprosuite.com/api/v1.0'
+                required_by_catalog = {}
+                sresp = requests.get(f'{base_url}/companies/3/jobs/{job_id}/sections/', headers=headers, timeout=15)
+                if sresp.status_code == 200:
+                    for section in sresp.json():
+                        section_id = section.get('ID')
+                        ccresp = requests.get(f'{base_url}/companies/3/jobs/{job_id}/sections/{section_id}/costCenters/', headers=headers, timeout=15)
+                        if ccresp.status_code == 200:
+                            for cc in ccresp.json():
+                                cc_id = cc.get('ID')
+                                stkresp = requests.get(f'{base_url}/companies/3/jobs/{job_id}/sections/{section_id}/costCenters/{cc_id}/stock/', headers=headers, timeout=15)
+                                if stkresp.status_code == 200:
+                                    for item in stkresp.json():
+                                        cat = item.get('Catalog', {})
+                                        c_id = cat.get('ID')
+                                        if not c_id:
+                                            continue
+                                        qty_obj = item.get('Quantity', {})
+                                        if isinstance(qty_obj, dict):
+                                            assigned = qty_obj.get('Assigned', 0) or 0
+                                        else:
+                                            assigned = qty_obj or 0
+                                        if assigned > 0:
+                                            required_by_catalog[c_id] = required_by_catalog.get(c_id, 0) + assigned
+
+                # Get total collected across ALL collections for this job
+                db2 = get_db()
+                cur2 = db2.cursor()
+                cur2.execute(
+                    'SELECT ci.catalog_id, SUM(ci.quantity) as total_qty '
+                    'FROM collection_items ci '
+                    'JOIN collections c ON ci.collection_id = c.id '
+                    'WHERE c.job_id = %s AND c.status = %s '
+                    'GROUP BY ci.catalog_id',
+                    (str(job_id), 'completed')
+                )
+                collected_by_catalog = {}
+                for row in cur2.fetchall():
+                    cat_id = row['catalog_id']
+                    if cat_id:
+                        collected_by_catalog[int(cat_id)] = row['total_qty'] or 0
+
+                # Compare: fully collected if ALL required items have been collected
+                fully_collected = True
+                if not required_by_catalog:
+                    fully_collected = False  # No materials found - don't assume full
+                else:
+                    for cat_id, req_qty in required_by_catalog.items():
+                        col_qty = collected_by_catalog.get(cat_id, 0)
+                        if col_qty < req_qty:
+                            fully_collected = False
+                            break
+
+                status_id = 1331 if fully_collected else 1330
+                status_label = 'Fully Collected' if fully_collected else 'Partially Collected'
+                patch_resp = simpro_request('PATCH', f'/companies/3/jobs/{job_id}/', json={
+                    'Status': {'ID': status_id}
+                })
+                print(f"Set job {job_id} status to {status_label} ({status_id}): HTTP {patch_resp.status_code}")
+            except Exception as e:
+                print(f"Warning: Failed to set job status: {e}")
+                import traceback; traceback.print_exc()
 
         # Send confirmation email via Graph API
         customer_email = data.get('customerEmail', '').strip()
