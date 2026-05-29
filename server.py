@@ -4450,7 +4450,7 @@ def collection_job_lookup():
                                     else:
                                         assigned = qty_obj or 0
                                         required = assigned
-                                    if assigned <= 0:
+                                    if assigned <= 0 and required <= 0:
                                         continue
                                     storage_name = 'Unknown'
                                     storage_id = None
