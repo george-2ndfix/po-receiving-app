@@ -1,4 +1,4 @@
-const CACHE_NAME = 'po-receiving-v145'; // v145 collection enhancements: PDF receipt, photo upload to Simpro, job status
+const CACHE_NAME = 'po-receiving-v146'; // v146 fix collection: Adelaide timezone, photos in PDF, archive job, PDF email attachment
 const urlsToCache = [
   '/styles.css',
   '/storage-locations.json',

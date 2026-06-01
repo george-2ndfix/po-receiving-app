@@ -4566,7 +4566,9 @@ def generate_collection_pdf(collection_data):
     collected_by = collection_data.get('collected_by', '')
     staff_name = collection_data.get('staff_name', '')
     collection_id = collection_data.get('collection_id', '')
-    now_str = datetime.now().strftime('%d/%m/%Y at %I:%M %p')
+    from zoneinfo import ZoneInfo
+    adelaide_tz = ZoneInfo('Australia/Adelaide')
+    now_str = datetime.now(adelaide_tz).strftime('%d/%m/%Y at %I:%M %p')
 
     info_data = [
         ['Job Number:', str(job_number), 'Date/Time:', now_str],
@@ -4634,6 +4636,25 @@ def generate_collection_pdf(collection_data):
         except Exception as e:
             print(f"Warning: Could not embed signature in PDF: {e}")
 
+    # Photos
+    photos = collection_data.get('photos', [])
+    if photos:
+        elements.append(Spacer(1, 6*mm))
+        elements.append(Paragraph("Photos:", bold_style))
+        elements.append(Spacer(1, 3*mm))
+        for pidx, photo in enumerate(photos, 1):
+            if photo:
+                try:
+                    photo_b64 = photo.split(',')[1] if ',' in photo else photo
+                    photo_bytes = base64.b64decode(photo_b64)
+                    photo_buf = io.BytesIO(photo_bytes)
+                    # Scale to fit page width (~180mm content area), keep aspect ratio
+                    photo_img = RLImage(photo_buf, width=160*mm, height=120*mm, kind='proportional')
+                    elements.append(photo_img)
+                    elements.append(Spacer(1, 3*mm))
+                except Exception as e:
+                    print(f"Warning: Could not embed photo {pidx} in PDF: {e}")
+
     elements.append(Spacer(1, 6*mm))
 
     # Footer
@@ -4664,7 +4685,7 @@ def collection_complete():
         return jsonify({'error': 'Missing required fields (job, name, items, signature)'}), 400
 
     staff_id = session.get('staff_id', 0)
-    staff_name = session.get('staff_name', 'Unknown')
+    staff_name = session.get('display_name', session.get('username', 'Unknown'))
 
     db = get_db()
     cursor = db.cursor()
@@ -4743,13 +4764,22 @@ def _collection_background_work(data):
             collected_by = data['collected_by']
             staff_name = data['staff_name']
             items = data['items']
+            pdf_bytes_saved = None
+
+            # TODO: Simpro attachment uploads currently use George's API token. Should use
+            # separate OAuth credentials for automation@2ndfix.com.au so attachments are
+            # attributed to "2ndFix - Tasklet Agent (Automation)" instead. Requires separate
+            # API key setup in Simpro admin. The POST /attachments/files/ endpoint does not
+            # have a field to specify the uploader/author — attribution is based on the API token owner.
 
             # Upload signature to Simpro job as attachment
             if job_id and signature_data:
                 try:
                     b64 = signature_data.split(',')[1] if ',' in signature_data else signature_data
                     from datetime import datetime
-                    ts = datetime.now().strftime('%Y%m%d_%H%M')
+                    from zoneinfo import ZoneInfo
+                    adelaide_tz = ZoneInfo('Australia/Adelaide')
+                    ts = datetime.now(adelaide_tz).strftime('%Y%m%d_%H%M')
                     simpro_request('POST', f'/companies/3/jobs/{job_id}/attachments/files/', json={
                         'Filename': f'Collection_Signature_{job_number}_{ts}.png',
                         'Base64Data': b64,
@@ -4763,7 +4793,8 @@ def _collection_background_work(data):
             if job_id:
                 photos_list = data.get('photos', [])
                 from datetime import datetime as _dt
-                date_str = _dt.now().strftime('%Y%m%d_%H%M')
+                from zoneinfo import ZoneInfo
+                date_str = _dt.now(ZoneInfo('Australia/Adelaide')).strftime('%Y%m%d_%H%M')
                 for idx, photo in enumerate(photos_list, 1):
                     if photo:
                         try:
@@ -4790,10 +4821,13 @@ def _collection_background_work(data):
                         'staff_name': staff_name,
                         'collection_id': collection_id,
                         'items': items,
-                        'signature_data': signature_data
+                        'signature_data': signature_data,
+                        'photos': data.get('photos', []),
                     })
+                    pdf_bytes_saved = pdf_bytes  # Save for email attachment
                     pdf_b64 = _b64.b64encode(pdf_bytes).decode('utf-8')
-                    pdf_date = _dt2.now().strftime('%Y%m%d_%H%M')
+                    from zoneinfo import ZoneInfo
+                    pdf_date = _dt2.now(ZoneInfo('Australia/Adelaide')).strftime('%Y%m%d_%H%M')
                     simpro_request('POST', f'/companies/3/jobs/{job_id}/attachments/files/', json={
                         'Filename': f'Collection_Receipt_{job_number}_{pdf_date}.pdf',
                         'Base64Data': pdf_b64,
@@ -4869,6 +4903,16 @@ def _collection_background_work(data):
                         'Status': {'ID': status_id}
                     })
                     print(f"[BG] Set job {job_id} status to {status_label} ({status_id}): HTTP {patch_resp.status_code}")
+                    if fully_collected:
+                        try:
+                            archive_resp = simpro_request('PATCH', f'/companies/3/jobs/{job_id}/', json={
+                                'Stage': 'Archived'
+                            })
+                            print(f"[BG] Archived job {job_id}: HTTP {archive_resp.status_code}")
+                            if archive_resp.status_code not in (200, 204):
+                                print(f"[BG] Archive response: {archive_resp.text[:500]}")
+                        except Exception as e:
+                            print(f"[BG] Warning: Failed to archive job: {e}")
                 except Exception as e:
                     print(f"[BG] Warning: Failed to set job status: {e}")
                     import traceback; traceback.print_exc()
@@ -4884,7 +4928,8 @@ def _collection_background_work(data):
                         job_name=data.get('job_name', ''),
                         items=items,
                         collected_by=collected_by,
-                        collection_id=collection_id
+                        collection_id=collection_id,
+                        pdf_bytes=pdf_bytes_saved
                     )
                 except Exception as e:
                     print(f"[BG] Warning: Confirmation email failed: {e}")
@@ -4896,7 +4941,7 @@ def _collection_background_work(data):
             import traceback; traceback.print_exc()
 
 
-def _send_collection_confirmation(customer_name, customer_email, job_number, job_name, items, collected_by, collection_id):
+def _send_collection_confirmation(customer_name, customer_email, job_number, job_name, items, collected_by, collection_id, pdf_bytes=None):
     """Send collection confirmation email via Microsoft Graph API from orders@2ndfix.com.au"""
     import os as _os
     from datetime import datetime
@@ -4922,7 +4967,8 @@ def _send_collection_confirmation(customer_name, customer_email, job_number, job
         return
     access_token = token_resp.json().get('access_token')
 
-    now = datetime.now().strftime('%d/%m/%Y at %I:%M %p')
+    from zoneinfo import ZoneInfo
+    now = datetime.now(ZoneInfo('Australia/Adelaide')).strftime('%d/%m/%Y at %I:%M %p')
     items_html = ''.join(f'<li>{it.get("description","")} &mdash; Qty: {it.get("quantity",0)}</li>' for it in items)
 
     html_body = f"""
@@ -4938,16 +4984,24 @@ def _send_collection_confirmation(customer_name, customer_email, job_number, job
     251 Churchill Road, Prospect SA 5082<br>1300 263 349</p>
     """
 
+    mail_msg = {
+        'subject': f'Collection Confirmation - Job {job_number}',
+        'body': {'contentType': 'HTML', 'content': html_body},
+        'toRecipients': [{'emailAddress': {'address': customer_email, 'name': customer_name or ''}}]
+    }
+    if pdf_bytes:
+        import base64 as _b64_email
+        mail_msg['attachments'] = [{
+            '@odata.type': '#microsoft.graph.fileAttachment',
+            'name': f'Collection_Receipt_{job_number}.pdf',
+            'contentType': 'application/pdf',
+            'contentBytes': _b64_email.b64encode(pdf_bytes).decode('utf-8')
+        }]
+
     send_resp = requests.post(
         'https://graph.microsoft.com/v1.0/users/orders@2ndfix.com.au/sendMail',
         headers={'Authorization': f'Bearer {access_token}', 'Content-Type': 'application/json'},
-        json={
-            'message': {
-                'subject': f'Collection Confirmation - Job {job_number}',
-                'body': {'contentType': 'HTML', 'content': html_body},
-                'toRecipients': [{'emailAddress': {'address': customer_email, 'name': customer_name or ''}}]
-            }
-        }
+        json={'message': mail_msg}
     )
     if send_resp.status_code in (200, 202):
         print(f"Collection confirmation email sent to {customer_email}")
