@@ -4702,151 +4702,26 @@ def collection_complete():
 
         db.commit()
 
-        # Upload signature to Simpro job as attachment
-        if job_id and signature_data:
-            try:
-                b64 = signature_data.split(',')[1] if ',' in signature_data else signature_data
-                from datetime import datetime
-                ts = datetime.now().strftime('%Y%m%d_%H%M')
-                simpro_request('POST', f'/companies/3/jobs/{job_id}/attachments/files/', json={
-                    'Filename': f'Collection_Signature_{job_number}_{ts}.png',
-                    'Base64Data': b64,
-                    'Public': True
-                })
-            except Exception as e:
-                print(f"Warning: Simpro signature upload failed: {e}")
-
-        # Upload photos to Simpro job
-        if job_id:
-            photos_list = data.get('photos', [])
-            from datetime import datetime as _dt
-            date_str = _dt.now().strftime('%Y%m%d_%H%M')
-            for idx, photo in enumerate(photos_list, 1):
-                if photo:
-                    try:
-                        photo_b64 = photo.split(',')[1] if ',' in photo else photo
-                        simpro_request('POST', f'/companies/3/jobs/{job_id}/attachments/files/', json={
-                            'Filename': f'Collection_{collection_id}_Photo_{idx}_{date_str}.jpg',
-                            'Base64Data': photo_b64,
-                            'Public': True
-                        })
-                        print(f"Uploaded photo {idx} to Simpro job {job_id}")
-                    except Exception as e:
-                        print(f"Warning: Simpro photo upload {idx} failed: {e}")
-
-        # Generate and upload Collection Receipt PDF to Simpro job
-        if job_id:
-            try:
-                import base64 as _b64
-                from datetime import datetime as _dt2
-                pdf_bytes = generate_collection_pdf({
-                    'job_number': job_number,
-                    'customer_name': data.get('customerName', ''),
-                    'site_address': data.get('siteAddress', ''),
-                    'collected_by': collected_by,
-                    'staff_name': staff_name,
-                    'collection_id': collection_id,
-                    'items': items,
-                    'signature_data': signature_data
-                })
-                pdf_b64 = _b64.b64encode(pdf_bytes).decode('utf-8')
-                pdf_date = _dt2.now().strftime('%Y%m%d_%H%M')
-                simpro_request('POST', f'/companies/3/jobs/{job_id}/attachments/files/', json={
-                    'Filename': f'Collection_Receipt_{job_number}_{pdf_date}.pdf',
-                    'Base64Data': pdf_b64,
-                    'Public': True
-                })
-                print(f"Uploaded Collection Receipt PDF to Simpro job {job_id}")
-            except Exception as e:
-                print(f"Warning: PDF generation/upload failed: {e}")
-                import traceback; traceback.print_exc()
-
-        # Set job status based on partial/full collection
-        if job_id:
-            try:
-                # Get total required materials for job from Simpro
-                token = get_simpro_token()
-                headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
-                base_url = 'https://2ndfix.simprosuite.com/api/v1.0'
-                required_by_catalog = {}
-                sresp = requests.get(f'{base_url}/companies/3/jobs/{job_id}/sections/', headers=headers, timeout=15)
-                if sresp.status_code == 200:
-                    for section in sresp.json():
-                        section_id = section.get('ID')
-                        ccresp = requests.get(f'{base_url}/companies/3/jobs/{job_id}/sections/{section_id}/costCenters/', headers=headers, timeout=15)
-                        if ccresp.status_code == 200:
-                            for cc in ccresp.json():
-                                cc_id = cc.get('ID')
-                                stkresp = requests.get(f'{base_url}/companies/3/jobs/{job_id}/sections/{section_id}/costCenters/{cc_id}/stock/', headers=headers, timeout=15)
-                                if stkresp.status_code == 200:
-                                    for item in stkresp.json():
-                                        cat = item.get('Catalog', {})
-                                        c_id = cat.get('ID')
-                                        if not c_id:
-                                            continue
-                                        qty_obj = item.get('Quantity', {})
-                                        if isinstance(qty_obj, dict):
-                                            assigned = qty_obj.get('Assigned', 0) or 0
-                                        else:
-                                            assigned = qty_obj or 0
-                                        if assigned > 0:
-                                            required_by_catalog[c_id] = required_by_catalog.get(c_id, 0) + assigned
-
-                # Get total collected across ALL collections for this job
-                db2 = get_db()
-                cur2 = db2.cursor()
-                cur2.execute(
-                    'SELECT ci.catalog_id, SUM(ci.quantity) as total_qty '
-                    'FROM collection_items ci '
-                    'JOIN collections c ON ci.collection_id = c.id '
-                    'WHERE c.job_id = %s AND c.status = %s '
-                    'GROUP BY ci.catalog_id',
-                    (str(job_id), 'completed')
-                )
-                collected_by_catalog = {}
-                for row in cur2.fetchall():
-                    cat_id = row['catalog_id']
-                    if cat_id:
-                        collected_by_catalog[int(cat_id)] = row['total_qty'] or 0
-
-                # Compare: fully collected if ALL required items have been collected
-                fully_collected = True
-                if not required_by_catalog:
-                    fully_collected = False  # No materials found - don't assume full
-                else:
-                    for cat_id, req_qty in required_by_catalog.items():
-                        col_qty = collected_by_catalog.get(cat_id, 0)
-                        if col_qty < req_qty:
-                            fully_collected = False
-                            break
-
-                status_id = 1331 if fully_collected else 1330
-                status_label = 'Fully Collected' if fully_collected else 'Partially Collected'
-                patch_resp = simpro_request('PATCH', f'/companies/3/jobs/{job_id}/', json={
-                    'Status': {'ID': status_id}
-                })
-                print(f"Set job {job_id} status to {status_label} ({status_id}): HTTP {patch_resp.status_code}")
-            except Exception as e:
-                print(f"Warning: Failed to set job status: {e}")
-                import traceback; traceback.print_exc()
-
-        # Send confirmation email via Graph API
-        customer_email = data.get('customerEmail', '').strip()
-        if customer_email:
-            try:
-                _send_collection_confirmation(
-                    customer_name=data.get('customerName', ''),
-                    customer_email=customer_email,
-                    job_number=job_number,
-                    job_name=job_name,
-                    items=items,
-                    collected_by=collected_by,
-                    collection_id=collection_id
-                )
-            except Exception as e:
-                print(f"Warning: Confirmation email failed: {e}")
-
+        # Log allocation in main request before returning
         log_allocation(staff_id, staff_name, '', job_number, '', len(items), 'Customer Collection', 'collection', 1)
+
+        # Gather data for background work (Simpro uploads, PDF, email, status)
+        bg_data = {
+            'job_id': job_id,
+            'job_number': job_number,
+            'job_name': job_name,
+            'collected_by': collected_by,
+            'staff_name': staff_name,
+            'collection_id': collection_id,
+            'signature_data': signature_data,
+            'photos': data.get('photos', []),
+            'items': items,
+            'customer_name': data.get('customerName', ''),
+            'customer_email': data.get('customerEmail', '').strip(),
+            'customer_phone': data.get('customerPhone', ''),
+            'site_address': data.get('siteAddress', ''),
+        }
+        threading.Thread(target=_collection_background_work, args=(bg_data,), daemon=True).start()
 
         return jsonify({'success': True, 'collectionId': collection_id})
 
@@ -4855,6 +4730,170 @@ def collection_complete():
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
+
+def _collection_background_work(data):
+    """Background thread: Simpro uploads, PDF generation, job status, confirmation email."""
+    with app.app_context():
+        try:
+            job_id = data['job_id']
+            job_number = data['job_number']
+            collection_id = data['collection_id']
+            signature_data = data['signature_data']
+            collected_by = data['collected_by']
+            staff_name = data['staff_name']
+            items = data['items']
+
+            # Upload signature to Simpro job as attachment
+            if job_id and signature_data:
+                try:
+                    b64 = signature_data.split(',')[1] if ',' in signature_data else signature_data
+                    from datetime import datetime
+                    ts = datetime.now().strftime('%Y%m%d_%H%M')
+                    simpro_request('POST', f'/companies/3/jobs/{job_id}/attachments/files/', json={
+                        'Filename': f'Collection_Signature_{job_number}_{ts}.png',
+                        'Base64Data': b64,
+                        'Public': True
+                    })
+                    print(f"[BG] Uploaded signature to Simpro job {job_id}")
+                except Exception as e:
+                    print(f"[BG] Warning: Simpro signature upload failed: {e}")
+
+            # Upload photos to Simpro job
+            if job_id:
+                photos_list = data.get('photos', [])
+                from datetime import datetime as _dt
+                date_str = _dt.now().strftime('%Y%m%d_%H%M')
+                for idx, photo in enumerate(photos_list, 1):
+                    if photo:
+                        try:
+                            photo_b64 = photo.split(',')[1] if ',' in photo else photo
+                            simpro_request('POST', f'/companies/3/jobs/{job_id}/attachments/files/', json={
+                                'Filename': f'Collection_{collection_id}_Photo_{idx}_{date_str}.jpg',
+                                'Base64Data': photo_b64,
+                                'Public': True
+                            })
+                            print(f"[BG] Uploaded photo {idx} to Simpro job {job_id}")
+                        except Exception as e:
+                            print(f"[BG] Warning: Simpro photo upload {idx} failed: {e}")
+
+            # Generate and upload Collection Receipt PDF to Simpro job
+            if job_id:
+                try:
+                    import base64 as _b64
+                    from datetime import datetime as _dt2
+                    pdf_bytes = generate_collection_pdf({
+                        'job_number': job_number,
+                        'customer_name': data.get('customer_name', ''),
+                        'site_address': data.get('site_address', ''),
+                        'collected_by': collected_by,
+                        'staff_name': staff_name,
+                        'collection_id': collection_id,
+                        'items': items,
+                        'signature_data': signature_data
+                    })
+                    pdf_b64 = _b64.b64encode(pdf_bytes).decode('utf-8')
+                    pdf_date = _dt2.now().strftime('%Y%m%d_%H%M')
+                    simpro_request('POST', f'/companies/3/jobs/{job_id}/attachments/files/', json={
+                        'Filename': f'Collection_Receipt_{job_number}_{pdf_date}.pdf',
+                        'Base64Data': pdf_b64,
+                        'Public': True
+                    })
+                    print(f"[BG] Uploaded Collection Receipt PDF to Simpro job {job_id}")
+                except Exception as e:
+                    print(f"[BG] Warning: PDF generation/upload failed: {e}")
+                    import traceback; traceback.print_exc()
+
+            # Set job status based on partial/full collection
+            if job_id:
+                try:
+                    # Get total required materials for job from Simpro
+                    token = get_simpro_token()
+                    headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+                    base_url = 'https://2ndfix.simprosuite.com/api/v1.0'
+                    required_by_catalog = {}
+                    sresp = requests.get(f'{base_url}/companies/3/jobs/{job_id}/sections/', headers=headers, timeout=15)
+                    if sresp.status_code == 200:
+                        for section in sresp.json():
+                            section_id = section.get('ID')
+                            ccresp = requests.get(f'{base_url}/companies/3/jobs/{job_id}/sections/{section_id}/costCenters/', headers=headers, timeout=15)
+                            if ccresp.status_code == 200:
+                                for cc in ccresp.json():
+                                    cc_id = cc.get('ID')
+                                    stkresp = requests.get(f'{base_url}/companies/3/jobs/{job_id}/sections/{section_id}/costCenters/{cc_id}/stock/', headers=headers, timeout=15)
+                                    if stkresp.status_code == 200:
+                                        for item in stkresp.json():
+                                            cat = item.get('Catalog', {})
+                                            c_id = cat.get('ID')
+                                            if not c_id:
+                                                continue
+                                            qty_obj = item.get('Quantity', {})
+                                            if isinstance(qty_obj, dict):
+                                                assigned = qty_obj.get('Assigned', 0) or 0
+                                            else:
+                                                assigned = qty_obj or 0
+                                            if assigned > 0:
+                                                required_by_catalog[c_id] = required_by_catalog.get(c_id, 0) + assigned
+
+                    # Get total collected across ALL collections for this job
+                    db2 = get_db()
+                    cur2 = db2.cursor()
+                    cur2.execute(
+                        'SELECT ci.catalog_id, SUM(ci.quantity) as total_qty '
+                        'FROM collection_items ci '
+                        'JOIN collections c ON ci.collection_id = c.id '
+                        'WHERE c.job_id = %s AND c.status = %s '
+                        'GROUP BY ci.catalog_id',
+                        (str(job_id), 'completed')
+                    )
+                    collected_by_catalog = {}
+                    for row in cur2.fetchall():
+                        cat_id = row['catalog_id']
+                        if cat_id:
+                            collected_by_catalog[int(cat_id)] = row['total_qty'] or 0
+
+                    # Compare: fully collected if ALL required items have been collected
+                    fully_collected = True
+                    if not required_by_catalog:
+                        fully_collected = False  # No materials found - don't assume full
+                    else:
+                        for cat_id, req_qty in required_by_catalog.items():
+                            col_qty = collected_by_catalog.get(cat_id, 0)
+                            if col_qty < req_qty:
+                                fully_collected = False
+                                break
+
+                    status_id = 1331 if fully_collected else 1330
+                    status_label = 'Fully Collected' if fully_collected else 'Partially Collected'
+                    patch_resp = simpro_request('PATCH', f'/companies/3/jobs/{job_id}/', json={
+                        'Status': {'ID': status_id}
+                    })
+                    print(f"[BG] Set job {job_id} status to {status_label} ({status_id}): HTTP {patch_resp.status_code}")
+                except Exception as e:
+                    print(f"[BG] Warning: Failed to set job status: {e}")
+                    import traceback; traceback.print_exc()
+
+            # Send confirmation email via Graph API
+            customer_email = data.get('customer_email', '').strip()
+            if customer_email:
+                try:
+                    _send_collection_confirmation(
+                        customer_name=data.get('customer_name', ''),
+                        customer_email=customer_email,
+                        job_number=job_number,
+                        job_name=data.get('job_name', ''),
+                        items=items,
+                        collected_by=collected_by,
+                        collection_id=collection_id
+                    )
+                except Exception as e:
+                    print(f"[BG] Warning: Confirmation email failed: {e}")
+
+            print(f"[BG] Collection {collection_id} background work completed successfully")
+
+        except Exception as e:
+            print(f"[BG] Collection background work FAILED: {e}")
+            import traceback; traceback.print_exc()
 
 
 def _send_collection_confirmation(customer_name, customer_email, job_number, job_name, items, collected_by, collection_id):
