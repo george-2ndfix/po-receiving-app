@@ -4899,13 +4899,13 @@ def _collection_background_work(data):
 
                     status_id = 1331 if fully_collected else 1330
                     status_label = 'Fully Collected' if fully_collected else 'Partially Collected'
-                    patch_resp = simpro_request('PATCH', f'/companies/3/jobs/{job_id}/', json={
-                        'Status': {'ID': status_id}
+                    patch_resp = simpro_request('PATCH', f'/companies/3/jobs/{job_id}', json={
+                        'Status': status_id
                     })
                     print(f"[BG] Set job {job_id} status to {status_label} ({status_id}): HTTP {patch_resp.status_code}")
                     if fully_collected:
                         try:
-                            archive_resp = simpro_request('PATCH', f'/companies/3/jobs/{job_id}/', json={
+                            archive_resp = simpro_request('PATCH', f'/companies/3/jobs/{job_id}', json={
                                 'Stage': 'Archived'
                             })
                             print(f"[BG] Archived job {job_id}: HTTP {archive_resp.status_code}")
