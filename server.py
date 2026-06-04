@@ -4613,7 +4613,15 @@ def generate_collection_pdf(collection_data):
         ('TOPPADDING', (0, 0), (-1, -1), 4),
     ]))
     elements.append(items_table)
-    elements.append(Spacer(1, 10*mm))
+    elements.append(Spacer(1, 8*mm))
+
+    # Notes (if provided)
+    notes_text = collection_data.get('notes', '').strip()
+    if notes_text:
+        elements.append(Paragraph("Notes:", bold_style))
+        elements.append(Spacer(1, 2*mm))
+        elements.append(Paragraph(notes_text, normal))
+        elements.append(Spacer(1, 8*mm))
 
     # Declaration
     elements.append(Paragraph(
@@ -4741,6 +4749,7 @@ def collection_complete():
             'customer_email': data.get('customerEmail', '').strip(),
             'customer_phone': data.get('customerPhone', ''),
             'site_address': data.get('siteAddress', ''),
+            'notes': data.get('notes', ''),
         }
         threading.Thread(target=_collection_background_work, args=(bg_data,), daemon=True).start()
 
@@ -4823,6 +4832,7 @@ def _collection_background_work(data):
                         'items': items,
                         'signature_data': signature_data,
                         'photos': data.get('photos', []),
+                        'notes': data.get('notes', ''),
                     })
                     pdf_bytes_saved = pdf_bytes  # Save for email attachment
                     pdf_b64 = _b64.b64encode(pdf_bytes).decode('utf-8')
@@ -4899,20 +4909,49 @@ def _collection_background_work(data):
 
                     status_id = 1331 if fully_collected else 1330
                     status_label = 'Fully Collected' if fully_collected else 'Partially Collected'
-                    patch_resp = simpro_request('PATCH', f'/companies/3/jobs/{job_id}', json={
-                        'Status': status_id
-                    })
-                    print(f"[BG] Set job {job_id} status to {status_label} ({status_id}): HTTP {patch_resp.status_code}")
-                    if fully_collected:
-                        try:
-                            archive_resp = simpro_request('PATCH', f'/companies/3/jobs/{job_id}', json={
-                                'Stage': 'Archived'
-                            })
-                            print(f"[BG] Archived job {job_id}: HTTP {archive_resp.status_code}")
-                            if archive_resp.status_code not in (200, 204):
-                                print(f"[BG] Archive response: {archive_resp.text[:500]}")
-                        except Exception as e:
-                            print(f"[BG] Warning: Failed to archive job: {e}")
+
+                    # Retry up to 10 times for locked jobs (30s intervals)
+                    import time as _time
+                    status_set = False
+                    for attempt in range(1, 11):
+                        patch_resp = simpro_request('PATCH', f'/companies/3/jobs/{job_id}', json={
+                            'Status': status_id
+                        })
+                        if patch_resp.status_code in (200, 204):
+                            print(f"[BG] Set job {job_id} status to {status_label} ({status_id}) on attempt {attempt}")
+                            status_set = True
+                            break
+                        elif patch_resp.status_code == 422 and 'locked' in patch_resp.text.lower():
+                            print(f"[BG] Job {job_id} locked (attempt {attempt}/10) — retrying in 30s...")
+                            _time.sleep(30)
+                        else:
+                            print(f"[BG] Status PATCH failed: HTTP {patch_resp.status_code} {patch_resp.text[:300]}")
+                            break
+                    if not status_set:
+                        print(f"[BG] WARNING: Could not set status on job {job_id} after 10 attempts")
+
+                    if fully_collected and status_set:
+                        archive_done = False
+                        for attempt in range(1, 11):
+                            try:
+                                archive_resp = simpro_request('PATCH', f'/companies/3/jobs/{job_id}', json={
+                                    'Stage': 'Archived'
+                                })
+                                if archive_resp.status_code in (200, 204):
+                                    print(f"[BG] Archived job {job_id} on attempt {attempt}")
+                                    archive_done = True
+                                    break
+                                elif archive_resp.status_code == 422 and 'locked' in archive_resp.text.lower():
+                                    print(f"[BG] Job {job_id} locked for archive (attempt {attempt}/10) — retrying in 30s...")
+                                    _time.sleep(30)
+                                else:
+                                    print(f"[BG] Archive failed: HTTP {archive_resp.status_code} {archive_resp.text[:300]}")
+                                    break
+                            except Exception as e:
+                                print(f"[BG] Archive attempt {attempt} error: {e}")
+                                _time.sleep(30)
+                        if not archive_done:
+                            print(f"[BG] WARNING: Could not archive job {job_id} after 10 attempts")
                 except Exception as e:
                     print(f"[BG] Warning: Failed to set job status: {e}")
                     import traceback; traceback.print_exc()

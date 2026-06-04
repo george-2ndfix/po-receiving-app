@@ -1,4 +1,4 @@
-const CACHE_NAME = 'po-receiving-v147'; // v146 fix collection: Adelaide timezone, photos in PDF, archive job, PDF email attachment
+const CACHE_NAME = 'po-receiving-v148'; // v146 fix collection: Adelaide timezone, photos in PDF, archive job, PDF email attachment
 const urlsToCache = [
   '/styles.css',
   '/storage-locations.json',
