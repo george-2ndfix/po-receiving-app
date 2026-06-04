@@ -205,8 +205,29 @@ footer {
     transition: border-color 0.2s;
 }
 
-.input-group input:focus {
+.input-group input:focus,
+.input-group textarea:focus {
     border-color: var(--primary);
+}
+
+.input-group label {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--gray-700);
+    margin-bottom: 4px;
+}
+
+.input-group textarea {
+    width: 100%;
+    padding: 14px 16px;
+    border: 2px solid var(--gray-300);
+    border-radius: 12px;
+    font-size: 17px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.2s;
+    resize: vertical;
+    box-sizing: border-box;
 }
 
 /* Buttons */
@@ -297,7 +318,7 @@ footer {
 
 .po-info p {
     color: var(--gray-600);
-    font-size: 14px;
+    font-size: 17px;
     margin-top: 4px;
 }
 
