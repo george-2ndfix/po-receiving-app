@@ -2497,53 +2497,7 @@ def allocate_items():
                             'method': 'stock_transfer'
                         })
                         fail_count += 1
-                    print(f"✅ Stock transfer successful: {len(group_items)} items moved from {source_name} to {storage_name}")
-                else:
-                    error_msg = f'Stock Transfer API returned {transfer_response.status_code}'
-                    try:
-                        error_detail = transfer_response.json()
-                        if isinstance(error_detail, dict) and 'Message' in error_detail:
-                            error_msg = error_detail['Message']
-                    except:
-                        pass
-                    
-                    print(f"❌ Stock transfer failed: {error_msg}")
-                    
-                    # If batch transfer failed, try items individually
-                    print(f"Retrying items individually...")
-                    for item in group_items:
-                        catalog_id = item.get('catalogId')
-                        quantity = item.get('quantity', 1)
-                        if quantity <= 0:
-                            quantity = 1
-                        
-                        single_payload = {
-                            'Catalog': int(catalog_id),
-                            'FromStorage': int(source_id),
-                            'ToStorage': int(storage_device_id),
-                            'Quantity': int(quantity)
-                        }
-                        
-                        single_resp = simpro_request('POST', f'/companies/{COMPANY_ID}/stockTransfer/', json=single_payload)
-                        if single_resp.status_code in (200, 201, 204):
-                            results.append({
-                                'catalogId': catalog_id,
-                                'success': True,
-                                'quantity': quantity,
-                                'verified': True,
-                                'method': 'stock_transfer',
-                                'message': f'Transferred from {source_name} to {storage_name}'
-                            })
-                            success_count += 1
-                            print(f"✅ Individual transfer success: catalog {catalog_id}")
-                        else:
-                            results.append({
-                                'catalogId': catalog_id,
-                                'success': False,
-                                'error': f'Stock transfer from {source_name} failed: {single_resp.status_code}',
-                                'method': 'stock_transfer'
-                            })
-                            print(f"❌ Individual transfer failed: catalog {catalog_id} - {single_resp.status_code}")
+                print(f"Stock transfer group complete: {success_count} success, {fail_count} failed from {source_name} to {storage_name}")
         
         # Log the allocation
         staff_id = session.get('staff_id')
