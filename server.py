@@ -1055,7 +1055,7 @@ def update_staff(staff_id):
         params.append(1 if data['active'] else 0)
     
     if updates:
-        updates.append('updated_at = datetime("now")')
+        updates.append("updated_at = datetime('now')")
         params.append(staff_id)
         cursor.execute(f'UPDATE staff SET {", ".join(updates)} WHERE id = ?', params)
         conn.commit()
