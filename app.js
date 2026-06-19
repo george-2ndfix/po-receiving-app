@@ -1155,9 +1155,22 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             photoEl.style.display = 'none';
         }
         
-        // Label count
-        const totalLabels = this.selectedItems.reduce((sum, item) => sum + item.quantity, 0);
-        document.getElementById('label-count').textContent = `${totalLabels} labels ready to print`;
+        // Label item checklist — let user pick which items to print labels for
+        const labelListEl = document.getElementById('label-item-list');
+        if (labelListEl) {
+            labelListEl.innerHTML = this.selectedItems.map((item, i) => `
+                <label style="display:flex;align-items:center;gap:8px;padding:8px 4px;border-bottom:1px solid #eee;font-size:15px;cursor:pointer;">
+                    <input type="checkbox" class="label-item-cb" data-idx="${i}" checked style="width:20px;height:20px;flex-shrink:0;">
+                    <span style="flex:1;">${item.description || 'Item'}</span>
+                    <span style="color:#666;font-size:13px;white-space:nowrap;">×${item.quantity}</span>
+                </label>
+            `).join('');
+            // Update label count on checkbox changes
+            labelListEl.querySelectorAll('.label-item-cb').forEach(cb => {
+                cb.addEventListener('change', () => this._updateLabelCount());
+            });
+        }
+        this._updateLabelCount();
         
         // Show picking slip button (always available after allocation)
         const pickSlipSection = document.getElementById('picking-slip-section');
@@ -1508,13 +1521,49 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         await this.generateAndShowLabels(testItems, 'TEST');
     },
 
+    _updateLabelCount() {
+        const checkboxes = document.querySelectorAll('.label-item-cb');
+        let total = 0;
+        checkboxes.forEach(cb => {
+            if (cb.checked) {
+                const idx = parseInt(cb.dataset.idx);
+                const item = this.selectedItems[idx];
+                if (item) total += item.quantity;
+            }
+        });
+        const countEl = document.getElementById('label-count');
+        if (countEl) countEl.textContent = `${total} label${total !== 1 ? 's' : ''} selected to print`;
+        const printBtn = document.getElementById('print-labels-btn');
+        if (printBtn) printBtn.disabled = total === 0;
+    },
+
     async printLabels() {
         const storageLocation = this.selectedStorage?.name || this._lastStorageName || 'Unknown';
         const poNumber = this.currentPO?.poNumber || 'N/A';
         const poJobNumber = this.currentPO?.jobNumber || '';
         const poCustomerName = this.currentPO?.customerName || '';
         
-        const items = this.selectedItems.map(item => ({
+        // Only include checked items from the label checklist
+        const checkboxes = document.querySelectorAll('.label-item-cb');
+        let checkedItems = [];
+        if (checkboxes.length > 0) {
+            checkboxes.forEach(cb => {
+                if (cb.checked) {
+                    const idx = parseInt(cb.dataset.idx);
+                    if (this.selectedItems[idx]) checkedItems.push(this.selectedItems[idx]);
+                }
+            });
+        } else {
+            // Fallback if no checklist (e.g. reprint flow)
+            checkedItems = this.selectedItems;
+        }
+        
+        if (checkedItems.length === 0) {
+            alert('No items selected for labels');
+            return;
+        }
+        
+        const items = checkedItems.map(item => ({
             jobNumber: item.jobNumber || poJobNumber,
             customerName: item.customerName || poCustomerName,
             partNo: item.partNo || '',
