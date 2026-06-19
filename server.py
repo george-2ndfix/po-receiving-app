@@ -2526,7 +2526,7 @@ def allocate_items():
                 
                 if allocated_items_for_merge:
                     # Get host job info from PO
-                    po_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}/')
+                    po_resp = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/{po_id}')
                     if po_resp.status_code == 200:
                         po_data_full = po_resp.json()
                         host_job_id = None
