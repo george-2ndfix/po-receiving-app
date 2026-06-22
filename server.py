@@ -805,9 +805,7 @@ def init_db():
             ''', (username, display_name, hash_password(password), role, 1, email))
             print(f"Created staff account: {username} ({role})")
         else:
-            cursor.execute('UPDATE staff SET password_hash = ? WHERE username = ?',
-                          (hash_password(password), username))
-            print(f"Reset password for {username}")
+            print(f"Staff account already exists: {username} (password preserved)")
             if email:
                 cursor.execute('UPDATE staff SET email = ? WHERE username = ? AND (email IS NULL OR email != ?)', 
                               (email, username, email))
