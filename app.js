@@ -62,6 +62,14 @@ const app = {
         document.getElementById('option-po')?.addEventListener('click', () => this.showScreen('scan'));
         document.getElementById('option-stock')?.addEventListener('click', () => this.showScreen('stock'));
         document.getElementById('option-picklist')?.addEventListener('click', () => this.showPicklist());
+        document.querySelectorAll('.picklist-filter .filter-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.picklist-filter .filter-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                this._picklistFilter = btn.dataset.filter;
+                this.showPicklist();
+            });
+        });
         document.getElementById('option-relocate')?.addEventListener('click', () => this.showScreen('relocate-source'));
         document.getElementById('option-mystery')?.addEventListener('click', () => this.showScreen('mystery'));
         document.getElementById('option-collection')?.addEventListener('click', () => this.showScreen('collection'));
@@ -1284,17 +1292,85 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
     
     async showPicklist() {
         this.showScreen('picklist');
+        const container = document.getElementById('picklist-items');
+        container.innerHTML = '<div class="loading">Loading pick list...</div>';
         
         try {
             const response = await fetch('/api/stock-pick-list');
             const data = await response.json();
             
-            this.picklistItems = data.items || [];
-            document.getElementById('stat-ready').textContent = this.picklistItems.length;
+            const jobs = data.jobs || [];
+            
+            if (data.error && !jobs.length) {
+                container.innerHTML = `<div class="empty-state">${data.error}</div>`;
+                return;
+            }
+            
+            // Count items by status
+            let readyCount = 0, partialCount = 0, orderCount = 0;
+            jobs.forEach(job => {
+                (job.items || []).forEach(item => {
+                    if (item.status === 'PICK_FROM_STOCK') readyCount++;
+                    else if (item.status === 'PARTIAL_STOCK') partialCount++;
+                    else orderCount++;
+                });
+            });
+            
+            document.getElementById('stat-ready').textContent = readyCount;
+            document.getElementById('stat-order').textContent = orderCount;
+            
+            // Show generated time
+            let headerNote = '';
+            if (data.generated) {
+                const d = new Date(data.generated);
+                headerNote = `<div class="picklist-updated">Last updated: ${d.toLocaleDateString('en-AU')} ${d.toLocaleTimeString('en-AU', {hour:'2-digit',minute:'2-digit'})}</div>`;
+            }
+            
+            // Render items grouped by job
+            let html = headerNote;
+            
+            // Active filter
+            this._picklistFilter = this._picklistFilter || 'ready';
+            
+            jobs.forEach(job => {
+                const items = (job.items || []).filter(item => {
+                    if (this._picklistFilter === 'ready') return item.status === 'PICK_FROM_STOCK';
+                    if (this._picklistFilter === 'order') return item.status === 'NEEDS_ORDERING';
+                    return true;
+                });
+                if (!items.length) return;
+                
+                html += `<div class="picklist-job">`;
+                html += `<div class="picklist-job-header">Job ${job.job_id} — ${this._escHtml(job.job_name || '')}</div>`;
+                items.forEach(item => {
+                    const icon = item.status === 'PICK_FROM_STOCK' ? '✅' : item.status === 'PARTIAL_STOCK' ? '⚡' : '⚠️';
+                    const locText = (item.stock_locations || []).map(l => `${l.device_name} (${l.qty})`).join(', ') || 'None';
+                    html += `<div class="picklist-item ${item.status.toLowerCase()}">`;
+                    html += `<div class="picklist-item-name">${icon} ${this._escHtml(item.name || item.part_no)}</div>`;
+                    html += `<div class="picklist-item-detail">Part: ${this._escHtml(item.part_no)} · Need: ${item.needed} · In Stock: ${item.in_stock}</div>`;
+                    if (item.status !== 'NEEDS_ORDERING') html += `<div class="picklist-item-detail">📍 ${this._escHtml(locText)}</div>`;
+                    html += `</div>`;
+                });
+                html += `</div>`;
+            });
+            
+            if (!html || html === headerNote) {
+                html += '<div class="empty-state">No items match this filter</div>';
+            }
+            
+            container.innerHTML = html;
+            this.picklistItems = jobs;
             
         } catch (error) {
             console.error('Picklist error:', error);
+            container.innerHTML = '<div class="empty-state">Failed to load pick list</div>';
         }
+    },
+    
+    _escHtml(str) {
+        const d = document.createElement('div');
+        d.textContent = str;
+        return d.innerHTML;
     },
     
     // ============================================
