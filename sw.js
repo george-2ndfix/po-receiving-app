@@ -1,4 +1,4 @@
-const CACHE_NAME = 'po-receiving-v151'; // v151 Stock pick list in-app, SOP footer fix, passwords preserved on deploy
+const CACHE_NAME = 'po-receiving-v152'; // v152 Pick list fix: count badge, default to All filter, server returns count
 const urlsToCache = [
   '/styles.css',
   '/storage-locations.json',
