@@ -1330,7 +1330,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             let html = headerNote;
             
             // Active filter
-            this._picklistFilter = this._picklistFilter || 'ready';
+            this._picklistFilter = this._picklistFilter || 'all';
             
             jobs.forEach(job => {
                 const items = (job.items || []).filter(item => {
