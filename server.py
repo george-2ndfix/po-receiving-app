@@ -3106,10 +3106,9 @@ def get_stock_pick_list():
 @app.route('/api/stock-pick-list/update', methods=['POST'])
 def update_stock_pick_list():
     """Receive and cache pick list data from the daily generator script"""
-    # Secured by API key
+    # Secured by internal API key
     api_key = request.headers.get('X-API-Key', '')
-    expected_key = os.environ.get('SECRET_KEY', '2ndfix-po-app-secret-key-2026-persistent')
-    if api_key != expected_key:
+    if api_key != '2ndfix-picklist-internal-2026':
         return jsonify({'error': 'Unauthorized'}), 401
     
     try:
