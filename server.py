@@ -3094,8 +3094,11 @@ def get_stock_pick_list():
         data = row[0] if isinstance(row[0], dict) else json.loads(row[0])
         generated = row[1].isoformat() if hasattr(row[1], 'isoformat') else str(row[1])
         
+        jobs = data.get('pick_list', [])
+        count = sum(len(j.get('items', [])) for j in jobs)
         return jsonify({
-            'jobs': data.get('pick_list', []),
+            'jobs': jobs,
+            'count': count,
             'generated': generated
         })
         
