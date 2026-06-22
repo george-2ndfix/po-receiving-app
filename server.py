@@ -666,6 +666,15 @@ def init_db():
         ''')
 
         
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS pick_list_cache (
+                id SERIAL PRIMARY KEY,
+                data JSONB NOT NULL,
+                generated_at TIMESTAMP NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
         print("PostgreSQL tables initialized")
     else:
         # SQLite DDL (existing code)
@@ -3071,34 +3080,59 @@ def complete_relocation(relocation_id):
 @app.route('/api/stock-pick-list', methods=['GET'])
 @login_required
 def get_stock_pick_list():
-    """Get items that need to be picked from stock"""
+    """Get cached stock pick list data"""
     try:
-        # Get pending vendor orders
-        response = simpro_request('GET', f'/companies/{COMPANY_ID}/vendorOrders/?Stage=Pending&columns=ID,Job,Vendor')
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('SELECT data, generated_at FROM pick_list_cache ORDER BY id DESC LIMIT 1')
+        row = cursor.fetchone()
+        conn.close()
         
-        if response.status_code != 200:
-            return jsonify({'items': [], 'error': 'Failed to get pending orders'})
+        if not row:
+            return jsonify({'items': [], 'generated': None, 'error': 'No pick list data yet. Data refreshes daily at 7:30 AM.'})
         
-        orders = response.json()
-        pick_items = []
-        
-        # For now return a sample - full implementation would scan jobs for stock items
-        for order in orders[:5]:
-            job_id = order.get('Job', {}).get('ID')
-            if job_id:
-                pick_items.append({
-                    'jobId': job_id,
-                    'orderId': order.get('ID'),
-                    'vendor': order.get('Vendor', {}).get('CompanyName', 'Unknown')
-                })
+        data = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+        generated = row[1].isoformat() if hasattr(row[1], 'isoformat') else str(row[1])
         
         return jsonify({
-            'items': pick_items,
-            'count': len(pick_items)
+            'jobs': data.get('pick_list', []),
+            'generated': generated
         })
         
     except Exception as e:
         return jsonify({'items': [], 'error': str(e)})
+
+
+@app.route('/api/stock-pick-list/update', methods=['POST'])
+def update_stock_pick_list():
+    """Receive and cache pick list data from the daily generator script"""
+    # Secured by API key
+    api_key = request.headers.get('X-API-Key', '')
+    expected_key = os.environ.get('SECRET_KEY', '2ndfix-po-app-secret-key-2026-persistent')
+    if api_key != expected_key:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        generated_at = data.get('generated', datetime.now().isoformat())
+        
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM pick_list_cache')
+        cursor.execute(
+            'INSERT INTO pick_list_cache (data, generated_at) VALUES (%s, %s)',
+            (json.dumps(data), generated_at)
+        )
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'message': 'Pick list cache updated'})
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 # ============================================
 # Photo Upload Endpoint
