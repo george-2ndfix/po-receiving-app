@@ -1936,9 +1936,10 @@ def correct_merged_po_allocations(po_id, host_job, host_section, host_cc, storag
         print(f"  MOVING catalog {catalog_id} (qty {qty}): Job {host_job} CC {host_cc} -> Job {target_job} CC {target_cc}")
         
         try:
-            # Step 1: Un-assign from host job CC
-            unassign_url = f'/companies/{COMPANY_ID}/jobs/{host_job}/sections/{host_section}/costCenters/{host_cc}/stock/{catalog_id}/'
-            unassign_resp = simpro_request('PATCH', unassign_url, json={
+            # Step 1: Un-assign from host job CC (Known Conflict #28: POST to collection, not PATCH to /stock/{id}/)
+            unassign_url = f'/companies/{COMPANY_ID}/jobs/{host_job}/sections/{host_section}/costCenters/{host_cc}/stock/'
+            unassign_resp = simpro_request('POST', unassign_url, json={
+                "Catalog": catalog_id,
                 "AssignedBreakdown": [{"Storage": int(storage_device_id), "Quantity": 0}]
             })
             print(f"    Step 1 un-assign: {unassign_resp.status_code}")
@@ -2429,9 +2430,10 @@ def allocate_items():
                         
                         # Step 1: Un-assign from CC at source storage
                         try:
-                            unassign_resp = simpro_request('PATCH', 
-                                f'/companies/{COMPANY_ID}/jobs/{cc_job}/sections/{cc_section}/costCenters/{cc_id}/stock/{catalog_id}/',
-                                json={'AssignedBreakdown': [{'Storage': int(source_id), 'Quantity': 0}]})
+                            # Known Conflict #28: POST to collection endpoint, not PATCH to /stock/{id}/
+                            unassign_resp = simpro_request('POST', 
+                                f'/companies/{COMPANY_ID}/jobs/{cc_job}/sections/{cc_section}/costCenters/{cc_id}/stock/',
+                                json={'Catalog': int(catalog_id), 'AssignedBreakdown': [{'Storage': int(source_id), 'Quantity': 0}]})
                             print(f"  Step 1 (un-assign): {unassign_resp.status_code} - {unassign_resp.text[:200]}")
                             if unassign_resp.status_code not in (200, 204):
                                 print(f"  ❌ Un-assign failed — skipping this item")
