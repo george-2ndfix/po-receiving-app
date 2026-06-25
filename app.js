@@ -232,6 +232,7 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         this.showScreen('home');
         this.loadPicklistCount();
         this.loadReceiptingStatus();
+        this.updatePrintQueueBadge();
         
         // Show report issue button
         document.getElementById('report-issue-fab')?.classList.remove('hidden');
@@ -1814,7 +1815,9 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         } catch (err) {
             console.error('Label PDF error:', err);
             const desc = items.length > 0 ? ('Job ' + (items[0].jobNumber || 'N/A') + ' - PO ' + poNumber) : 'Labels';
-            this.saveLabelsToPrintQueue(labels, desc);
+            if (confirm('⚠️ Label PDF failed (possibly offline). Save to print queue for later?')) {
+                this.saveLabelsToPrintQueue(labels, desc);
+            }
         }
     },
 
@@ -1899,20 +1902,26 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
                     <button id="close-queue-btn" style="background:none;border:none;color:white;font-size:28px;cursor:pointer;padding:4px 8px;">\u2716</button>
                 </div>
                 <div style="display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap;justify-content:center;">
-                    <a href="${url}" download="print_queue_labels.pdf" style="padding:12px 24px;background:#2563eb;color:white;border-radius:8px;text-decoration:none;font-size:16px;font-weight:600;">\u2b07\ufe0f Download PDF</a>
-                    <button onclick="window.open('${url}','_blank')" style="padding:12px 24px;background:#059669;color:white;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">\ud83d\udda8\ufe0f Open to Print</button>
-                    <button id="clear-queue-btn" style="padding:12px 24px;background:#dc2626;color:white;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">\ud83d\uddd1\ufe0f Clear Queue</button>
+                    <a id="download-queue-btn" href="${url}" download="print_queue_labels.pdf" style="padding:12px 24px;background:#2563eb;color:white;border-radius:8px;text-decoration:none;font-size:16px;font-weight:600;">\u2b07\ufe0f Download & Clear</a>
+                    <button id="print-queue-btn" style="padding:12px 24px;background:#059669;color:white;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">\ud83d\udda8\ufe0f Print & Clear</button>
                 </div>
                 <iframe src="${url}" style="flex:1;width:100%;max-width:600px;border:none;border-radius:8px;background:white;"></iframe>
             `;
-            document.getElementById('close-queue-btn').onclick = () => {
-                overlay.style.display = 'none';
-            };
-            document.getElementById('clear-queue-btn').onclick = () => {
+            const clearAndClose = () => {
                 localStorage.setItem('label_print_queue', '[]');
                 this.updatePrintQueueBadge();
                 overlay.style.display = 'none';
                 URL.revokeObjectURL(url);
+            };
+            document.getElementById('close-queue-btn').onclick = () => {
+                overlay.style.display = 'none';
+            };
+            document.getElementById('download-queue-btn').onclick = () => {
+                setTimeout(clearAndClose, 1000);
+            };
+            document.getElementById('print-queue-btn').onclick = () => {
+                window.open(url, '_blank');
+                setTimeout(clearAndClose, 1000);
             };
 
             setTimeout(() => URL.revokeObjectURL(url), 300000);
