@@ -1,4 +1,4 @@
-const CACHE_NAME = 'po-receiving-v152'; // v152 Pick list fix: count badge, default to All filter, server returns count
+const CACHE_NAME = 'po-receiving-v153'; // v153 Print queue auto-clear on print/download, fix CC stock un-assign 404 (Conflict #28)
 const urlsToCache = [
   '/styles.css',
   '/storage-locations.json',
