@@ -2469,6 +2469,18 @@ def allocate_items():
                     print(f"  Transfer payload: {json.dumps(transfer_payload)}")
                     transfer_response = simpro_request('POST', f'/companies/{COMPANY_ID}/stockTransfer/', json=transfer_payload)
                     print(f"  Response: {transfer_response.status_code} - {transfer_response.text[:200]}")
+                    
+                    # Fallback: SourceStorageDeviceID + Items format (works for pre-build/one-off items)
+                    if transfer_response.status_code not in (200, 201, 204):
+                        print(f"  Flat format failed ({transfer_response.status_code}), trying SourceStorageDeviceID format...")
+                        alt_payload = {
+                            "SourceStorageDeviceID": int(source_id),
+                            "Items": [{"CatalogID": int(catalog_id), "Quantity": int(quantity), "DestinationStorageDeviceID": int(storage_device_id)}]
+                        }
+                        print(f"  Alt payload: {json.dumps(alt_payload)}")
+                        transfer_response = simpro_request('POST', f'/companies/{COMPANY_ID}/stockTransfer/', json=alt_payload)
+                        print(f"  Alt response: {transfer_response.status_code} - {transfer_response.text[:200]}")
+                    
                     if transfer_response.status_code in (200, 201, 204):
                         # Step 3 (if CC-allocated): Re-assign to CC at destination
                         if item.get('needs_cc_unassign'):
