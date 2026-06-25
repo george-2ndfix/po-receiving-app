@@ -1,4 +1,4 @@
-const CACHE_NAME = 'po-receiving-v153'; // v153 Print queue auto-clear on print/download, fix CC stock un-assign 404 (Conflict #28)
+const CACHE_NAME = 'po-receiving-v154'; // v154 Fix pre-build item transfer: fallback to SourceStorageDeviceID+Items format when flat format fails
 const urlsToCache = [
   '/styles.css',
   '/storage-locations.json',
