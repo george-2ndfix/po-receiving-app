@@ -1,4 +1,4 @@
-const CACHE_NAME = 'po-receiving-v154'; // v154 Fix pre-build item transfer: fallback to SourceStorageDeviceID+Items format when flat format fails
+const CACHE_NAME = 'po-receiving-v155'; // v155 Fix blank relocate labels: format with line1/line2/line3 like normal PO labels
 const urlsToCache = [
   '/styles.css',
   '/storage-locations.json',

@@ -2111,16 +2111,24 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             return;
         }
 
-        const labels = this.relocateLabelItems.map(item => ({
-            jobNumber: item.jobNumber || this.relocateJobNumber,
-            customerName: item.customer || this.relocateCustomer,
-            partCode: item.partNo,
-            description: item.name,
-            quantity: item.qty,
-            storage: item.storage || this.relocateDestName,
-            poNumber: 'RELOCATE',
-            date: new Date().toLocaleDateString('en-AU')
-        }));
+        const today = new Date().toLocaleDateString('en-AU');
+        const labels = [];
+        for (const item of this.relocateLabelItems) {
+            const jobNum = item.jobNumber || this.relocateJobNumber || '';
+            const customer = item.customer || this.relocateCustomer || '';
+            const partCode = item.partNo || '';
+            const desc = item.name || '';
+            const qty = item.qty || 1;
+            const storage = item.storage || this.relocateDestName || '';
+
+            const line1 = [jobNum ? `Job ${jobNum}` : '', customer].filter(Boolean).join(' \u00b7 ');
+            const line2 = [partCode, desc].filter(Boolean).join(' \u00b7 ');
+            const line3 = [`Qty: ${qty}`, storage, today, 'RELOCATE'].filter(Boolean).join(' \u00b7 ');
+
+            for (let i = 0; i < qty; i++) {
+                labels.push({ line1, line2, line3 });
+            }
+        }
 
         const isAndroid = /android/i.test(navigator.userAgent);
 
