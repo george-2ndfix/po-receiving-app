@@ -2061,7 +2061,7 @@ def allocate_items():
                                         'quantity': alloc.get('Quantity', 0),
                                         'cc_job': assigned_to.get('Job'),
                                         'cc_section': assigned_to.get('Section'),
-                                        'cc_id': assigned_to.get('CostCenter', {}).get('ID') if isinstance(assigned_to.get('CostCenter'), dict) else assigned_to.get('CostCenter'),
+                                        'cc_id': assigned_to.get('ID'),  # Must use AssignedTo.ID (CC instance ID), NOT CostCenter.ID (CC type ID)
                                         'cc_name': assigned_to.get('CostCenter', {}).get('Name', '') if isinstance(assigned_to.get('CostCenter'), dict) else ''
                                     }
                 else:
@@ -2916,9 +2916,10 @@ def relocate_items():
             # Step 1: Un-assign from CC at source
             if section_id and cc_id:
                 print(f"[relocate] Step 1: Un-assign cat {catalog_id} from storage {source_id} on job {job_id}")
-                unassign_resp = simpro_request('PATCH',
-                    f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{section_id}/costCenters/{cc_id}/stock/{catalog_id}/',
-                    json={"AssignedBreakdown": [{"Storage": int(source_id), "Quantity": 0}]}
+                # Known Conflict #28: POST to collection endpoint, not PATCH to /stock/{id}/
+                unassign_resp = simpro_request('POST',
+                    f'/companies/{COMPANY_ID}/jobs/{job_id}/sections/{section_id}/costCenters/{cc_id}/stock/',
+                    json={"Catalog": int(catalog_id), "AssignedBreakdown": [{"Storage": int(source_id), "Quantity": 0}]}
                 )
                 print(f"[relocate] Step 1 response: {unassign_resp.status_code}")
                 if unassign_resp.status_code not in (200, 204):

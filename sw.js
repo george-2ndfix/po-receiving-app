@@ -1,4 +1,4 @@
-const CACHE_NAME = 'po-receiving-v156'; // v156 Fix collection greyed-out items: distinguish "not allocated" from "fully collected" so unassigned items are selectable
+const CACHE_NAME = 'po-receiving-v157'; // v157 Fix allocation 404: use AssignedTo.ID (CC instance) not CostCenter.ID (CC type); fix relocate PATCH→POST per Known Conflict #28
 const urlsToCache = [
   '/styles.css',
   '/storage-locations.json',
