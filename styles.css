@@ -3192,6 +3192,8 @@ footer {
 .collection-item .ci-badge.available { background: #e8f5e9; color: #2e7d32; }
 .collection-item .ci-badge.partial { background: #fff3e0; color: #ef6c00; }
 .collection-item .ci-badge.done { background: #e0e0e0; color: #666; }
+.collection-item .ci-badge.warning { background: #fce4ec; color: #c62828; }
+.collection-item.not-allocated { border-left: 3px solid #ff9800; }
 .collection-history-item { background: #f5f5f5; border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
 .collection-history-item .ch-header { display: flex; justify-content: space-between; font-size: 13px; font-weight: 600; }
 .collection-history-item .ch-items { font-size: 12px; color: #555; margin-top: 4px; }

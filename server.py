@@ -4516,7 +4516,13 @@ def collection_job_lookup():
                     collected_qty[key] = collected_qty.get(key, 0) + (it.get('quantity', 0))
         for m in materials:
             m['collected'] = collected_qty.get(m['partCode'], 0)
-            m['remaining'] = max(0, m['assigned'] - m['collected'])
+            # Distinguish "not allocated" (assigned=0, required>0) from "fully collected"
+            if m['assigned'] <= 0 and m.get('quantity', 0) > 0:
+                m['notAllocated'] = True
+                m['remaining'] = max(0, m.get('quantity', 0) - m['collected'])
+            else:
+                m['notAllocated'] = False
+                m['remaining'] = max(0, m['assigned'] - m['collected'])
 
         return jsonify({
             'job': {'id': job_id, 'number': job_input, 'name': job_name},

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'po-receiving-v155'; // v155 Fix blank relocate labels: format with line1/line2/line3 like normal PO labels
+const CACHE_NAME = 'po-receiving-v156'; // v156 Fix collection greyed-out items: distinguish "not allocated" from "fully collected" so unassigned items are selectable
 const urlsToCache = [
   '/styles.css',
   '/storage-locations.json',

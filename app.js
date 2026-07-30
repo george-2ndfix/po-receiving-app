@@ -2827,10 +2827,12 @@ document.addEventListener('DOMContentLoaded', () => app.init());
         list.innerHTML = cState.materials.map((m, i) => {
             const remaining = m.remaining != null ? m.remaining : m.assigned;
             const collected = m.collected || 0;
-            const fullyDone = remaining <= 0;
-            const badgeCls = fullyDone ? 'done' : collected > 0 ? 'partial' : 'available';
-            const badgeTxt = fullyDone ? 'Collected' : collected > 0 ? collected + ' collected' : 'Available';
-            return '<div class="collection-item ' + (fullyDone ? 'collected' : '') + '">'
+            const notAllocated = m.notAllocated || false;
+            const fullyDone = remaining <= 0 && !notAllocated;
+            const badgeCls = fullyDone ? 'done' : notAllocated ? 'warning' : collected > 0 ? 'partial' : 'available';
+            const badgeTxt = fullyDone ? 'Collected' : notAllocated ? '\u26A0 Not Allocated' : collected > 0 ? collected + ' collected' : 'Available';
+            const qtyBase = notAllocated ? (m.quantity || 0) : m.assigned;
+            return '<div class="collection-item ' + (fullyDone ? 'collected' : '') + (notAllocated ? ' not-allocated' : '') + '">'
                 + '<input type="checkbox" class="ci-check" data-idx="' + i + '"' + (fullyDone ? ' disabled' : '') + '>'
                 + '<div class="ci-info">'
                 + '<div class="ci-part">' + escH(m.partCode) + '</div>'
@@ -2840,7 +2842,7 @@ document.addEventListener('DOMContentLoaded', () => app.init());
                 + '</div>'
                 + '<div class="ci-qty">'
                 + '<input type="number" class="ci-qty-input" data-idx="' + i + '" value="' + remaining + '" min="1" max="' + remaining + '"' + (fullyDone ? ' disabled' : '') + '>'
-                + '<span class="ci-qty-label">of ' + m.assigned + '</span>'
+                + '<span class="ci-qty-label">of ' + qtyBase + '</span>'
                 + '</div></div>';
         }).join('');
 
