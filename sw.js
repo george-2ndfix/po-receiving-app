@@ -1,4 +1,4 @@
-const CACHE_NAME = 'po-receiving-v157'; // v157 Fix allocation 404: use AssignedTo.ID (CC instance) not CostCenter.ID (CC type); fix relocate PATCH→POST per Known Conflict #28
+const CACHE_NAME = 'po-receiving-v158'; // v158 Android printing: use same server-side PDF as iPhone instead of broken Chrome print dialog
 const urlsToCache = [
   '/styles.css',
   '/storage-locations.json',
