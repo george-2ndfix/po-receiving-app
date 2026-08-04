@@ -1694,11 +1694,8 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
         }
         
         // All devices: Server-side PDF (v95 gold standard)
-        if (isAndroid) {
-            this._showAndroidLabels(labels, items, poNumber);
-        } else {
-            this._showPdfLabels(labels, items, poNumber);
-        }
+        // v158: Android now uses same PDF path as iPhone — no more Chrome print dialog issues
+        this._showPdfLabels(labels, items, poNumber);
     },
 
     _showAndroidLabels(labels, items, poNumber) {
@@ -2130,13 +2127,8 @@ document.getElementById('view-history-btn')?.addEventListener('click', () => thi
             }
         }
 
-        const isAndroid = /android/i.test(navigator.userAgent);
-
-        if (isAndroid) {
-            this._showAndroidLabels(labels, this.relocateLabelItems, 'RELOCATE');
-        } else {
-            this._showPdfLabels(labels, this.relocateLabelItems, 'RELOCATE');
-        }
+        // v158: All devices use PDF path
+        this._showPdfLabels(labels, this.relocateLabelItems, 'RELOCATE');
     },
 
     startNewRelocate() {
